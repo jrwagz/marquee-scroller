@@ -54,6 +54,12 @@ SOFTWARE.
 // Start Settings
 //******************************
 
+
+String WAGFAM_DATA_URL = ""; // URL to Pull WagFam Calendar Data from
+boolean WAGFAM_ENABLED = true;  // Enable/Disable WagFam Calendar Functions
+String WAGFAM_API_KEY = ""; // UNUSED - saved for future use
+
+
 String TIMEDBKEY = ""; // Your API Key from https://timezonedb.com/register
 String APIKEY = ""; // Your API Key from http://openweathermap.org/
 // Default City Location (use http://openweathermap.org/find to find city ID)
@@ -72,9 +78,6 @@ int minutesBetweenScrolling = 1; // Time in minutes between scrolling data (defa
 int displayScrollSpeed = 25; // In milliseconds -- Configurable by the web UI (slow = 35, normal = 25, fast = 15, very fast = 5)
 boolean flashOnSeconds = true; // when true the : character in the time will flash on and off as a seconds indicator
 
-boolean WAGFAM_CALENDAR_ENABLED = true;
-String WAGFAM_API_KEY = "";
-String WAGFAM_DATA_SOURCE_URL = "https://raw.githubusercontent.com/jrwagz/wagfam-birthday-clocks/main/data_source.json";
 
 // Display Settings
 // CLK -> D5 (SCK)
