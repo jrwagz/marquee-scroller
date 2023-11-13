@@ -56,10 +56,6 @@ long firstEpoch = 0;
 long displayOffEpoch = 0;
 boolean displayOn = true;
 
-// News Client
-//NewsApiClient newsClient(NEWS_API_KEY, NEWS_SOURCE);
-//int newsIndex = 0;
-
 // WagFam Calendar Client
 WagFamBdayClient bdayClient(WAGFAM_API_KEY, WAGFAM_DATA_SOURCE_URL);
 int bdayMessageIndex = 0;
@@ -75,13 +71,6 @@ boolean SHOW_WIND = true;
 boolean SHOW_WINDDIR = true;
 boolean SHOW_PRESSURE = false;
 boolean SHOW_HIGHLOW = true;
-
-// OctoPrint Client
-//OctoPrintClient printerClient(OctoPrintApiKey, OctoPrintServer, OctoPrintPort, OctoAuthUser, OctoAuthPass);
-//int printerCount = 0;
-
-// Pi-hole Client
-//PiHoleClient piholeClient;
 
 ESP8266WebServer server(WEBSERVER_PORT);
 ESP8266HTTPUpdateServer serverUpdater;
@@ -633,7 +622,6 @@ void handleConfigure() {
   }
   form.replace("%HIGHLOW_CHECKED%", isHighlowChecked);
 
-  
   String is24hourChecked = "";
   if (IS_24HOUR) {
     is24hourChecked = "checked='checked'";
@@ -1269,7 +1257,7 @@ void centerPrint(String msg, boolean extraStuff) {
       matrix.drawPixel(matrix.width() - 1, 6, HIGH);
     }
   }
-  
+
   matrix.setCursor(x, 0);
   matrix.print(msg);
   matrix.write();
