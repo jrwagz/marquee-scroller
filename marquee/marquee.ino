@@ -38,9 +38,6 @@ void configModeCallback (WiFiManager *myWiFiManager);
 int8_t getWifiQuality();
 
 // LED Settings
-const int offset = 1;
-int refresh = 0;
-String message = "hello";
 int spacer = 1;  // dots between letters
 int width = 5 + spacer; // The font width is 5 pixels + spacer
 Max72xxPanel matrix = Max72xxPanel(pinCS, numberOfHorizontalDisplays, numberOfVerticalDisplays);
@@ -57,7 +54,7 @@ long displayOffEpoch = 0;
 boolean displayOn = true;
 
 // WagFam Calendar Client
-WagFamBdayClient bdayClient(WAGFAM_API_KEY, WAGFAM_DATA_SOURCE_URL);
+WagFamBdayClient bdayClient(WAGFAM_API_KEY, WAGFAM_DATA_URL);
 int bdayMessageIndex = 0;
 
 // Weather Client
@@ -87,7 +84,14 @@ static const char WEB_ACTION3[] PROGMEM = "</a><a class='w3-bar-item w3-button' 
                        "<a class='w3-bar-item w3-button' href='https://github.com/Qrome/marquee-scroller' target='_blank'><i class='fas fa-question-circle'></i> About</a>";
 
 static const char CHANGE_FORM1[] PROGMEM = "<form class='w3-container' action='/locations' method='get'><h2>Configure:</h2>"
-                      "<label>TimeZone DB API Key (get from <a href='https://timezonedb.com/register' target='_BLANK'>here</a>)</label>"
+                      "<label>WagFam Calendar Data Source</label>"
+                      "<input class='w3-input w3-border w3-margin-bottom' type='text' name='wagFamDataSource' value='%WAGFAMDATASOURCE%' maxlength='256'>"
+                      "<label>WagFam Calendar API Key</label>"
+                      "<input class='w3-input w3-border w3-margin-bottom' type='text' name='wagFamApiKey' value='%WAGFAMAPIKEY%' maxlength='128'>"
+                      "<p><input name='enwagfam' class='w3-check w3-margin-top' type='checkbox' %WAGFAM_ENABLED%> Enable WagFam Calendar</p>"
+                      "<hr>";
+
+static const char CHANGE_FORM2[] PROGMEM = "<label>TimeZone DB API Key (get from <a href='https://timezonedb.com/register' target='_BLANK'>here</a>)</label>"
                       "<input class='w3-input w3-border w3-margin-bottom' type='text' name='TimeZoneDB' value='%TIMEDBKEY%' maxlength='60'>"
                       "<label>OpenWeatherMap API Key (get from <a href='https://openweathermap.org/' target='_BLANK'>here</a>)</label>"
                       "<input class='w3-input w3-border w3-margin-bottom' type='text' name='openWeatherMapApiKey' value='%WEATHERKEY%' maxlength='70'>"
@@ -103,7 +107,7 @@ static const char CHANGE_FORM1[] PROGMEM = "<form class='w3-container' action='/
                       "<p><input name='showpressure' class='w3-check w3-margin-top' type='checkbox' %PRESSURE_CHECKED%> Display Barometric Pressure</p>"
                       "<p><input name='is24hour' class='w3-check w3-margin-top' type='checkbox' %IS_24HOUR_CHECKED%> Use 24 Hour Clock (military time)</p>";
 
-static const char CHANGE_FORM2[] PROGMEM = "<p><input name='isPM' class='w3-check w3-margin-top' type='checkbox' %IS_PM_CHECKED%> Show PM indicator (only 12h format)</p>"
+static const char CHANGE_FORM3[] PROGMEM = "<p><input name='isPM' class='w3-check w3-margin-top' type='checkbox' %IS_PM_CHECKED%> Show PM indicator (only 12h format)</p>"
                       "<p><input name='flashseconds' class='w3-check w3-margin-top' type='checkbox' %FLASHSECONDS%> Flash : in the time</p>"
                       "<p><label>Marquee Message (up to 60 chars)</label><input class='w3-input w3-border w3-margin-bottom' type='text' name='marqueeMsg' value='%MSG%' maxlength='60'></p>"
                       "<p><label>Start Time </label><input name='startTime' type='time' value='%STARTTIME%'></p>"
@@ -113,7 +117,7 @@ static const char CHANGE_FORM2[] PROGMEM = "<p><input name='isPM' class='w3-chec
                       "<p>Minutes Between Refresh Data <select class='w3-option w3-padding' name='refresh'>%OPTIONS%</select></p>"
                       "<p>Minutes Between Scrolling Data <input class='w3-border w3-margin-bottom' name='refreshDisplay' type='number' min='1' max='10' value='%REFRESH_DISPLAY%'></p>";
 
-static const char CHANGE_FORM3[] PROGMEM = "<hr><p><input name='isBasicAuth' class='w3-check w3-margin-top' type='checkbox' %IS_BASICAUTH_CHECKED%> Use Security Credentials for Configuration Changes</p>"
+static const char CHANGE_FORM4[] PROGMEM = "<hr><p><input name='isBasicAuth' class='w3-check w3-margin-top' type='checkbox' %IS_BASICAUTH_CHECKED%> Use Security Credentials for Configuration Changes</p>"
                       "<p><label>Marquee User ID (for this web interface)</label><input class='w3-input w3-border w3-margin-bottom' type='text' name='userid' value='%USERID%' maxlength='20'></p>"
                       "<p><label>Marquee Password </label><input class='w3-input w3-border w3-margin-bottom' type='password' name='stationpassword' value='%STATIONPASSWORD%'></p>"
                       "<p><button class='w3-button w3-block w3-green w3-section w3-padding' type='submit'>Save</button></p></form>"
@@ -142,7 +146,7 @@ void setup() {
   //New Line to clear from start garbage
   Serial.println();
 
-  readCityIds();
+  readPersistentConfig();
 
   Serial.println("Number of LED Displays: " + String(numberOfHorizontalDisplays));
   // initialize dispaly
@@ -319,7 +323,7 @@ void loop() {
 
       msg += marqueeMessage + " ";
 
-      if (WAGFAM_CALENDAR_ENABLED) {
+      if (WAGFAM_ENABLED) {
         msg += " " + bdayClient.getMessage(bdayMessageIndex) + " ";
         bdayMessageIndex += 1;
         if (bdayMessageIndex >= bdayClient.getNumMessages()) {
@@ -399,16 +403,23 @@ void handleSaveWideClock() {
   }
   if (numberOfHorizontalDisplays >= 8) {
     Wide_Clock_Style = server.arg("wideclockformat");
-    writeCityIds();
+    savePersistentConfig();
     matrix.fillScreen(LOW); // show black
   }
   redirectHome();
 }
 
+// This function name is terrible, it's actually handing the saving of all the configuration data
+// perhaps it's worth renaming for ease of understanding, and changing the associated URL endpoint
+// for it
 void handleLocations() {
   if (!athentication()) {
     return server.requestAuthentication();
   }
+  WAGFAM_DATA_URL = server.arg("wagFamDataSource");
+  WAGFAM_API_KEY = server.arg("wagFamApiKey");
+  WAGFAM_ENABLED = server.hasArg("enwagfam");
+  bdayClient.updateBdayClient(WAGFAM_API_KEY,WAGFAM_DATA_URL);
   TIMEDBKEY = server.arg("TimeZoneDB");
   APIKEY = server.arg("openWeatherMapApiKey");
   CityIDs[0] = server.arg("city1").toInt();
@@ -437,7 +448,7 @@ void handleLocations() {
   temp.toCharArray(www_password, sizeof(temp));
   weatherClient.setMetric(IS_METRIC);
   matrix.fillScreen(LOW); // show black
-  writeCityIds();
+  savePersistentConfig();
   getWeatherData(); // this will force a data pull for new weather
   redirectHome();
 }
@@ -511,6 +522,18 @@ void handleConfigure() {
   sendHeader();
 
   String form = FPSTR(CHANGE_FORM1);
+  form.replace("%WAGFAMDATASOURCE%", WAGFAM_DATA_URL);
+  form.replace("%WAGFAMAPIKEY%", WAGFAM_API_KEY);
+
+  String isWagFamEnabled = "";
+  if (WAGFAM_ENABLED) {
+    isWagFamEnabled = "checked='checked'";
+  }
+  form.replace("%WAGFAM_ENABLED%", isWagFamEnabled);
+  server.sendContent(form); // Send another chunk of the form
+
+
+  form = FPSTR(CHANGE_FORM2);
   form.replace("%TIMEDBKEY%", TIMEDBKEY);
   form.replace("%WEATHERKEY%", APIKEY);
 
@@ -570,7 +593,7 @@ void handleConfigure() {
   form.replace("%CHECKED%", checked);
   server.sendContent(form);
 
-  form = FPSTR(CHANGE_FORM2);
+  form = FPSTR(CHANGE_FORM3);
   String isPmChecked = "";
   if (IS_PM) {
     isPmChecked = "checked='checked'";
@@ -595,9 +618,9 @@ void handleConfigure() {
   form.replace("%OPTIONS%", options);
   form.replace("%REFRESH_DISPLAY%", String(minutesBetweenScrolling));
 
-  server.sendContent(form); //Send another chunk of the form
+  server.sendContent(form); // Send another chunk of the form
 
-  form = FPSTR(CHANGE_FORM3);
+  form = FPSTR(CHANGE_FORM4);
   String isUseSecurityChecked = "";
   if (IS_BASIC_AUTH) {
     isUseSecurityChecked = "checked='checked'";
@@ -606,7 +629,7 @@ void handleConfigure() {
   form.replace("%USERID%", String(www_username));
   form.replace("%STATIONPASSWORD%", String(www_password));
 
-  server.sendContent(form); // Send the second chunk of Data
+  server.sendContent(form); // Send another chunk of the form
 
   sendFooter();
 
@@ -672,7 +695,7 @@ void getWeatherData() //client function to send/receive GET request data.
     Serial.println("firstEpoch is: " + String(firstEpoch));
   }
 
-  if (WAGFAM_CALENDAR_ENABLED) {
+  if (WAGFAM_ENABLED) {
     bdayClient.updateBdays();
   }
 
@@ -966,13 +989,16 @@ void checkDisplay() {
   }
 }
 
-String writeCityIds() {
+void savePersistentConfig() {
   // Save decoded message to SPIFFS file for playback on power up.
   File f = SPIFFS.open(CONFIG, "w");
   if (!f) {
     Serial.println("File open failed!");
   } else {
     Serial.println("Saving settings now...");
+    f.println("WAGFAM_DATA_URL=" + WAGFAM_DATA_URL);
+    f.println("WAGFAM_API_KEY=" + WAGFAM_API_KEY);
+    f.println("WAGFAM_ENABLED=" + String(WAGFAM_ENABLED));
     f.println("TIMEDBKEY=" + TIMEDBKEY);
     f.println("APIKEY=" + APIKEY);
     f.println("CityID=" + String(CityIDs[0]));
@@ -1000,22 +1026,33 @@ String writeCityIds() {
     f.println("SHOW_DATE=" + String(SHOW_DATE));
   }
   f.close();
-  readCityIds();
-  weatherClient.updateCityIdList(CityIDs, 1);
-  String cityIds = weatherClient.getMyCityIDs();
-  return cityIds;
+  readPersistentConfig();
 }
 
-void readCityIds() {
+void readPersistentConfig() {
   if (SPIFFS.exists(CONFIG) == false) {
     Serial.println("Settings File does not yet exists.");
-    writeCityIds();
+    savePersistentConfig();
     return;
   }
   File fr = SPIFFS.open(CONFIG, "r");
   String line;
   while (fr.available()) {
     line = fr.readStringUntil('\n');
+    if (line.indexOf("WAGFAM_DATA_URL=") >= 0) {
+      WAGFAM_DATA_URL = line.substring(line.lastIndexOf("WAGFAM_DATA_URL=") + 16);
+      WAGFAM_DATA_URL.trim();
+      Serial.println("WAGFAM_DATA_URL: " + WAGFAM_DATA_URL);
+    }
+    if (line.indexOf("WAGFAM_API_KEY=") >= 0) {
+      WAGFAM_API_KEY = line.substring(line.lastIndexOf("WAGFAM_API_KEY=") + 15);
+      WAGFAM_API_KEY.trim();
+      Serial.println("WAGFAM_API_KEY: " + WAGFAM_API_KEY);
+    }
+    if (line.indexOf("WAGFAM_ENABLED=") >= 0) {
+      WAGFAM_ENABLED = line.substring(line.lastIndexOf("WAGFAM_ENABLED=") + 15).toInt();
+      Serial.println("WAGFAM_ENABLED: " + String(WAGFAM_ENABLED));
+    }
     if (line.indexOf("TIMEDBKEY=") >= 0) {
       TIMEDBKEY = line.substring(line.lastIndexOf("TIMEDBKEY=") + 10);
       TIMEDBKEY.trim();
@@ -1136,6 +1173,7 @@ void readCityIds() {
   weatherClient.updateWeatherApiKey(APIKEY);
   weatherClient.setMetric(IS_METRIC);
   weatherClient.updateCityIdList(CityIDs, 1);
+  bdayClient.updateBdayClient(WAGFAM_API_KEY,WAGFAM_DATA_URL);
 }
 
 void scrollMessage(String msg) {
@@ -1147,8 +1185,6 @@ void scrollMessage(String msg) {
     if (ENABLE_OTA) {
       ArduinoOTA.handle();
     }
-    if (refresh == 1) i = 0;
-    refresh = 0;
     matrix.fillScreen(LOW);
 
     int letter = i / width;
