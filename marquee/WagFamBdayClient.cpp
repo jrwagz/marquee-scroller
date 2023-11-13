@@ -66,7 +66,6 @@ void WagFamBdayClient::updateBdays() {
     return;
   }
 
-  Serial.println("[HTTPS] GET... code: " + String(httpCode));
 
   if(httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY) {
     // get lenght of document (is -1 when Server sends no Content-Length header)
@@ -91,6 +90,8 @@ void WagFamBdayClient::updateBdays() {
         }
       delay(1);
     }
+  } else {
+    Serial.println("[HTTPS] GET... unsupported code: " + String(httpCode));
   }
   https.end();
 

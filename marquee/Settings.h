@@ -28,13 +28,13 @@ SOFTWARE.
  * Matrix Display:  https://amzn.to/2HtnQlD
  ******************************************************************************/
 /******************************************************************************
- * NOTE: The settings here are the default settings for the first loading.  
- * After loading you will manage changes to the settings via the Web Interface.  
- * If you want to change settings again in the settings.h, you will need to 
- * erase the file system on the Wemos or use the “Reset Settings” option in 
+ * NOTE: The settings here are the default settings for the first loading.
+ * After loading you will manage changes to the settings via the Web Interface.
+ * If you want to change settings again in the settings.h, you will need to
+ * erase the file system on the Wemos or use the “Reset Settings” option in
  * the Web Interface.
  ******************************************************************************/
- 
+
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266HTTPUpdateServer.h>
@@ -77,8 +77,8 @@ String WAGFAM_API_KEY = "";
 String WAGFAM_DATA_SOURCE_URL = "https://raw.githubusercontent.com/jrwagz/wagfam-birthday-clocks/main/data_source.json";
 
 // Display Settings
-// CLK -> D5 (SCK)  
-// CS  -> D6 
+// CLK -> D5 (SCK)
+// CS  -> D6
 // DIN -> D7 (MOSI)
 const int pinCS = D6; // Attach CS to this pin, DIN to MOSI and CLK to SCK (cf http://arduino.cc/en/Reference/SPI )
 int displayIntensity = 1;  //(This can be set from 0 - 15)
@@ -101,5 +101,3 @@ String OTA_Password = "";     // Set an OTA password here -- leave blank if you 
 //******************************
 // End Settings
 //******************************
-//blue-grey
-String themeColor = "blue-grey"; // this can be changed later in the web interface.
