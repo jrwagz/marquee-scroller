@@ -44,18 +44,17 @@ void WagFamBdayClient::updateBdays() {
 
   HTTPClient https;
 
-  // TODO: implement Security on the URL
-//   if (myApiKey == "") {
-//     Serial.println("Please provide an API key for the News.");
-//     return;
-//   }
-
   Serial.println("Getting Birthdays Data");
   Serial.println(myJsonSourceUrl);
 
   if (!https.begin(*client, myJsonSourceUrl)) {
     Serial.println("[HTTPS] Unable to connect");
     return;
+  }
+
+  // Add Authorization token if one is provided
+  if (myApiKey != "") {
+    https.addHeader("Authorization", "token " + myApiKey);
   }
 
   int httpCode = https.GET();
