@@ -27,7 +27,7 @@
 
 #include "Settings.h"
 
-#define VERSION "3.04-wagfambdays"
+#define VERSION "3.04.1-wagfam"
 
 #define HOSTNAME "CLOCK-"
 #define CONFIG "/conf.txt"
@@ -233,7 +233,7 @@ void setup() {
   }
 
   if (WEBSERVER_ENABLED) {
-    server.on("/", displayWeatherData);
+    server.on("/", displayHomePage);
     server.on("/pull", handlePull);
     server.on("/locations", handleLocations);
     server.on("/savewideclock", handleSaveWideClock);
@@ -394,7 +394,7 @@ boolean athentication() {
 
 void handlePull() {
   getWeatherData(); // this will force a data pull for new weather
-  displayWeatherData();
+  displayHomePage();
 }
 
 void handleSaveWideClock() {
@@ -763,7 +763,7 @@ void sendHeader() {
   server.sendContent(FPSTR(WEB_ACTION3));
 
   html = "</nav>";
-  html += "<header class='w3-top w3-bar w3-theme'><button class='w3-bar-item w3-button w3-xxxlarge w3-hover-theme' onclick='openSidebar()'><i class='fas fa-bars'></i></button><h2 class='w3-bar-item'>Weather Marquee</h2></header>";
+  html += "<header class='w3-top w3-bar w3-theme'><button class='w3-bar-item w3-button w3-xxxlarge w3-hover-theme' onclick='openSidebar()'><i class='fas fa-bars'></i></button><h2 class='w3-bar-item'>Wagner Family Calendar Clock</h2></header>";
   html += "<script>";
   html += "function openSidebar(){document.getElementById('mySidebar').style.display='block'}function closeSidebar(){document.getElementById('mySidebar').style.display='none'}closeSidebar();";
   html += "</script>";
@@ -788,7 +788,7 @@ void sendFooter() {
   server.sendContent(html);
 }
 
-void displayWeatherData() {
+void displayHomePage() {
   digitalWrite(externalLight, LOW);
   String html = "";
 
@@ -799,6 +799,30 @@ void displayWeatherData() {
   server.send(200, "text/html", "");
   sendHeader();
 
+  // Send Over the Main Wagner Family Data Section first
+  if (WAGFAM_DATA_URL == "") {
+    html += "<div class='w3-cell-row' style='width:100%'><p>Please <a href='/configure'>Configure</a> WagFam Calendar Data Source</p></div>";
+  }
+  if (WAGFAM_API_KEY == "") {
+    html += "<div class='w3-cell-row' style='width:100%'><p>Please <a href='/configure'>Configure</a> WagFam Calendar API Key</p></div>";
+  }
+
+  if (bdayClient.getNumMessages() == 0) {
+    html += "<div class='w3-cell-row' style='width:100%'><h2>No Upcoming Events!</h2></div>";
+  } else {
+    html += "<div class='w3-cell-row' style='width:100%'><h2>Upcoming Events</h2></div>";
+    html += "<div class='w3-cell-row' style='width:100%'><ul>";
+    for (int i = 0; i < bdayClient.getNumMessages(); i++) {
+      html += "<li>" + bdayClient.getMessage(i) + "</li>";
+    }
+    html += "</ul></div>";
+  }
+  html += "<hr>";
+  server.sendContent(html); // Send over the first section
+  html = "";
+
+
+  // Next send over the Weather Data Section
   String temperature = weatherClient.getTemp(0);
 
   if ((temperature.indexOf(".") != -1) && (temperature.length() >= (temperature.indexOf(".") + 2))) {
@@ -823,7 +847,7 @@ void displayWeatherData() {
       html += "<p>Weather Error: <strong>" + weatherClient.getError() + "</strong></p>";
     }
   } else {
-    html += "<div class='w3-cell-row' style='width:100%'><h2>" + weatherClient.getCity(0) + ", " + weatherClient.getCountry(0) + "</h2></div><div class='w3-cell-row'>";
+    html += "<div class='w3-cell-row' style='width:100%'><h2>Weather for " + weatherClient.getCity(0) + ", " + weatherClient.getCountry(0) + "</h2></div><div class='w3-cell-row'>";
     html += "<div class='w3-cell w3-left w3-medium' style='width:120px'>";
     html += "<img src='http://openweathermap.org/img/w/" + weatherClient.getIcon(0) + ".png' alt='" + weatherClient.getDescription(0) + "'><br>";
     html += weatherClient.getHumidity(0) + "% Humidity<br>";
@@ -840,7 +864,7 @@ void displayWeatherData() {
   }
 
 
-  server.sendContent(String(html)); // spit out what we got
+  server.sendContent(html); // spit out what we got
   html = ""; // fresh start
   sendFooter();
   server.sendContent("");
