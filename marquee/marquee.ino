@@ -27,7 +27,7 @@
 
 #include "Settings.h"
 
-#define VERSION "3.04.1-wagfam"
+#define VERSION "3.04.2-wagfam"
 
 #define HOSTNAME "CLOCK-"
 #define CONFIG "/conf.txt"
@@ -56,6 +56,7 @@ boolean displayOn = true;
 // WagFam Calendar Client
 WagFamBdayClient bdayClient(WAGFAM_API_KEY, WAGFAM_DATA_URL);
 int bdayMessageIndex = 0;
+WagFamBdayClient::configValues serverConfig = {};
 
 // Weather Client
 OpenWeatherMapClient weatherClient(APIKEY, CityIDs, 1, IS_METRIC);
@@ -83,7 +84,7 @@ static const char WEB_ACTION3[] PROGMEM = "</a><a class='w3-bar-item w3-button' 
                        "<a class='w3-bar-item w3-button' href='/update'><i class='fas fa-wrench'></i> Firmware Update</a>"
                        "<a class='w3-bar-item w3-button' href='https://github.com/Qrome/marquee-scroller' target='_blank'><i class='fas fa-question-circle'></i> About</a>";
 
-static const char CHANGE_FORM1[] PROGMEM = "<form class='w3-container' action='/locations' method='get'><h2>Configure:</h2>"
+static const char CHANGE_FORM1[] PROGMEM = "<form class='w3-container' action='/saveconfig' method='get'><h2>Configure:</h2>"
                       "<label>WagFam Calendar Data Source</label>"
                       "<input class='w3-input w3-border w3-margin-bottom' type='text' name='wagFamDataSource' value='%WAGFAMDATASOURCE%' maxlength='256'>"
                       "<label>WagFam Calendar API Key</label>"
@@ -235,11 +236,11 @@ void setup() {
   if (WEBSERVER_ENABLED) {
     server.on("/", displayHomePage);
     server.on("/pull", handlePull);
-    server.on("/locations", handleLocations);
     server.on("/savewideclock", handleSaveWideClock);
     server.on("/systemreset", handleSystemReset);
     server.on("/forgetwifi", handleForgetWifi);
     server.on("/configure", handleConfigure);
+    server.on("/saveconfig", handleSaveConfig);
     server.on("/configurewideclock", handleWideClockConfigure);
     server.on("/display", handleDisplay);
     server.onNotFound(redirectHome);
@@ -385,7 +386,7 @@ String secondsIndicator(boolean isRefresh) {
   return rtnValue;
 }
 
-boolean athentication() {
+boolean authentication() {
   if (IS_BASIC_AUTH) {
     return server.authenticate(www_username, www_password);
   }
@@ -398,7 +399,7 @@ void handlePull() {
 }
 
 void handleSaveWideClock() {
-  if (!athentication()) {
+  if (!authentication()) {
     return server.requestAuthentication();
   }
   if (numberOfHorizontalDisplays >= 8) {
@@ -409,11 +410,8 @@ void handleSaveWideClock() {
   redirectHome();
 }
 
-// This function name is terrible, it's actually handing the saving of all the configuration data
-// perhaps it's worth renaming for ease of understanding, and changing the associated URL endpoint
-// for it
-void handleLocations() {
-  if (!athentication()) {
+void handleSaveConfig() {
+  if (!authentication()) {
     return server.requestAuthentication();
   }
   WAGFAM_DATA_URL = server.arg("wagFamDataSource");
@@ -454,7 +452,7 @@ void handleLocations() {
 }
 
 void handleSystemReset() {
-  if (!athentication()) {
+  if (!authentication()) {
     return server.requestAuthentication();
   }
   Serial.println("Reset System Configuration");
@@ -465,7 +463,7 @@ void handleSystemReset() {
 }
 
 void handleForgetWifi() {
-  if (!athentication()) {
+  if (!authentication()) {
     return server.requestAuthentication();
   }
   //WiFiManager
@@ -477,7 +475,7 @@ void handleForgetWifi() {
 }
 
 void handleWideClockConfigure() {
-  if (!athentication()) {
+  if (!authentication()) {
     return server.requestAuthentication();
   }
   digitalWrite(externalLight, LOW);
@@ -507,12 +505,11 @@ void handleWideClockConfigure() {
 }
 
 void handleConfigure() {
-  if (!athentication()) {
+  if (!authentication()) {
     return server.requestAuthentication();
   }
   digitalWrite(externalLight, LOW);
   String html = "";
-
   server.sendHeader("Cache-Control", "no-cache, no-store");
   server.sendHeader("Pragma", "no-cache");
   server.sendHeader("Expires", "-1");
@@ -536,7 +533,6 @@ void handleConfigure() {
   form = FPSTR(CHANGE_FORM2);
   form.replace("%TIMEDBKEY%", TIMEDBKEY);
   form.replace("%WEATHERKEY%", APIKEY);
-
 
   String cityName = "";
   if (weatherClient.getCity(0) != "") {
@@ -639,7 +635,7 @@ void handleConfigure() {
 }
 
 void handleDisplay() {
-  if (!athentication()) {
+  if (!authentication()) {
     return server.requestAuthentication();
   }
   enableDisplay(!displayOn);
@@ -696,7 +692,24 @@ void getWeatherData() //client function to send/receive GET request data.
   }
 
   if (WAGFAM_ENABLED) {
-    bdayClient.updateBdays();
+    serverConfig = bdayClient.updateData();
+    bool needToSave = false;
+    if (serverConfig.dataSourceUrlValid) {
+      WAGFAM_DATA_URL = serverConfig.dataSourceUrl;
+      needToSave = true;
+    }
+    if (serverConfig.apiKeyValid) {
+      WAGFAM_API_KEY = serverConfig.apiKey;
+      needToSave = true;
+    }
+    if (serverConfig.eventTodayValid) {
+      WAGFAM_EVENT_TODAY = serverConfig.eventToday;
+      needToSave = true;
+    }
+    if (needToSave) {
+      Serial.println("Saving new config received from server");
+      savePersistentConfig();
+    }
   }
 
   Serial.println("Version: " + String(VERSION));
@@ -750,7 +763,6 @@ void sendHeader() {
   server.sendContent(html);
 
   server.sendContent(FPSTR(WEB_ACTIONS1));
-  Serial.println("Displays: " + String(numberOfHorizontalDisplays));
   if (numberOfHorizontalDisplays >= 8) {
     server.sendContent("<a class='w3-bar-item w3-button' href='/configurewideclock'><i class='far fa-clock'></i> Wide Clock</a>");
   }
@@ -763,7 +775,7 @@ void sendHeader() {
   server.sendContent(FPSTR(WEB_ACTION3));
 
   html = "</nav>";
-  html += "<header class='w3-top w3-bar w3-theme'><button class='w3-bar-item w3-button w3-xxxlarge w3-hover-theme' onclick='openSidebar()'><i class='fas fa-bars'></i></button><h2 class='w3-bar-item'>Wagner Family Calendar Clock</h2></header>";
+  html += "<header class='w3-top w3-bar w3-theme'><button class='w3-bar-item w3-button w3-xxxlarge w3-hover-theme' onclick='openSidebar()'><i class='fas fa-bars'></i></button><h2 class='w3-bar-item'>WagFam CalClock</h2></header>";
   html += "<script>";
   html += "function openSidebar(){document.getElementById('mySidebar').style.display='block'}function closeSidebar(){document.getElementById('mySidebar').style.display='none'}closeSidebar();";
   html += "</script>";
@@ -773,9 +785,6 @@ void sendHeader() {
 
 void sendFooter() {
   int8_t rssi = getWifiQuality();
-  Serial.print("Signal Strength (RSSI): ");
-  Serial.print(rssi);
-  Serial.println("%");
   String html = "<br><br><br>";
   html += "</div>";
   html += "<footer class='w3-container w3-bottom w3-theme w3-margin-top'>";
@@ -830,12 +839,6 @@ void displayHomePage() {
   }
 
   String time = TimeDB.getDayName() + ", " + TimeDB.getMonthName() + " " + day() + ", " + hourFormat12() + ":" + TimeDB.zeroPad(minute()) + " " + TimeDB.getAmPm();
-
-  Serial.println(weatherClient.getCity(0));
-  Serial.println(weatherClient.getCondition(0));
-  Serial.println(weatherClient.getDescription(0));
-  Serial.println(temperature);
-  Serial.println(time);
 
   if (TIMEDBKEY == "") {
     html += "<p>Please <a href='/configure'>Configure TimeZoneDB</a> with API key.</p>";
@@ -1023,6 +1026,7 @@ void savePersistentConfig() {
     f.println("WAGFAM_DATA_URL=" + WAGFAM_DATA_URL);
     f.println("WAGFAM_API_KEY=" + WAGFAM_API_KEY);
     f.println("WAGFAM_ENABLED=" + String(WAGFAM_ENABLED));
+    f.println("WAGFAM_EVENT_TODAY=" + String(WAGFAM_EVENT_TODAY));
     f.println("TIMEDBKEY=" + TIMEDBKEY);
     f.println("APIKEY=" + APIKEY);
     f.println("CityID=" + String(CityIDs[0]));
@@ -1076,6 +1080,10 @@ void readPersistentConfig() {
     if (line.indexOf("WAGFAM_ENABLED=") >= 0) {
       WAGFAM_ENABLED = line.substring(line.lastIndexOf("WAGFAM_ENABLED=") + 15).toInt();
       Serial.println("WAGFAM_ENABLED: " + String(WAGFAM_ENABLED));
+    }
+    if (line.indexOf("WAGFAM_EVENT_TODAY=") >= 0) {
+      WAGFAM_EVENT_TODAY = line.substring(line.lastIndexOf("WAGFAM_EVENT_TODAY=") + 19).toInt();
+      Serial.println("WAGFAM_EVENT_TODAY: " + String(WAGFAM_EVENT_TODAY));
     }
     if (line.indexOf("TIMEDBKEY=") >= 0) {
       TIMEDBKEY = line.substring(line.lastIndexOf("TIMEDBKEY=") + 10);
