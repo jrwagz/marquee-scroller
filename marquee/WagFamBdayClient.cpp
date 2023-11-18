@@ -35,7 +35,8 @@ void WagFamBdayClient::updateBdayClient(String ApiKey, String JsonDataSourceUrl)
   myApiKey = ApiKey;
 }
 
-void WagFamBdayClient::updateBdays() {
+WagFamBdayClient::configValues WagFamBdayClient::updateData() {
+  currentConfig = {};
   JsonStreamingParser parser;
   parser.setListener(this);
 
@@ -49,7 +50,7 @@ void WagFamBdayClient::updateBdays() {
 
   if (!https.begin(*client, myJsonSourceUrl)) {
     Serial.println("[HTTPS] Unable to connect");
-    return;
+    return currentConfig;
   }
 
   // Add Authorization token if one is provided
@@ -62,7 +63,7 @@ void WagFamBdayClient::updateBdays() {
   if (httpCode < 0) {
     Serial.println("[HTTPS] GET... failed, error " + https.errorToString(httpCode));
     Serial.println();
-    return;
+    return currentConfig;
   }
 
 
@@ -94,6 +95,7 @@ void WagFamBdayClient::updateBdays() {
   }
   https.end();
 
+  return currentConfig;
 }
 
 String WagFamBdayClient::getMessage(int index) {
@@ -112,8 +114,31 @@ void WagFamBdayClient::whitespace(char c) {
 
 }
 
+
+// Here is the expected data format of the JSON we are fetching
+//
+// NOTE: not all config values need to be specified.  The client is smart enough to only update the
+// particular configuration values that are present in the data, and not any others.
+//
+// [
+//   {
+//     "config": {
+//       "dataSourceUrl": "",
+//       "apiKey": "",
+//       "eventToday": ""
+//     }
+//   },
+//   {
+//     "message": "Test Message 1"
+//   },
+//   {
+//     "message": "Test Message 2"
+//   }
+// ]
+
 void WagFamBdayClient::startDocument() {
   messageCounter = 0;
+  inConfig = false;
 }
 
 void WagFamBdayClient::key(String key) {
@@ -121,12 +146,25 @@ void WagFamBdayClient::key(String key) {
 }
 
 void WagFamBdayClient::value(String value) {
-  if (messageCounter >= 10) {
-    // we are full so return
-    return;
-  }
-  if (currentKey == "message") {
+  if (inConfig) {
+    // Here is where we save the config data from the server
+    if (currentKey == "dataSourceUrl") {
+      currentConfig.dataSourceUrlValid = true;
+      currentConfig.dataSourceUrl = value;
+    } else if (currentKey == "apiKey") {
+      currentConfig.apiKeyValid = true;
+      currentConfig.apiKey = value;
+    } else if (currentKey == "eventToday") {
+      currentConfig.eventTodayValid = true;
+      currentConfig.eventToday = value.toInt();
+    }
+  } else if (currentKey == "message") {
+    if (messageCounter >= 10) {
+      // we are full so return
+      return;
+    }
     messages[messageCounter] = cleanText(value);
+    messageCounter++;
   }
 
   Serial.println(currentKey + "=" + value);
@@ -136,13 +174,18 @@ void WagFamBdayClient::endArray() {
 }
 
 void WagFamBdayClient::endObject() {
-    messageCounter++;
+  if (inConfig) {
+    inConfig = false;
+  }
 }
 
 void WagFamBdayClient::startArray() {
 }
 
 void WagFamBdayClient::startObject() {
+  if (currentKey == "config") {
+    inConfig = true;
+  }
 }
 
 void WagFamBdayClient::endDocument() {
