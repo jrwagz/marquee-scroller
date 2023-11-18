@@ -30,20 +30,19 @@ SOFTWARE.
 
 class WagFamBdayClient: public JsonListener {
 
-  private:
-    String myJsonSourceUrl = "";
-    String myApiKey = "";
-
-    String currentKey = "";
-    int messageCounter = 0;
-
-    // Support up to 10 messages queued up for display
-    String messages[10];
-
   public:
+    typedef struct {
+      boolean dataSourceUrlValid;
+      String dataSourceUrl;
+      boolean apiKeyValid;
+      String apiKey;
+      boolean eventTodayValid;
+      boolean eventToday;
+    } configValues;
+
     WagFamBdayClient(String ApiKey, String JsonDataSourceUrl);
     void updateBdayClient(String ApiKey, String JsonDataSourceUrl);
-    void updateBdays();
+    WagFamBdayClient::configValues updateData();
     void updateDataSource(String JsonDataSourceUrl);
 
     String getMessage(int index);
@@ -59,5 +58,18 @@ class WagFamBdayClient: public JsonListener {
     virtual void endDocument();
     virtual void startArray();
     virtual void startObject();
+
+  private:
+    String myJsonSourceUrl = "";
+    String myApiKey = "";
+
+    String currentKey = "";
+    int messageCounter = 0;
+
+    // Support up to 10 messages queued up for display
+    String messages[10];
+
+    bool inConfig = false;
+    configValues currentConfig = {};
 
 };
