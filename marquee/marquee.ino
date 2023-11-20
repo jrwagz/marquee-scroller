@@ -27,7 +27,7 @@
 
 #include "Settings.h"
 
-#define VERSION "3.04.3-wagfam"
+#define VERSION "3.04.4-wagfam"
 
 #define HOSTNAME "CLOCK-"
 #define CONFIG "/conf.txt"
@@ -180,6 +180,8 @@ void setup() {
   }
   delay(1000);
   matrix.setIntensity(displayIntensity);
+
+  scrollMessage("Welcome to the Wagner Family Calendar Clock!!!");
 
   //WiFiManager
   //Local intialization. Once its business is done, there is no need to keep it around
