@@ -59,6 +59,8 @@ String WAGFAM_DATA_URL = ""; // URL to Pull WagFam Calendar Data from
 boolean WAGFAM_ENABLED = true;  // Enable/Disable WagFam Calendar Functions
 String WAGFAM_API_KEY = ""; // Authorization token to use to authenticate to access the DATA_URL, only used if provided
 boolean WAGFAM_EVENT_TODAY = false; // Whether or not an event is happening today
+int TODAY_DISPLAY_DOT_SPACING = 5;  // How far apart the dots for the Today display are spaced
+int TODAY_DISPLAY_DOT_SPEED_MS = 333; // How many milliseconds between dot moves for the today display
 
 
 String TIMEDBKEY = ""; // Your API Key from https://timezonedb.com/register
