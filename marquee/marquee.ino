@@ -27,7 +27,7 @@
 
 #include "Settings.h"
 
-#define VERSION "3.04.4-wagfam"
+#define VERSION "3.04.5-wagfam"
 
 #define HOSTNAME "CLOCK-"
 #define CONFIG "/conf.txt"
@@ -57,6 +57,8 @@ boolean displayOn = true;
 WagFamBdayClient bdayClient(WAGFAM_API_KEY, WAGFAM_DATA_URL);
 int bdayMessageIndex = 0;
 WagFamBdayClient::configValues serverConfig = {};
+int todayDisplayMilliSecond = 0;
+int todayDisplayStartingLED = 0;
 
 // Weather Client
 OpenWeatherMapClient weatherClient(APIKEY, CityIDs, 1, IS_METRIC);
@@ -1249,6 +1251,28 @@ void centerPrint(String msg, boolean extraStuff) {
 
   // Print the static portions of the display before the main Message
   if (extraStuff) {
+    // We will have a shifting left-right on/off pattern on the two side and the bottom row
+    // only displayed when there is an event happening on a given day.
+    if (WAGFAM_EVENT_TODAY) {
+      todayDisplayMilliSecond = millis() % (TODAY_DISPLAY_DOT_SPACING * TODAY_DISPLAY_DOT_SPEED_MS);
+      todayDisplayStartingLED = int(todayDisplayMilliSecond / TODAY_DISPLAY_DOT_SPEED_MS);
+      for (int i = 0; i < (matrix.height()*2+matrix.width()-2); i++) {
+        if ((i % TODAY_DISPLAY_DOT_SPACING) == todayDisplayStartingLED) {
+          if (i < matrix.height()) {
+            // Far left matrix boundary
+            matrix.drawPixel(0,i,HIGH);
+          } else if (i < (matrix.height()+matrix.width()-2)) {
+            // Bottom matrix boundary
+            matrix.drawPixel(i-(matrix.height()-1),(matrix.height()-1),HIGH);
+          } else {
+            // Far right matrix boundary
+            matrix.drawPixel(matrix.width()-1,((matrix.height()-1)-(i-(matrix.height()+matrix.width()-2))),HIGH);
+          }
+        }
+      }
+    }
+
+    // Draw the PM pixel after the shifting pattern, so that we ensure that it's still on
     if (!IS_24HOUR && IS_PM && isPM()) {
       matrix.drawPixel(matrix.width() - 1, 6, HIGH);
     }
