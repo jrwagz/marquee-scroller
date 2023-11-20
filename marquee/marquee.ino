@@ -27,7 +27,7 @@
 
 #include "Settings.h"
 
-#define VERSION "3.04.2-wagfam"
+#define VERSION "3.04.3-wagfam"
 
 #define HOSTNAME "CLOCK-"
 #define CONFIG "/conf.txt"
@@ -138,7 +138,6 @@ int externalLight = LED_BUILTIN; // LED_BUILTIN is is the built in LED on the We
 void setup() {
   Serial.begin(115200);
   SPIFFS.begin();
-  //SPIFFS.remove(CONFIG);
   delay(10);
 
   // Initialize digital pin for LED
@@ -181,7 +180,6 @@ void setup() {
   }
   delay(1000);
   matrix.setIntensity(displayIntensity);
-  //noTone(BUZZER_PIN);
 
   //WiFiManager
   //Local intialization. Once its business is done, there is no need to keep it around
@@ -696,10 +694,12 @@ void getWeatherData() //client function to send/receive GET request data.
     bool needToSave = false;
     if (serverConfig.dataSourceUrlValid) {
       WAGFAM_DATA_URL = serverConfig.dataSourceUrl;
+      lastEpoch = 0; // this should force a data pull, since with a new URL that's required
       needToSave = true;
     }
     if (serverConfig.apiKeyValid) {
       WAGFAM_API_KEY = serverConfig.apiKey;
+      lastEpoch = 0; // this should force a data pull, since with a new API_KEY that's required
       needToSave = true;
     }
     if (serverConfig.eventTodayValid) {
