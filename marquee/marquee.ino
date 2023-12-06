@@ -27,7 +27,7 @@
 
 #include "Settings.h"
 
-#define VERSION "3.04.5-wagfam"
+#define VERSION "3.04.6-wagfam"
 
 #define HOSTNAME "CLOCK-"
 #define CONFIG "/conf.txt"
@@ -65,12 +65,12 @@ OpenWeatherMapClient weatherClient(APIKEY, CityIDs, 1, IS_METRIC);
 // (some) Default Weather Settings
 boolean SHOW_DATE = false;
 boolean SHOW_CITY = true;
-boolean SHOW_CONDITION = true;
-boolean SHOW_HUMIDITY = true;
-boolean SHOW_WIND = true;
-boolean SHOW_WINDDIR = true;
+boolean SHOW_CONDITION = false;
+boolean SHOW_HUMIDITY = false;
+boolean SHOW_WIND = false;
+boolean SHOW_WINDDIR = false;
 boolean SHOW_PRESSURE = false;
-boolean SHOW_HIGHLOW = true;
+boolean SHOW_HIGHLOW = false;
 
 ESP8266WebServer server(WEBSERVER_PORT);
 ESP8266HTTPUpdateServer serverUpdater;
