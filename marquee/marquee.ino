@@ -27,7 +27,7 @@
 
 #include "Settings.h"
 
-#define VERSION "3.07.0-wagfam"
+#define VERSION "3.07.1-butter"
 
 #define HOSTNAME "CLOCK-"
 #define CONFIG "/conf.txt"
@@ -112,9 +112,9 @@ static const char WEB_ACTION3[] PROGMEM = "</a><a class='w3-bar-item w3-button' 
                        "<a class='w3-bar-item w3-button' href='/update'><i class='fas fa-wrench'></i> Firmware Update</a>";
 
 static const char CHANGE_FORM1[] PROGMEM = "<form class='w3-container' action='/saveconfig' method='get'><h2>Configure:</h2>"
-                      "<label>WagFam Calendar Data Source</label>"
+                      "<label>Butter Calendar Data Source</label>"
                       "<input class='w3-input w3-border w3-margin-bottom' type='text' name='wagFamDataSource' value='%WAGFAMDATASOURCE%' maxlength='256'>"
-                      "<label>WagFam Calendar API Key</label>"
+                      "<label>Butter Calendar API Key</label>"
                       "<input class='w3-input w3-border w3-margin-bottom' type='text' name='wagFamApiKey' value='%WAGFAMAPIKEY%' maxlength='128'>"
                       "<hr>";
 
@@ -190,7 +190,7 @@ void setup() {
   delay(1000);
   matrix.setIntensity(displayIntensity);
 
-  scrollMessageWait(F("Welcome to the Wagner Family Calendar Clock!!!"));
+  scrollMessageWait(F("Welcome to the Butterfield Family Calendar Clock!!!"));
 
   //WiFiManager
   //Local intialization. Once its business is done, there is no need to keep it around
@@ -717,7 +717,7 @@ void sendHeader() {
   server.sendContent(FPSTR(WEB_ACTION3));
 
   html = "</nav>";
-  html += "<header class='w3-top w3-bar w3-theme'><button class='w3-bar-item w3-button w3-xxxlarge w3-hover-theme' onclick='openSidebar()'><i class='fas fa-bars'></i></button><h2 class='w3-bar-item'>WagFam CalClock</h2></header>";
+  html += "<header class='w3-top w3-bar w3-theme'><button class='w3-bar-item w3-button w3-xxxlarge w3-hover-theme' onclick='openSidebar()'><i class='fas fa-bars'></i></button><h2 class='w3-bar-item'>Butter CalClock</h2></header>";
   html += "<script>";
   html += "function openSidebar(){document.getElementById('mySidebar').style.display='block'}function closeSidebar(){document.getElementById('mySidebar').style.display='none'}closeSidebar();";
   html += "</script>";
@@ -752,10 +752,10 @@ void displayHomePage() {
 
   // Send Over the Main Wagner Family Data Section first
   if (WAGFAM_DATA_URL == "") {
-    html += "<div class='w3-cell-row' style='width:100%'><p>Please <a href='/configure'>Configure</a> WagFam Calendar Data Source</p></div>";
+    html += "<div class='w3-cell-row' style='width:100%'><p>Please <a href='/configure'>Configure</a> Butter Calendar Data Source</p></div>";
   }
   if (WAGFAM_API_KEY == "") {
-    html += "<div class='w3-cell-row' style='width:100%'><p>Please <a href='/configure'>Configure</a> WagFam Calendar API Key</p></div>";
+    html += "<div class='w3-cell-row' style='width:100%'><p>Please <a href='/configure'>Configure</a> Butter Calendar API Key</p></div>";
   }
 
   if (bdayClient.getNumMessages() == 0) {
