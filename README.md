@@ -58,11 +58,12 @@ It is recommended to use Arduino IDE.  You will need to configure Arduino IDE to
 ## Loading Supporting Library Files in Arduino
 Use the Arduino guide for details on how to installing and manage libraries https://www.arduino.cc/en/Guide/Libraries  
 **Packages** -- the following packages and libraries are used (download and install):  
-<WiFiManager.h> --> https://github.com/tzapu/WiFiManager (latest)  
-<TimeLib.h> --> https://github.com/PaulStoffregen/Time  
-<Adafruit_GFX.h> --> https://github.com/adafruit/Adafruit-GFX-Library  
-<Max72xxPanel.h> --> https://github.com/markruys/arduino-Max72xxPanel  
-<JsonStreamingParser.h> --> https://github.com/squix78/json-streaming-parser  
+* <WiFiManager.h> --> https://github.com/tzapu/WiFiManager (latest)  
+* <TimeLib.h> --> https://github.com/PaulStoffregen/Time  
+* <Adafruit_GFX.h> --> https://github.com/adafruit/Adafruit-GFX-Library  
+* <Max72xxPanel.h> --> https://github.com/markruys/arduino-Max72xxPanel  
+* <JsonStreamingParser.h> --> https://github.com/squix78/json-streaming-parser  
+* <ArduinoJson> -->  https://github.com/bblanchon/ArduinoJson v7.4.2+
 
 Note ArduinoJson (version 5.13.1) is now included as a library file in version 2.7 and later.
 

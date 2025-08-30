@@ -1,97 +1,98 @@
-/** The MIT License (MIT)
-
-Copyright (c) 2018 David Payne
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-*/
+/**
+ * parts Copyright (c) 2018 David Payne
+ * Copyright (c) 2025 rob040@users.github.com
+ * This code is licensed under MIT license (see LICENSE.txt for details)
+ *
+ */
 
 #pragma once
 #include <ESP8266WiFi.h>
-#include "libs/ArduinoJson/ArduinoJson.h"
+#include <ArduinoJson.h>
 
 class OpenWeatherMapClient {
 
 private:
-  String myCityIDs = "";
-  String myApiKey = "";
-  String units = "";
-  
+  String myApiKey;
+
   const char* servername = "api.openweathermap.org";  // remote server we will connect to
 
-  typedef struct {
-    String lat;
-    String lon;
-    String dt;
-    String city;
-    String country;
-    String temp;
-    String humidity;
-    String condition;
-    String wind;
-    String weatherId;
-    String description;
-    String icon;
-    boolean cached;
-    String error;
-    String pressure;
-    String direction;
-    String high;
-    String low;
-    String timeZone;
+  String myGeoLocation;
+  enum locationtype_e {
+    LOC_UNSET,
+    LOC_UNKNOWN,
+    LOC_CITYID,
+    LOC_LATLON,
+    LOC_NAME
+  } myGeoLocationType;
+  int myGeoLocation_CityID;
+  float myGeoLocation_lat;
+  float myGeoLocation_lon;
+
+  struct
+  {
+    // Weather report content
+    String city;        // City name
+    String country;     // Country code (GB, JP etc.)
+    String condition;   // Group of weather parameters (Rain, Snow, Extreme etc.)
+    String description; // Weather condition within the group. (language translated)
+    String icon;        // Weather icon id
+    float lat;          // City geo Location coordinate Latitude
+    float lon;          // City geo Location coordinate Longitude
+    float temperature;  // Temperature. Unit Default: Kelvin, Metric: Celsius, Imperial: Fahrenheit
+    float tempHigh;     // Temperature Highs
+    float tempLow;      // Temperature Lows
+    float windSpeed;    // Unit Default: meter/sec, Metric: meter/sec, Imperial: miles/hour
+    int weatherId;      // Weather condition id
+    int pressure;       // Atmospheric pressure at ground level, hPa
+    int humidity;       // Humidity in %, 0..100
+    int windDirection;  // Wind direction in degrees 0..359
+    int cloudCoverage;  // in %, 0..100
+    int timeZone;       // TZ Shift in seconds from UTC
+    uint32_t reportTimestamp; // Time of Weather data calculation, unix, UTC
+    uint32_t sunRise;   // Sunrise time, unix, UTC
+    uint32_t sunSet;    // Sunset time, unix, UTC
+    bool isValid;       // Weather report is valid
   } weather;
 
-  weather weathers[5];
+  bool isMetric;   // Weather request format Metric or Imperial
+  const int dataGetRetryCountError = 10; // Amount of data get timeouts until we invalidate all data
+  int dataGetRetryCount;
+  String errorMsg; // Weather request error message
 
-  String roundValue(String value);
-  
+
 public:
-  OpenWeatherMapClient(String ApiKey, int CityIDs[], int cityCount, boolean isMetric);
+  OpenWeatherMapClient(const String &ApiKey, bool isMetric);
+  int setGeoLocation(const String &location);
   void updateWeather();
-  void updateWeatherApiKey(String ApiKey);
-  void updateCityIdList(int CityIDs[], int cityCount);
-  void setMetric(boolean isMetric);
+  inline void setWeatherApiKey(const String &ApiKey) {myApiKey = ApiKey;};
+  inline void setMetric(bool isMetric) {this->isMetric = isMetric;};
 
-  String getLat(int index);
-  String getLon(int index);
-  String getDt(int index);
-  String getCity(int index);
-  String getCountry(int index);
-  String getTemp(int index);
-  String getTempRounded(int index);
-  String getHumidity(int index);
-  String getHumidityRounded(int index);
-  String getCondition(int index);
-  String getWind(int index);
-  String getWindRounded(int index);
-  String getDirection(int index);
-  String getDirectionRounded(int index);
-  String getDirectionText(int index);
-  String getPressure(int index);
-  String getHigh(int index);
-  String getLow(int index);
-  String getWeatherId(int index);
-  String getDescription(int index);
-  String getIcon(int index);
-  boolean getCached();
-  String getMyCityIDs();
-  String getWeatherIcon(int index);
-  String getError();
-  String getWeekDay(int index, float offset);
-  int getTimeZone(int index);
+  inline float getLat() {return weather.lat;};
+  inline float getLon() {return weather.lon;};
+  inline uint32_t getReportTimestamp() {return weather.reportTimestamp;};
+  inline String getCity() {return weather.city;};
+  inline String getCountry() {return weather.country;};
+  inline float getTemperature() {return weather.temperature;};
+  inline int getHumidity() {return weather.humidity;};
+  inline String getWeatherCondition() {return weather.condition;};
+  inline float getWindSpeed() {return weather.windSpeed;};
+  inline int getWindDirection() {return weather.windDirection;};
+  inline int getCloudCoverage() {return weather.cloudCoverage;};
+  inline int getPressure() {return weather.pressure;};
+  inline float getTemperatureHigh() {return weather.tempHigh;};
+  inline float getTemperatureLow() {return weather.tempLow;};
+  inline int getWeatherId() {return weather.weatherId;};
+  inline String getWeatherDescription() {return weather.description;};
+  inline String getIcon() {return weather.icon;};
+  inline bool getWeatherDataValid() {return weather.isValid;};
+  inline String getErrorMessage() {return errorMsg;};
+  inline int getTimeZone() {return weather.timeZone/3600;}; // Local TimeZone delta with UTC in Hours
+  inline int getTimeZoneSeconds() {return weather.timeZone;};
+  inline uint32_t getSunRise() {return weather.sunRise;};
+  inline uint32_t getSunSet() {return weather.sunSet;};
+  String getWeekDay();
+  String getWindDirectionText();
+  String getWeatherIcon();
 };
+
+extern String EncodeUrlSpecialChars(const char *msg);
