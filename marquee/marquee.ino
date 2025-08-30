@@ -27,7 +27,7 @@
 
 #include "Settings.h"
 
-#define VERSION "3.04.6-wagfam"
+#define VERSION "3.05.0-wagfam"
 
 #define HOSTNAME "CLOCK-"
 #define CONFIG "/conf.txt"
@@ -61,7 +61,7 @@ int todayDisplayMilliSecond = 0;
 int todayDisplayStartingLED = 0;
 
 // Weather Client
-OpenWeatherMapClient weatherClient(APIKEY, CityIDs, 1, IS_METRIC);
+OpenWeatherMapClient weatherClient(APIKEY, IS_METRIC);
 // (some) Default Weather Settings
 boolean SHOW_DATE = false;
 boolean SHOW_CITY = true;
@@ -263,7 +263,7 @@ void setup() {
 }
 
 //************************************************************
-// Main Looop
+// Main Loop
 //************************************************************
 void loop() {
   //Get some Weather Data to serve
@@ -275,8 +275,8 @@ void loop() {
   if (lastMinute != TimeDB.zeroPad(minute())) {
     lastMinute = TimeDB.zeroPad(minute());
 
-    if (weatherClient.getError() != "") {
-      scrollMessage(weatherClient.getError());
+    if (weatherClient.getErrorMessage() != "") {
+      scrollMessage(weatherClient.getErrorMessage());
       return;
     }
 
@@ -287,41 +287,42 @@ void loop() {
 
     displayRefreshCount --;
     // Check to see if we need to Scroll some Data
-    if (displayRefreshCount <= 0) {
+    if ((displayRefreshCount <= 0) && weatherClient.getWeatherDataValid() && (weatherClient.getErrorMessage().length() == 0)) {
       displayRefreshCount = minutesBetweenScrolling;
-      String temperature = weatherClient.getTempRounded(0);
-      String description = weatherClient.getDescription(0);
+      String msg = " ";
+      String temperature = String(weatherClient.getTemperature(),0);
+      String description = weatherClient.getWeatherDescription();
       description.toUpperCase();
-      String msg;
-      msg += " ";
 
       if (SHOW_DATE) {
         msg += TimeDB.getDayName() + ", ";
         msg += TimeDB.getMonthName() + " " + day() + "  ";
       }
       if (SHOW_CITY) {
-        msg += weatherClient.getCity(0) + "  ";
+        msg += weatherClient.getCity() + "  ";
         // Only show the temperature if the city is shown also
         msg += temperature + getTempSymbol() + "  ";
       }
 
       //show high/low temperature
       if (SHOW_HIGHLOW) {
-        msg += "High/Low:" + weatherClient.getHigh(0) + "/" + weatherClient.getLow(0) + " " + getTempSymbol() + "  ";
+        msg += "High/Low:" + String(weatherClient.getTemperatureHigh(),0) + "/" + String(weatherClient.getTemperatureLow(),0) + " " + getTempSymbol() + " ";
       }
 
       if (SHOW_CONDITION) {
         msg += description + "  ";
       }
       if (SHOW_HUMIDITY) {
-        msg += "Humidity:" + weatherClient.getHumidityRounded(0) + "%  ";
+        msg += "Humidity:" + String(weatherClient.getHumidity()) + "%  ";
       }
       if (SHOW_WIND) {
-        msg += "Wind: " + weatherClient.getDirectionText(0) + " @ " + weatherClient.getWindRounded(0) + " " + getSpeedSymbol() + "  ";
+        String windspeed = String(weatherClient.getWindSpeed(),0);
+        windspeed.trim();
+        msg += "Wind: " + weatherClient.getWindDirectionText() + " " + windspeed + getSpeedSymbol() + "  ";
       }
       //line to show barometric pressure
       if (SHOW_PRESSURE) {
-        msg += "Pressure:" + weatherClient.getPressure(0) + getPressureSymbol() + "  ";
+        msg += "Pressure:" + String(weatherClient.getPressure()) + getPressureSymbol() + "  ";
       }
 
       msg += marqueeMessage + " ";
@@ -342,7 +343,7 @@ void loop() {
   if (numberOfHorizontalDisplays >= 8) {
     if (Wide_Clock_Style == "1") {
       // On Wide Display -- show the current temperature as well
-      String currentTemp = weatherClient.getTempRounded(0);
+      String currentTemp = String(weatherClient.getTemperature(),0);
       currentTime += " " + currentTemp + getTempSymbol();
     }
     if (Wide_Clock_Style == "2") {
@@ -422,7 +423,7 @@ void handleSaveConfig() {
   bdayClient.updateBdayClient(WAGFAM_API_KEY,WAGFAM_DATA_URL);
   TIMEDBKEY = server.arg("TimeZoneDB");
   APIKEY = server.arg("openWeatherMapApiKey");
-  CityIDs[0] = server.arg("city1").toInt();
+  geoLocation = server.arg("city1");
   flashOnSeconds = server.hasArg("flashseconds");
   IS_24HOUR = server.hasArg("is24hour");
   IS_PM = server.hasArg("isPM");
@@ -447,6 +448,7 @@ void handleSaveConfig() {
   temp = server.arg("stationpassword");
   temp.toCharArray(www_password, sizeof(temp));
   weatherClient.setMetric(IS_METRIC);
+  weatherClient.setGeoLocation(geoLocation);
   matrix.fillScreen(LOW); // show black
   savePersistentConfig();
   getWeatherData(); // this will force a data pull for new weather
@@ -537,11 +539,11 @@ void handleConfigure() {
   form.replace("%WEATHERKEY%", APIKEY);
 
   String cityName = "";
-  if (weatherClient.getCity(0) != "") {
-    cityName = weatherClient.getCity(0) + ", " + weatherClient.getCountry(0);
+  if (weatherClient.getCity() != "") {
+    cityName = weatherClient.getCity() + ", " + weatherClient.getCountry();
   }
   form.replace("%CITYNAME1%", cityName);
-  form.replace("%CITY1%", String(CityIDs[0]));
+  form.replace("%CITY1%", geoLocation);
   String isDateChecked = "";
   if (SHOW_DATE) {
     isDateChecked = "checked='checked'";
@@ -668,8 +670,8 @@ void getWeatherData() //client function to send/receive GET request data.
     matrix.write();
 
     weatherClient.updateWeather();
-    if (weatherClient.getError() != "") {
-      scrollMessage(weatherClient.getError());
+    if (weatherClient.getErrorMessage() != "") {
+      scrollMessage(weatherClient.getErrorMessage());
     }
   }
 
@@ -680,7 +682,7 @@ void getWeatherData() //client function to send/receive GET request data.
   matrix.drawPixel(0, 2, HIGH);
   Serial.println("matrix Width:" + matrix.width());
   matrix.write();
-  TimeDB.updateConfig(TIMEDBKEY, weatherClient.getLat(0), weatherClient.getLon(0));
+  TimeDB.updateConfig(TIMEDBKEY, String(weatherClient.getLat()), String(weatherClient.getLon()));
   time_t currentTime = TimeDB.getTime();
   if(currentTime > 5000 || firstEpoch == 0) {
     setTime(currentTime);
@@ -762,7 +764,7 @@ void sendHeader() {
   html = "<nav class='w3-sidebar w3-bar-block w3-card' style='margin-top:88px' id='mySidebar'>";
   html += "<div class='w3-container w3-theme-d2'>";
   html += "<span onclick='closeSidebar()' class='w3-button w3-display-topright w3-large'><i class='fas fa-times'></i></span>";
-  html += "<div class='w3-left'><img src='http://openweathermap.org/img/w/" + weatherClient.getIcon(0) + ".png' alt='" + weatherClient.getDescription(0) + "'></div>";
+  html += "<div class='w3-left'><img src='http://openweathermap.org/img/w/" + weatherClient.getIcon() + ".png' alt='" + weatherClient.getWeatherDescription() + "'></div>";
   html += "<div class='w3-padding'>Menu</div></div>";
   server.sendContent(html);
 
@@ -836,7 +838,7 @@ void displayHomePage() {
 
 
   // Next send over the Weather Data Section
-  String temperature = weatherClient.getTemp(0);
+  String temperature = String(weatherClient.getTemperature(),0);
 
   if ((temperature.indexOf(".") != -1) && (temperature.length() >= (temperature.indexOf(".") + 2))) {
     temperature.remove(temperature.indexOf(".") + 2);
@@ -848,25 +850,25 @@ void displayHomePage() {
     html += "<p>Please <a href='/configure'>Configure TimeZoneDB</a> with API key.</p>";
   }
 
-  if (weatherClient.getCity(0) == "") {
+  if (weatherClient.getCity() == "") {
     html += "<p>Please <a href='/configure'>Configure Weather</a> API</p>";
-    if (weatherClient.getError() != "") {
-      html += "<p>Weather Error: <strong>" + weatherClient.getError() + "</strong></p>";
+    if (weatherClient.getErrorMessage() != "") {
+      html += "<p>Weather Error: <strong>" + weatherClient.getErrorMessage() + "</strong></p>";
     }
   } else {
-    html += "<div class='w3-cell-row' style='width:100%'><h2>Weather for " + weatherClient.getCity(0) + ", " + weatherClient.getCountry(0) + "</h2></div><div class='w3-cell-row'>";
+    html += "<div class='w3-cell-row' style='width:100%'><h2>Weather for " + weatherClient.getCity() + ", " + weatherClient.getCountry() + "</h2></div><div class='w3-cell-row'>";
     html += "<div class='w3-cell w3-left w3-medium' style='width:120px'>";
-    html += "<img src='http://openweathermap.org/img/w/" + weatherClient.getIcon(0) + ".png' alt='" + weatherClient.getDescription(0) + "'><br>";
-    html += weatherClient.getHumidity(0) + "% Humidity<br>";
-    html += weatherClient.getDirectionText(0) + " / " + weatherClient.getWind(0) + " <span class='w3-tiny'>" + getSpeedSymbol() + "</span> Wind<br>";
-    html += weatherClient.getPressure(0) + " Pressure<br>";
+    html += "<img src='http://openweathermap.org/img/w/" + weatherClient.getIcon() + ".png' alt='" + weatherClient.getWeatherDescription() + "'><br>";
+    html += String(weatherClient.getHumidity(),0) + "% Humidity<br>";
+    html += weatherClient.getWindDirectionText() + " / " + String(weatherClient.getWindSpeed(),0) + " <span class='w3-tiny'>" + getSpeedSymbol() + "</span> Wind<br>";
+    html += String(weatherClient.getPressure()) + " Pressure<br>";
     html += "</div>";
     html += "<div class='w3-cell w3-container' style='width:100%'><p>";
-    html += weatherClient.getCondition(0) + " (" + weatherClient.getDescription(0) + ")<br>";
+    html += weatherClient.getWeatherCondition() + " (" + weatherClient.getWeatherDescription() + ")<br>";
     html += temperature + " " + getTempSymbol(true) + "<br>";
-    html += weatherClient.getHigh(0) + "/" + weatherClient.getLow(0) + " " + getTempSymbol(true) + "<br>";
+    html += String(weatherClient.getTemperatureHigh(),0) + "/" + String(weatherClient.getTemperatureLow(),0) + " " + getTempSymbol(true) + "<br>";
     html += time + "<br>";
-    html += "<a href='https://www.google.com/maps/@" + weatherClient.getLat(0) + "," + weatherClient.getLon(0) + ",10000m/data=!3m1!1e3' target='_BLANK'><i class='fas fa-map-marker' style='color:red'></i> Map It!</a><br>";
+    html += "<a href='https://www.google.com/maps/@" + String(weatherClient.getLat()) + "," + String(weatherClient.getLon()) + ",10000m/data=!3m1!1e3' target='_BLANK'><i class='fas fa-map-marker' style='color:red'></i> Map It!</a><br>";
     html += "</p></div></div><hr>";
   }
 
@@ -1033,7 +1035,7 @@ void savePersistentConfig() {
     f.println("WAGFAM_EVENT_TODAY=" + String(WAGFAM_EVENT_TODAY));
     f.println("TIMEDBKEY=" + TIMEDBKEY);
     f.println("APIKEY=" + APIKEY);
-    f.println("CityID=" + String(CityIDs[0]));
+    f.println("CityID=" + geoLocation);
     f.println("marqueeMessage=" + marqueeMessage);
     f.println("timeDisplayTurnsOn=" + timeDisplayTurnsOn);
     f.println("timeDisplayTurnsOff=" + timeDisplayTurnsOff);
@@ -1100,8 +1102,9 @@ void readPersistentConfig() {
       Serial.println("APIKEY: " + APIKEY);
     }
     if (line.indexOf("CityID=") >= 0) {
-      CityIDs[0] = line.substring(line.lastIndexOf("CityID=") + 7).toInt();
-      Serial.println("CityID: " + String(CityIDs[0]));
+      geoLocation = line.substring(line.lastIndexOf("CityID=") + 7);
+      geoLocation.trim();
+      Serial.println("CityID: " + geoLocation);
     }
     if (line.indexOf("isFlash=") >= 0) {
       flashOnSeconds = line.substring(line.lastIndexOf("isFlash=") + 8).toInt();
@@ -1206,9 +1209,9 @@ void readPersistentConfig() {
   }
   fr.close();
   matrix.setIntensity(displayIntensity);
-  weatherClient.updateWeatherApiKey(APIKEY);
+  weatherClient.setWeatherApiKey(APIKEY);
   weatherClient.setMetric(IS_METRIC);
-  weatherClient.updateCityIdList(CityIDs, 1);
+  weatherClient.setGeoLocation(geoLocation);
   bdayClient.updateBdayClient(WAGFAM_API_KEY,WAGFAM_DATA_URL);
 }
 
@@ -1310,4 +1313,45 @@ String decodeHtmlString(String msg) {
   decodedMsg.toUpperCase();
   decodedMsg.trim();
   return decodedMsg;
+}
+
+String EncodeUrlSpecialChars(const char *msg)
+{
+const static char special[] = {'\x20','\x22','\x23','\x24','\x25','\x26','\x2B','\x3B','\x3C','\x3D','\x3E','\x3F','\x40'};
+  String encoded;
+  int inIdx;
+  char ch, hex;
+  bool convert;
+  const int inLen = strlen(msg);
+  //Serial.printf_P(PSTR("EncodeURL in:  %s\n"), msg);
+  encoded.reserve(inLen+128);
+
+  for (inIdx=0; inIdx < inLen; inIdx++) {
+    ch = msg[inIdx];
+    convert = false;
+    if (ch < ' ') {
+      convert = true; // this includes 0x80-0xFF !
+    }
+    // find ch in table
+    for (int i=0; i < (int)sizeof(special) && !convert; i++) {
+      if (special[i] == ch) convert = true;
+    }
+    if (convert) {
+      // convert character to "%HEX"
+      encoded += '%';
+      hex = (ch >> 4) & 0x0F;
+      hex += '0';
+      if (hex > '9') hex += 7;
+      encoded += hex;
+      hex = ch & 0x0F;
+      hex += '0';
+      if (hex > '9') hex += 7;
+      encoded += hex;
+    }
+    else {
+      encoded += ch;
+    }
+  }
+  //Serial.printf_P(PSTR("EncodeURL out: %s\n"), encoded.c_str());
+  return encoded;
 }
