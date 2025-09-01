@@ -27,11 +27,10 @@
 
 #include "Settings.h"
 
-#define VERSION "3.05.0-wagfam"
+#define VERSION "3.05.2-wagfam"
 
 #define HOSTNAME "CLOCK-"
 #define CONFIG "/conf.txt"
-#define BUZZER_PIN  D2
 
 //declairing prototypes
 void configModeCallback (WiFiManager *myWiFiManager);
@@ -147,14 +146,6 @@ void setup() {
   Serial.println("matrix created");
   matrix.fillScreen(LOW); // show black
   centerPrint("hello");
-
-  tone(BUZZER_PIN, 415, 500);
-  delay(500 * 1.3);
-  tone(BUZZER_PIN, 466, 500);
-  delay(500 * 1.3);
-  tone(BUZZER_PIN, 370, 1000);
-  delay(1000 * 1.3);
-  noTone(BUZZER_PIN);
 
   for (int inx = 0; inx <= 15; inx++) {
     matrix.setIntensity(inx);
@@ -751,14 +742,12 @@ void configModeCallback (WiFiManager *myWiFiManager) {
 
 void flashLED(int number, int delayTime) {
   for (int inx = 0; inx < number; inx++) {
-    tone(BUZZER_PIN, 440, delayTime);
     delay(delayTime);
     digitalWrite(externalLight, LOW);
     delay(delayTime);
     digitalWrite(externalLight, HIGH);
     delay(delayTime);
   }
-  noTone(BUZZER_PIN);
 }
 
 String getTempSymbol() {
