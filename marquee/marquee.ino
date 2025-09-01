@@ -27,7 +27,7 @@
 
 #include "Settings.h"
 
-#define VERSION "3.05.2-wagfam"
+#define VERSION "3.06.0-wagfam"
 
 #define HOSTNAME "CLOCK-"
 #define CONFIG "/conf.txt"
@@ -132,7 +132,6 @@ static const char CHANGE_FORM2[] PROGMEM = "<label>OpenWeatherMap API Key (get f
                       "<p><input name='is24hour' class='w3-check w3-margin-top' type='checkbox' %IS_24HOUR_CHECKED%> Use 24 Hour Clock (military time)</p>";
 
 static const char CHANGE_FORM3[] PROGMEM = "<p><input name='isPM' class='w3-check w3-margin-top' type='checkbox' %IS_PM_CHECKED%> Show PM indicator (only 12h format)</p>"
-                      "<p><input name='flashseconds' class='w3-check w3-margin-top' type='checkbox' %FLASHSECONDS%> Flash : in the time</p>"
                       "<p>Display Brightness <input class='w3-border w3-margin-bottom' name='ledintensity' type='number' min='0' max='15' value='%INTENSITYOPTIONS%'></p>"
                       "<p>Display Scroll Speed <select class='w3-option w3-padding' name='scrollspeed'>%SCROLLOPTIONS%</select></p>"
                       "<p>Minutes Between Refresh Data <select class='w3-option w3-padding' name='refresh'>%OPTIONS%</select></p>"
@@ -356,7 +355,7 @@ String hourMinutes(bool isRefresh) {
 
 char secondsIndicator(bool isRefresh) {
   char rtnValue = ':';
-  if (!isRefresh && (flashOnSeconds && ((second() % 2) == 0))) {
+  if (!isRefresh && ((second() % 2) == 0)) {
     rtnValue = ' ';
   }
   return rtnValue;
@@ -373,7 +372,6 @@ void handleSaveConfig() {
   bdayClient.updateBdayClient(WAGFAM_API_KEY,WAGFAM_DATA_URL);
   APIKEY = server.arg("openWeatherMapApiKey");
   geoLocation = server.arg("city1");
-  flashOnSeconds = server.hasArg("flashseconds");
   IS_24HOUR = server.hasArg("is24hour");
   IS_PM = server.hasArg("isPM");
   SHOW_DATE = server.hasArg("showdate");
@@ -494,11 +492,6 @@ void handleConfigure() {
     isPmChecked = "checked='checked'";
   }
   form.replace("%IS_PM_CHECKED%", isPmChecked);
-  String isFlashSecondsChecked = "";
-  if (flashOnSeconds) {
-    isFlashSecondsChecked = "checked='checked'";
-  }
-  form.replace("%FLASHSECONDS%", isFlashSecondsChecked);
   form.replace("%INTENSITYOPTIONS%", String(displayIntensity));
   String dSpeed = String(displayScrollSpeed);
   String scrollOptions = "<option value='35'>Slow</option><option value='25'>Normal</option><option value='15'>Fast</option><option value='10'>Very Fast</option>";
@@ -808,7 +801,6 @@ void savePersistentConfig() {
     f.println("CityID=" + geoLocation);
     f.println("ledIntensity=" + String(displayIntensity));
     f.println("scrollSpeed=" + String(displayScrollSpeed));
-    f.println("isFlash=" + String(flashOnSeconds));
     f.println("is24hour=" + String(IS_24HOUR));
     f.println("isPM=" + String(IS_PM));
     f.println("isMetric=" + String(IS_METRIC));
@@ -859,10 +851,6 @@ void readPersistentConfig() {
       geoLocation = line.substring(line.lastIndexOf("CityID=") + 7);
       geoLocation.trim();
       Serial.println("CityID: " + geoLocation);
-    }
-    if (line.indexOf("isFlash=") >= 0) {
-      flashOnSeconds = line.substring(line.lastIndexOf("isFlash=") + 8).toInt();
-      Serial.println("flashOnSeconds=" + String(flashOnSeconds));
     }
     if (line.indexOf("is24hour=") >= 0) {
       IS_24HOUR = line.substring(line.lastIndexOf("is24hour=") + 9).toInt();

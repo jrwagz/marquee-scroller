@@ -74,7 +74,7 @@ const int WEBSERVER_PORT = 80; // The port you can access this device on over HT
 int minutesBetweenDataRefresh = 15;  // Time in minutes between data refresh (default 15 minutes)
 int minutesBetweenScrolling = 1; // Time in minutes between scrolling data (default 1 minutes and max is 10)
 int displayScrollSpeed = 25; // In milliseconds -- Configurable by the web UI (slow = 35, normal = 25, fast = 15, very fast = 5)
-boolean flashOnSeconds = true; // when true the : character in the time will flash on and off as a seconds indicator
+// The : will always flash on and off as a seconds indicator
 
 
 // Display Settings
