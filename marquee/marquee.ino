@@ -111,8 +111,6 @@ static const char CHANGE_FORM2[] PROGMEM = "<label>TimeZone DB API Key (get from
 static const char CHANGE_FORM3[] PROGMEM = "<p><input name='isPM' class='w3-check w3-margin-top' type='checkbox' %IS_PM_CHECKED%> Show PM indicator (only 12h format)</p>"
                       "<p><input name='flashseconds' class='w3-check w3-margin-top' type='checkbox' %FLASHSECONDS%> Flash : in the time</p>"
                       "<p><label>Marquee Message (up to 60 chars)</label><input class='w3-input w3-border w3-margin-bottom' type='text' name='marqueeMsg' value='%MSG%' maxlength='60'></p>"
-                      "<p><label>Start Time </label><input name='startTime' type='time' value='%STARTTIME%'></p>"
-                      "<p><label>End Time </label><input name='endTime' type='time' value='%ENDTIME%'></p>"
                       "<p>Display Brightness <input class='w3-border w3-margin-bottom' name='ledintensity' type='number' min='0' max='15' value='%INTENSITYOPTIONS%'></p>"
                       "<p>Display Scroll Speed <select class='w3-option w3-padding' name='scrollspeed'>%SCROLLOPTIONS%</select></p>"
                       "<p>Minutes Between Refresh Data <select class='w3-option w3-padding' name='refresh'>%OPTIONS%</select></p>"
@@ -266,7 +264,6 @@ void loop() {
   if ((getMinutesFromLastRefresh() >= minutesBetweenDataRefresh) || lastEpoch == 0) {
     getWeatherData();
   }
-  checkDisplay(); // this will see if we need to turn it on or off for night mode.
 
   if (lastMinute != TimeDB.zeroPad(minute())) {
     lastMinute = TimeDB.zeroPad(minute());
@@ -404,8 +401,6 @@ void handleSaveConfig() {
   SHOW_HIGHLOW = server.hasArg("showhighlow");
   IS_METRIC = server.hasArg("metric");
   marqueeMessage = decodeHtmlString(server.arg("marqueeMsg"));
-  timeDisplayTurnsOn = decodeHtmlString(server.arg("startTime"));
-  timeDisplayTurnsOff = decodeHtmlString(server.arg("endTime"));
   displayIntensity = server.arg("ledintensity").toInt();
   minutesBetweenDataRefresh = server.arg("refresh").toInt();
   minutesBetweenScrolling = server.arg("refreshDisplay").toInt();
@@ -537,8 +532,6 @@ void handleConfigure() {
   }
   form.replace("%FLASHSECONDS%", isFlashSecondsChecked);
   form.replace("%MSG%", marqueeMessage);
-  form.replace("%STARTTIME%", timeDisplayTurnsOn);
-  form.replace("%ENDTIME%", timeDisplayTurnsOff);
   form.replace("%INTENSITYOPTIONS%", String(displayIntensity));
   String dSpeed = String(displayScrollSpeed);
   String scrollOptions = "<option value='35'>Slow</option><option value='25'>Normal</option><option value='15'>Fast</option><option value='10'>Very Fast</option>";
@@ -929,26 +922,6 @@ void enableDisplay(boolean enable) {
   }
 }
 
-// Toggle on and off the display if user defined times
-void checkDisplay() {
-  if (timeDisplayTurnsOn == "" || timeDisplayTurnsOff == "") {
-    return; // nothing to do
-  }
-  String currentTime = TimeDB.zeroPad(hour()) + ":" + TimeDB.zeroPad(minute());
-
-  if (currentTime == timeDisplayTurnsOn && !displayOn) {
-    Serial.println("Time to turn display on: " + currentTime);
-    flashLED(1, 500);
-    enableDisplay(true);
-  }
-
-  if (currentTime == timeDisplayTurnsOff && displayOn) {
-    Serial.println("Time to turn display off: " + currentTime);
-    flashLED(2, 500);
-    enableDisplay(false);
-  }
-}
-
 void savePersistentConfig() {
   // Save decoded message to SPIFFS file for playback on power up.
   File f = SPIFFS.open(CONFIG, "w");
@@ -963,8 +936,6 @@ void savePersistentConfig() {
     f.println("APIKEY=" + APIKEY);
     f.println("CityID=" + geoLocation);
     f.println("marqueeMessage=" + marqueeMessage);
-    f.println("timeDisplayTurnsOn=" + timeDisplayTurnsOn);
-    f.println("timeDisplayTurnsOff=" + timeDisplayTurnsOff);
     f.println("ledIntensity=" + String(displayIntensity));
     f.println("scrollSpeed=" + String(displayScrollSpeed));
     f.println("isFlash=" + String(flashOnSeconds));
@@ -1059,16 +1030,6 @@ void readPersistentConfig() {
       marqueeMessage = line.substring(line.lastIndexOf("marqueeMessage=") + 15);
       marqueeMessage.trim();
       Serial.println("marqueeMessage=" + marqueeMessage);
-    }
-    if (line.indexOf("timeDisplayTurnsOn=") >= 0) {
-      timeDisplayTurnsOn = line.substring(line.lastIndexOf("timeDisplayTurnsOn=") + 19);
-      timeDisplayTurnsOn.trim();
-      Serial.println("timeDisplayTurnsOn=" + timeDisplayTurnsOn);
-    }
-    if (line.indexOf("timeDisplayTurnsOff=") >= 0) {
-      timeDisplayTurnsOff = line.substring(line.lastIndexOf("timeDisplayTurnsOff=") + 20);
-      timeDisplayTurnsOff.trim();
-      Serial.println("timeDisplayTurnsOff=" + timeDisplayTurnsOff);
     }
     if (line.indexOf("ledIntensity=") >= 0) {
       displayIntensity = line.substring(line.lastIndexOf("ledIntensity=") + 13).toInt();
