@@ -110,7 +110,6 @@ static const char CHANGE_FORM2[] PROGMEM = "<label>TimeZone DB API Key (get from
 
 static const char CHANGE_FORM3[] PROGMEM = "<p><input name='isPM' class='w3-check w3-margin-top' type='checkbox' %IS_PM_CHECKED%> Show PM indicator (only 12h format)</p>"
                       "<p><input name='flashseconds' class='w3-check w3-margin-top' type='checkbox' %FLASHSECONDS%> Flash : in the time</p>"
-                      "<p><label>Marquee Message (up to 60 chars)</label><input class='w3-input w3-border w3-margin-bottom' type='text' name='marqueeMsg' value='%MSG%' maxlength='60'></p>"
                       "<p>Display Brightness <input class='w3-border w3-margin-bottom' name='ledintensity' type='number' min='0' max='15' value='%INTENSITYOPTIONS%'></p>"
                       "<p>Display Scroll Speed <select class='w3-option w3-padding' name='scrollspeed'>%SCROLLOPTIONS%</select></p>"
                       "<p>Minutes Between Refresh Data <select class='w3-option w3-padding' name='refresh'>%OPTIONS%</select></p>"
@@ -318,8 +317,6 @@ void loop() {
         msg += "Pressure:" + String(weatherClient.getPressure()) + getPressureSymbol() + "  ";
       }
 
-      msg += marqueeMessage + " ";
-
       // WAGFAM Calendar Specific display
       msg += " " + bdayClient.getMessage(bdayMessageIndex) + " ";
       bdayMessageIndex += 1;
@@ -400,7 +397,6 @@ void handleSaveConfig() {
   SHOW_PRESSURE = server.hasArg("showpressure");
   SHOW_HIGHLOW = server.hasArg("showhighlow");
   IS_METRIC = server.hasArg("metric");
-  marqueeMessage = decodeHtmlString(server.arg("marqueeMsg"));
   displayIntensity = server.arg("ledintensity").toInt();
   minutesBetweenDataRefresh = server.arg("refresh").toInt();
   minutesBetweenScrolling = server.arg("refreshDisplay").toInt();
@@ -531,7 +527,6 @@ void handleConfigure() {
     isFlashSecondsChecked = "checked='checked'";
   }
   form.replace("%FLASHSECONDS%", isFlashSecondsChecked);
-  form.replace("%MSG%", marqueeMessage);
   form.replace("%INTENSITYOPTIONS%", String(displayIntensity));
   String dSpeed = String(displayScrollSpeed);
   String scrollOptions = "<option value='35'>Slow</option><option value='25'>Normal</option><option value='15'>Fast</option><option value='10'>Very Fast</option>";
@@ -935,7 +930,6 @@ void savePersistentConfig() {
     f.println("TIMEDBKEY=" + TIMEDBKEY);
     f.println("APIKEY=" + APIKEY);
     f.println("CityID=" + geoLocation);
-    f.println("marqueeMessage=" + marqueeMessage);
     f.println("ledIntensity=" + String(displayIntensity));
     f.println("scrollSpeed=" + String(displayScrollSpeed));
     f.println("isFlash=" + String(flashOnSeconds));
@@ -1025,11 +1019,6 @@ void readPersistentConfig() {
       displayRefreshCount = 1;
       minutesBetweenScrolling = line.substring(line.lastIndexOf("minutesBetweenScrolling=") + 24).toInt();
       Serial.println("minutesBetweenScrolling=" + String(minutesBetweenScrolling));
-    }
-    if (line.indexOf("marqueeMessage=") >= 0) {
-      marqueeMessage = line.substring(line.lastIndexOf("marqueeMessage=") + 15);
-      marqueeMessage.trim();
-      Serial.println("marqueeMessage=" + marqueeMessage);
     }
     if (line.indexOf("ledIntensity=") >= 0) {
       displayIntensity = line.substring(line.lastIndexOf("ledIntensity=") + 13).toInt();
