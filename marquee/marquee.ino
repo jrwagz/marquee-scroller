@@ -230,27 +230,23 @@ void setup() {
     ArduinoOTA.begin();
   }
 
-  if (WEBSERVER_ENABLED) {
-    server.on("/", displayHomePage);
-    server.on("/pull", handlePull);
-    server.on("/systemreset", handleSystemReset);
-    server.on("/forgetwifi", handleForgetWifi);
-    server.on("/configure", handleConfigure);
-    server.on("/saveconfig", handleSaveConfig);
-    server.on("/display", handleDisplay);
-    server.onNotFound(redirectHome);
-    serverUpdater.setup(&server, "/update", www_username, www_password);
-    // Start the server
-    server.begin();
-    Serial.println("Server started");
-    // Print the IP address
-    String webAddress = "http://" + WiFi.localIP().toString() + ":" + String(WEBSERVER_PORT) + "/";
-    Serial.println("Use this URL : " + webAddress);
-    scrollMessage(" v" + String(VERSION) + "  IP: " + WiFi.localIP().toString() + "  ");
-  } else {
-    Serial.println("Web Interface is Disabled");
-    scrollMessage("Web Interface is Disabled");
-  }
+  // Web Server is always enabled
+  server.on("/", displayHomePage);
+  server.on("/pull", handlePull);
+  server.on("/systemreset", handleSystemReset);
+  server.on("/forgetwifi", handleForgetWifi);
+  server.on("/configure", handleConfigure);
+  server.on("/saveconfig", handleSaveConfig);
+  server.on("/display", handleDisplay);
+  server.onNotFound(redirectHome);
+  serverUpdater.setup(&server, "/update", www_username, www_password);
+  // Start the server
+  server.begin();
+  Serial.println("Server started");
+  // Print the IP address
+  String webAddress = "http://" + WiFi.localIP().toString() + ":" + String(WEBSERVER_PORT) + "/";
+  Serial.println("Use this URL : " + webAddress);
+  scrollMessage(" v" + String(VERSION) + "  IP: " + WiFi.localIP().toString() + "  ");
 
   flashLED(1, 500);
 }
@@ -332,9 +328,8 @@ void loop() {
   matrix.fillScreen(LOW);
   centerPrint(currentTime, true);
 
-  if (WEBSERVER_ENABLED) {
-    server.handleClient();
-  }
+  // Web Server is always enabled
+  server.handleClient();
   if (ENABLE_OTA) {
     ArduinoOTA.handle();
   }
@@ -1084,9 +1079,8 @@ void readPersistentConfig() {
 void scrollMessage(String msg) {
   msg += " "; // add a space at the end
   for ( int i = 0 ; i < width * msg.length() + matrix.width() - 1 - spacer; i++ ) {
-    if (WEBSERVER_ENABLED) {
-      server.handleClient();
-    }
+    // Web server is always enabled
+    server.handleClient();
     if (ENABLE_OTA) {
       ArduinoOTA.handle();
     }
