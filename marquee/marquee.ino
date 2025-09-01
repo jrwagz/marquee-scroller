@@ -48,8 +48,6 @@ String lastMinute = "xx";
 int displayRefreshCount = 1;
 long lastEpoch = 0;
 long firstEpoch = 0;
-long displayOffEpoch = 0;
-boolean displayOn = true;
 
 // WagFam Calendar Client
 WagFamBdayClient bdayClient(WAGFAM_API_KEY, WAGFAM_DATA_URL);
@@ -76,8 +74,7 @@ ESP8266HTTPUpdateServer serverUpdater;
 static const char WEB_ACTIONS1[] PROGMEM = "<a class='w3-bar-item w3-button' href='/'><i class='fas fa-home'></i> Home</a>"
                         "<a class='w3-bar-item w3-button' href='/configure'><i class='fas fa-cog'></i> Configure</a>";
 
-static const char WEB_ACTIONS2[] PROGMEM = "<a class='w3-bar-item w3-button' href='/pull'><i class='fas fa-cloud-download-alt'></i> Refresh Data</a>"
-                        "<a class='w3-bar-item w3-button' href='/display'>";
+static const char WEB_ACTIONS2[] PROGMEM = "<a class='w3-bar-item w3-button' href='/pull'><i class='fas fa-cloud-download-alt'></i> Refresh Data</a>";
 
 static const char WEB_ACTION3[] PROGMEM = "</a><a class='w3-bar-item w3-button' href='/systemreset' onclick='return confirm(\"Do you want to reset to default weather settings?\")'><i class='fas fa-undo'></i> Reset Settings</a>"
                        "<a class='w3-bar-item w3-button' href='/forgetwifi' onclick='return confirm(\"Do you want to forget to WiFi connection?\")'><i class='fas fa-wifi'></i> Forget WiFi</a>"
@@ -213,7 +210,6 @@ void setup() {
   server.on("/forgetwifi", handleForgetWifi);
   server.on("/configure", handleConfigure);
   server.on("/saveconfig", handleSaveConfig);
-  server.on("/display", handleDisplay);
   server.onNotFound(redirectHome);
   // Setup the update endpoint and don't require a username/password
   serverUpdater.setup(&server, "/update", "", "");
@@ -245,9 +241,7 @@ void loop() {
       return;
     }
 
-    if (displayOn) {
-      matrix.shutdown(false);
-    }
+    matrix.shutdown(false);
     matrix.fillScreen(LOW); // show black
 
     displayRefreshCount --;
@@ -494,15 +488,6 @@ void handleConfigure() {
   digitalWrite(externalLight, HIGH);
 }
 
-void handleDisplay() {
-  enableDisplay(!displayOn);
-  String state = "OFF";
-  if (displayOn) {
-    state = "ON";
-  }
-  displayMessage("Display is now " + state);
-}
-
 //***********************************************************************
 void getWeatherData() //client function to send/receive GET request data.
 {
@@ -510,22 +495,20 @@ void getWeatherData() //client function to send/receive GET request data.
   matrix.fillScreen(LOW); // show black
   Serial.println();
 
-  if (displayOn) {
-    // only pull the weather data if display is on
-    if (firstEpoch != 0) {
-      centerPrint(hourMinutes(true), true);
-    } else {
-      centerPrint("...");
-    }
-    matrix.drawPixel(0, 7, HIGH);
-    matrix.drawPixel(0, 6, HIGH);
-    matrix.drawPixel(0, 5, HIGH);
-    matrix.write();
+  // pull the weather data
+  if (firstEpoch != 0) {
+    centerPrint(hourMinutes(true), true);
+  } else {
+    centerPrint("...");
+  }
+  matrix.drawPixel(0, 7, HIGH);
+  matrix.drawPixel(0, 6, HIGH);
+  matrix.drawPixel(0, 5, HIGH);
+  matrix.write();
 
-    weatherClient.updateWeather();
-    if (weatherClient.getErrorMessage() != "") {
-      scrollMessage(weatherClient.getErrorMessage());
-    }
+  weatherClient.updateWeather();
+  if (weatherClient.getErrorMessage() != "") {
+    scrollMessage(weatherClient.getErrorMessage());
   }
 
   Serial.println("Updating Time...");
@@ -621,11 +604,6 @@ void sendHeader() {
 
   server.sendContent(FPSTR(WEB_ACTIONS1));
   server.sendContent(FPSTR(WEB_ACTIONS2));
-  if (displayOn) {
-    server.sendContent("<i class='fas fa-eye-slash'></i> Turn Display OFF");
-  } else {
-    server.sendContent("<i class='fas fa-eye'></i> Turn Display ON");
-  }
   server.sendContent(FPSTR(WEB_ACTION3));
 
   html = "</nav>";
@@ -823,29 +801,6 @@ String getTimeTillUpdate() {
 int getMinutesFromLastRefresh() {
   int minutes = (now() - lastEpoch) / 60;
   return minutes;
-}
-
-int getMinutesFromLastDisplay() {
-  int minutes = (now() - displayOffEpoch) / 60;
-  return minutes;
-}
-
-void enableDisplay(boolean enable) {
-  displayOn = enable;
-  if (enable) {
-    if (getMinutesFromLastDisplay() >= minutesBetweenDataRefresh) {
-      // The display has been off longer than the minutes between refresh -- need to get fresh data
-      lastEpoch = 0; // this should force a data pull of the weather
-      displayOffEpoch = 0;  // reset
-    }
-    matrix.shutdown(false);
-    matrix.fillScreen(LOW); // show black
-    Serial.println("Display was turned ON: " + now());
-  } else {
-    matrix.shutdown(true);
-    Serial.println("Display was turned OFF: " + now());
-    displayOffEpoch = lastEpoch;
-  }
 }
 
 void savePersistentConfig() {
