@@ -1073,35 +1073,6 @@ void centerPrint(String msg, boolean extraStuff) {
   matrix.write();
 }
 
-String decodeHtmlString(String msg) {
-  String decodedMsg = msg;
-  // Restore special characters that are misformed to %char by the client browser
-  decodedMsg.replace("+", " ");
-  decodedMsg.replace("%21", "!");
-  decodedMsg.replace("%22", "");
-  decodedMsg.replace("%23", "#");
-  decodedMsg.replace("%24", "$");
-  decodedMsg.replace("%25", "%");
-  decodedMsg.replace("%26", "&");
-  decodedMsg.replace("%27", "'");
-  decodedMsg.replace("%28", "(");
-  decodedMsg.replace("%29", ")");
-  decodedMsg.replace("%2A", "*");
-  decodedMsg.replace("%2B", "+");
-  decodedMsg.replace("%2C", ",");
-  decodedMsg.replace("%2F", "/");
-  decodedMsg.replace("%3A", ":");
-  decodedMsg.replace("%3B", ";");
-  decodedMsg.replace("%3C", "<");
-  decodedMsg.replace("%3D", "=");
-  decodedMsg.replace("%3E", ">");
-  decodedMsg.replace("%3F", "?");
-  decodedMsg.replace("%40", "@");
-  decodedMsg.toUpperCase();
-  decodedMsg.trim();
-  return decodedMsg;
-}
-
 String EncodeUrlSpecialChars(const char *msg)
 {
 const static char special[] = {'\x20','\x22','\x23','\x24','\x25','\x26','\x2B','\x3B','\x3C','\x3D','\x3E','\x3F','\x40'};
