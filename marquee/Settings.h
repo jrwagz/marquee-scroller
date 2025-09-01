@@ -97,9 +97,6 @@ const int numberOfVerticalDisplays = 1; // default 1 for a single row height
 */
 int ledRotation = 3;
 
-String timeDisplayTurnsOn = "";  // 24 Hour Format HH:MM -- Leave blank for always on. (ie 05:30)
-String timeDisplayTurnsOff = ""; // 24 Hour Format HH:MM -- Leave blank for always on. Both must be set to work.
-
 boolean ENABLE_OTA = true;    // this will allow you to load firmware to the device over WiFi (see OTA for ESP8266)
 String OTA_Password = "";     // Set an OTA password here -- leave blank if you don't want to be prompted for password
 
