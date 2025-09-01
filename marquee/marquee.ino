@@ -41,7 +41,6 @@ int8_t getWifiQuality();
 int spacer = 1;  // dots between letters
 int width = 5 + spacer; // The font width is 5 pixels + spacer
 Max72xxPanel matrix = Max72xxPanel(pinCS, numberOfHorizontalDisplays, numberOfVerticalDisplays);
-String Wide_Clock_Style = "1";  //1="hh:mm Temp", 2="hh:mm:ss", 3="hh:mm"
 float UtcOffset;  //time zone offsets that correspond with the CityID above (offset from GMT)
 
 // Time
@@ -237,12 +236,10 @@ void setup() {
   if (WEBSERVER_ENABLED) {
     server.on("/", displayHomePage);
     server.on("/pull", handlePull);
-    server.on("/savewideclock", handleSaveWideClock);
     server.on("/systemreset", handleSystemReset);
     server.on("/forgetwifi", handleForgetWifi);
     server.on("/configure", handleConfigure);
     server.on("/saveconfig", handleSaveConfig);
-    server.on("/configurewideclock", handleWideClockConfigure);
     server.on("/display", handleDisplay);
     server.onNotFound(redirectHome);
     serverUpdater.setup(&server, "/update", www_username, www_password);
@@ -338,20 +335,6 @@ void loop() {
 
   String currentTime = hourMinutes(false);
 
-  if (numberOfHorizontalDisplays >= 8) {
-    if (Wide_Clock_Style == "1") {
-      // On Wide Display -- show the current temperature as well
-      String currentTemp = String(weatherClient.getTemperature(),0);
-      currentTime += " " + currentTemp + getTempSymbol();
-    }
-    if (Wide_Clock_Style == "2") {
-      currentTime = currentTime + secondsIndicator(false) + TimeDB.zeroPad(second());
-      matrix.fillScreen(LOW); // show black
-    }
-    if (Wide_Clock_Style == "3") {
-      // No change this is normal clock display
-    }
-  }
   matrix.fillScreen(LOW);
   centerPrint(currentTime, true);
 
@@ -397,18 +380,6 @@ boolean authentication() {
 void handlePull() {
   getWeatherData(); // this will force a data pull for new weather
   displayHomePage();
-}
-
-void handleSaveWideClock() {
-  if (!authentication()) {
-    return server.requestAuthentication();
-  }
-  if (numberOfHorizontalDisplays >= 8) {
-    Wide_Clock_Style = server.arg("wideclockformat");
-    savePersistentConfig();
-    matrix.fillScreen(LOW); // show black
-  }
-  redirectHome();
 }
 
 void handleSaveConfig() {
@@ -473,36 +444,6 @@ void handleForgetWifi() {
   WiFiManager wifiManager;
   wifiManager.resetSettings();
   ESP.restart();
-}
-
-void handleWideClockConfigure() {
-  if (!authentication()) {
-    return server.requestAuthentication();
-  }
-  digitalWrite(externalLight, LOW);
-
-  server.sendHeader("Cache-Control", "no-cache, no-store");
-  server.sendHeader("Pragma", "no-cache");
-  server.sendHeader("Expires", "-1");
-  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
-  server.send(200, "text/html", "");
-
-  sendHeader();
-
-  if (numberOfHorizontalDisplays >= 8) {
-    // Wide display options
-    String form = FPSTR(WIDECLOCK_FORM);
-    String clockOptions = "<option value='1'>HH:MM Temperature</option><option value='2'>HH:MM:SS</option><option value='3'>HH:MM</option>";
-    clockOptions.replace(Wide_Clock_Style + "'", Wide_Clock_Style + "' selected");
-    form.replace("%WIDECLOCKOPTIONS%", clockOptions);
-    server.sendContent(form);
-  }
-
-  sendFooter();
-
-  server.sendContent("");
-  server.client().stop();
-  digitalWrite(externalLight, HIGH);
 }
 
 void handleConfigure() {
@@ -758,9 +699,6 @@ void sendHeader() {
   server.sendContent(html);
 
   server.sendContent(FPSTR(WEB_ACTIONS1));
-  if (numberOfHorizontalDisplays >= 8) {
-    server.sendContent("<a class='w3-bar-item w3-button' href='/configurewideclock'><i class='far fa-clock'></i> Wide Clock</a>");
-  }
   server.sendContent(FPSTR(WEB_ACTIONS2));
   if (displayOn) {
     server.sendContent("<i class='fas fa-eye-slash'></i> Turn Display OFF");
@@ -1032,7 +970,6 @@ void savePersistentConfig() {
     f.println("isFlash=" + String(flashOnSeconds));
     f.println("is24hour=" + String(IS_24HOUR));
     f.println("isPM=" + String(IS_PM));
-    f.println("wideclockformat=" + Wide_Clock_Style);
     f.println("isMetric=" + String(IS_METRIC));
     f.println("refreshRate=" + String(minutesBetweenDataRefresh));
     f.println("minutesBetweenScrolling=" + String(minutesBetweenScrolling));
@@ -1101,11 +1038,6 @@ void readPersistentConfig() {
     if (line.indexOf("isPM=") >= 0) {
       IS_PM = line.substring(line.lastIndexOf("isPM=") + 5).toInt();
       Serial.println("IS_PM=" + String(IS_PM));
-    }
-    if (line.indexOf("wideclockformat=") >= 0) {
-      Wide_Clock_Style = line.substring(line.lastIndexOf("wideclockformat=") + 16);
-      Wide_Clock_Style.trim();
-      Serial.println("Wide_Clock_Style=" + Wide_Clock_Style);
     }
     if (line.indexOf("isMetric=") >= 0) {
       IS_METRIC = line.substring(line.lastIndexOf("isMetric=") + 9).toInt();
