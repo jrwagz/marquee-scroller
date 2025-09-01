@@ -93,9 +93,6 @@ const int numberOfVerticalDisplays = 1; // default 1 for a single row height
 */
 int ledRotation = 3;
 
-boolean ENABLE_OTA = true;    // this will allow you to load firmware to the device over WiFi (see OTA for ESP8266)
-String OTA_Password = "";     // Set an OTA password here -- leave blank if you don't want to be prompted for password
-
 //******************************
 // End Settings
 //******************************

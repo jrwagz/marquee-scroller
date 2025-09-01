@@ -194,30 +194,26 @@ void setup() {
   Serial.print(getWifiQuality());
   Serial.println("%");
 
-  if (ENABLE_OTA) {
-    ArduinoOTA.onStart([]() {
-      Serial.println("Start");
-    });
-    ArduinoOTA.onEnd([]() {
-      Serial.println("\nEnd");
-    });
-    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-      Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
-    });
-    ArduinoOTA.onError([](ota_error_t error) {
-      Serial.printf("Error[%u]: ", error);
-      if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
-      else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
-      else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
-      else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
-      else if (error == OTA_END_ERROR) Serial.println("End Failed");
-    });
-    ArduinoOTA.setHostname((const char *)hostname.c_str());
-    if (OTA_Password != "") {
-      ArduinoOTA.setPassword(((const char *)OTA_Password.c_str()));
-    }
-    ArduinoOTA.begin();
-  }
+  // OTA Updater is always enabled without password requirement
+  ArduinoOTA.onStart([]() {
+    Serial.println("Start");
+  });
+  ArduinoOTA.onEnd([]() {
+    Serial.println("\nEnd");
+  });
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+  });
+  ArduinoOTA.onError([](ota_error_t error) {
+    Serial.printf("Error[%u]: ", error);
+    if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
+    else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
+    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
+    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
+    else if (error == OTA_END_ERROR) Serial.println("End Failed");
+  });
+  ArduinoOTA.setHostname((const char *)hostname.c_str());
+  ArduinoOTA.begin();
 
   // Web Server is always enabled
   server.on("/", displayHomePage);
@@ -320,9 +316,8 @@ void loop() {
 
   // Web Server is always enabled
   server.handleClient();
-  if (ENABLE_OTA) {
-    ArduinoOTA.handle();
-  }
+  // OTA Updater is always enabled
+  ArduinoOTA.handle();
 }
 
 String zeroPad(int value) {
@@ -1014,9 +1009,8 @@ void scrollMessage(String msg) {
   for ( int i = 0 ; i < width * msg.length() + matrix.width() - 1 - spacer; i++ ) {
     // Web server is always enabled
     server.handleClient();
-    if (ENABLE_OTA) {
-      ArduinoOTA.handle();
-    }
+    // OTA Updater is always enabled
+    ArduinoOTA.handle();
     matrix.fillScreen(LOW);
 
     int letter = i / width;
