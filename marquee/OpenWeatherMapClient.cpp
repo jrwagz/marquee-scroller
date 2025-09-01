@@ -84,7 +84,7 @@ int OpenWeatherMapClient::setGeoLocation(const String &location) {
     // USE http://api.openweathermap.org/data/2.5/weather?q={city-name},{state-code},{country-code}&appid={API-key}
     // those will also get the lat,lon
   }
-  Serial.println("Final myGeoLocationType="+String(myGeoLocationType));
+  // Serial.println("Final myGeoLocationType="+String(myGeoLocationType));
   return (myGeoLocationType <= LOC_UNKNOWN);
 }
 
