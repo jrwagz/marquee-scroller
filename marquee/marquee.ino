@@ -27,7 +27,7 @@
 
 #include "Settings.h"
 
-#define VERSION "3.06.0-wagfam"
+#define VERSION "3.07.0-wagfam"
 
 #define HOSTNAME "CLOCK-"
 #define CONFIG "/conf.txt"
@@ -63,6 +63,7 @@ void scrollMessageWait(const String &msg);
 void centerPrint(const String &msg, bool extraStuff = false);
 String EncodeUrlSpecialChars(const char *msg);
 
+void handleUpdateFromUrl();
 
 // LED Settings
 int spacer = 1;  // dots between letters
@@ -136,6 +137,14 @@ static const char CHANGE_FORM3[] PROGMEM = "<p><input name='isPM' class='w3-chec
                       "<p>Display Scroll Speed <select class='w3-option w3-padding' name='scrollspeed'>%SCROLLOPTIONS%</select></p>"
                       "<p>Minutes Between Refresh Data <select class='w3-option w3-padding' name='refresh'>%OPTIONS%</select></p>"
                       "<p>Minutes Between Scrolling Data <input class='w3-border w3-margin-bottom' name='refreshDisplay' type='number' min='1' max='10' value='%REFRESH_DISPLAY%'></p>";
+
+static const char CHANGE_FORM4[] PROGMEM = "<p><button class='w3-button w3-block w3-green w3-section w3-padding' type='submit'>Save</button></p></form>"
+                      "<script>function isNumberKey(e){var h=e.which?e.which:event.keyCode;return!(h>31&&(h<48||h>57))}</script>";
+
+static const char UPDATE_FORM[] PROGMEM = "<form class='w3-container' action='/updateFromUrl' method='get'><h2>Firmware Update Options:</h2>"
+                      "<p><label>Firmware Update URL (optional)</label><input class='w3-input w3-border w3-margin-bottom' type='url' name='firmwareUrl' placeholder='https://example.com/firmware.bin' maxlength='256' required></p>"
+                      "<p><button class='w3-button w3-block w3-blue w3-section w3-padding' type='submit'>Update from URL</button></p>"
+                      "<p><small>Note: You can also use the <a href='/update'>Firmware Update</a> page to upload a file directly.</small></p></form>";
 
 const int TIMEOUT = 500; // 500 = 1/2 second
 int timeoutCount = 0;
@@ -236,6 +245,7 @@ void setup() {
   server.on("/forgetwifi", handleForgetWifi);
   server.on("/configure", handleConfigure);
   server.on("/saveconfig", handleSaveConfig);
+  server.on("/updateFromUrl", handleUpdateFromUrl);
   server.onNotFound(redirectHome);
   // Setup the update endpoint and don't require a username/password
   serverUpdater.setup(&server, "/update", "", "");
@@ -505,10 +515,88 @@ void handleConfigure() {
 
   server.sendContent(form); // Send another chunk of the form
 
+  server.sendContent(FPSTR(CHANGE_FORM4)); // Send another chunk of the for
+
+  // Add the firmware update form
+  form = FPSTR(UPDATE_FORM);
+  server.sendContent(form); // Send the update form
+
   sendFooter();
 
   server.sendContent("");
   server.client().stop();
+  digitalWrite(externalLight, HIGH);
+}
+
+void handleUpdateFromUrl() {
+  String firmwareUrl = server.arg("firmwareUrl");
+  server.sendHeader("Cache-Control", "no-cache, no-store");
+  server.sendHeader("Pragma", "no-cache");
+  server.sendHeader("Expires", "-1");
+  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server.send(200, "text/html", "");
+
+  sendHeader();
+
+  int has_error = 0;
+  String error_message = "";
+
+  if (firmwareUrl == "") {
+    error_message = PSTR("Error: No firmware URL provided");
+    Serial.printf_P(PSTR("%s\n"),error_message);
+    has_error = 1;
+  }
+
+  // Validate URL format (only HTTP is supported)
+  if (!firmwareUrl.startsWith("http://")) {
+    error_message = PSTR("Error: Invalid URL format. Must start with http:// HTTPS is NOT SUPPORTED\n");
+    Serial.printf_P(PSTR("%s\n"),error_message);
+    has_error = 1;
+  }
+
+  if (has_error != 0) {
+    server.sendContent("<p>ERROR: "+error_message+"</p>");
+    sendFooter();
+    server.sendContent("");
+    server.client().stop();
+    return;
+  }
+
+  server.sendContent("<p>STARTING UPDATE from "+firmwareUrl+"</p>");
+  sendFooter();
+  server.sendContent("");
+  server.client().stop();
+
+  digitalWrite(externalLight, LOW);
+  matrix.fillScreen(LOW);
+  scrollMessageWait("   ...Updating...");
+  centerPrint("...");
+
+  // Enhanced logging for debugging
+  Serial.printf_P(PSTR("=== FIRMWARE UPDATE PROCESS STARTED ===\n"));
+  Serial.printf_P(PSTR("URL: %s\n"), firmwareUrl.c_str());
+
+  t_httpUpdate_return ret;
+
+  WiFiClient client;
+  ret = ESPhttpUpdate.update(client, firmwareUrl);
+
+  // IF WE GET HERE IT MEANS OUR UPDATE DIDN'T TAKE!!!!
+  Serial.printf_P(PSTR("ERROR: ESPhttpUpdate.update() failed! Return value: %d \n"), ret);
+
+  switch (ret) {
+    case HTTP_UPDATE_FAILED:
+      Serial.printf_P(PSTR("ERROR: Update failed: %s\n"),ESPhttpUpdate.getLastErrorString());
+      Serial.printf_P(PSTR("Last error code: %d \n"), ESPhttpUpdate.getLastError());
+      break;
+    case HTTP_UPDATE_NO_UPDATES:
+      Serial.printf_P(PSTR("INFO: No updates available\n"));
+      break;
+    default:
+      Serial.printf_P(PSTR("ERROR: Update failed with unknown error code: %d \n"),ret);
+      break;
+  }
+
   digitalWrite(externalLight, HIGH);
 }
 
