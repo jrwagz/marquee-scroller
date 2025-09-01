@@ -115,17 +115,6 @@ static const char CHANGE_FORM3[] PROGMEM = "<p><input name='isPM' class='w3-chec
                       "<p>Minutes Between Refresh Data <select class='w3-option w3-padding' name='refresh'>%OPTIONS%</select></p>"
                       "<p>Minutes Between Scrolling Data <input class='w3-border w3-margin-bottom' name='refreshDisplay' type='number' min='1' max='10' value='%REFRESH_DISPLAY%'></p>";
 
-static const char CHANGE_FORM4[] PROGMEM = "<hr><p><input name='isBasicAuth' class='w3-check w3-margin-top' type='checkbox' %IS_BASICAUTH_CHECKED%> Use Security Credentials for Configuration Changes</p>"
-                      "<p><label>Marquee User ID (for this web interface)</label><input class='w3-input w3-border w3-margin-bottom' type='text' name='userid' value='%USERID%' maxlength='20'></p>"
-                      "<p><label>Marquee Password </label><input class='w3-input w3-border w3-margin-bottom' type='password' name='stationpassword' value='%STATIONPASSWORD%'></p>"
-                      "<p><button class='w3-button w3-block w3-green w3-section w3-padding' type='submit'>Save</button></p></form>"
-                      "<script>function isNumberKey(e){var h=e.which?e.which:event.keyCode;return!(h>31&&(h<48||h>57))}</script>";
-
-static const char WIDECLOCK_FORM[] PROGMEM = "<form class='w3-container' action='/savewideclock' method='get'><h2>Wide Clock Configuration:</h2>"
-                          "<p>Wide Clock Display Format <select class='w3-option w3-padding' name='wideclockformat'>%WIDECLOCKOPTIONS%</select></p>"
-                          "<button class='w3-button w3-block w3-grey w3-section w3-padding' type='submit'>Save</button></form>";
-
-
 const int TIMEOUT = 500; // 500 = 1/2 second
 int timeoutCount = 0;
 
@@ -239,7 +228,8 @@ void setup() {
   server.on("/saveconfig", handleSaveConfig);
   server.on("/display", handleDisplay);
   server.onNotFound(redirectHome);
-  serverUpdater.setup(&server, "/update", www_username, www_password);
+  // Setup the update endpoint and don't require a username/password
+  serverUpdater.setup(&server, "/update", "", "");
   // Start the server
   server.begin();
   Serial.println("Server started");
@@ -359,22 +349,12 @@ String secondsIndicator(boolean isRefresh) {
   return rtnValue;
 }
 
-boolean authentication() {
-  if (IS_BASIC_AUTH) {
-    return server.authenticate(www_username, www_password);
-  }
-  return true; // Authentication not required
-}
-
 void handlePull() {
   getWeatherData(); // this will force a data pull for new weather
   displayHomePage();
 }
 
 void handleSaveConfig() {
-  if (!authentication()) {
-    return server.requestAuthentication();
-  }
   WAGFAM_DATA_URL = server.arg("wagFamDataSource");
   WAGFAM_API_KEY = server.arg("wagFamApiKey");
   bdayClient.updateBdayClient(WAGFAM_API_KEY,WAGFAM_DATA_URL);
@@ -396,11 +376,6 @@ void handleSaveConfig() {
   minutesBetweenDataRefresh = server.arg("refresh").toInt();
   minutesBetweenScrolling = server.arg("refreshDisplay").toInt();
   displayScrollSpeed = server.arg("scrollspeed").toInt();
-  IS_BASIC_AUTH = server.hasArg("isBasicAuth");
-  String temp = server.arg("userid");
-  temp.toCharArray(www_username, sizeof(temp));
-  temp = server.arg("stationpassword");
-  temp.toCharArray(www_password, sizeof(temp));
   weatherClient.setMetric(IS_METRIC);
   weatherClient.setGeoLocation(geoLocation);
   matrix.fillScreen(LOW); // show black
@@ -410,9 +385,6 @@ void handleSaveConfig() {
 }
 
 void handleSystemReset() {
-  if (!authentication()) {
-    return server.requestAuthentication();
-  }
   Serial.println("Reset System Configuration");
   if (SPIFFS.remove(CONFIG)) {
     redirectHome();
@@ -421,9 +393,6 @@ void handleSystemReset() {
 }
 
 void handleForgetWifi() {
-  if (!authentication()) {
-    return server.requestAuthentication();
-  }
   //WiFiManager
   //Local intialization. Once its business is done, there is no need to keep it around
   redirectHome();
@@ -433,9 +402,6 @@ void handleForgetWifi() {
 }
 
 void handleConfigure() {
-  if (!authentication()) {
-    return server.requestAuthentication();
-  }
   digitalWrite(externalLight, LOW);
   String html = "";
   server.sendHeader("Cache-Control", "no-cache, no-store");
@@ -535,17 +501,6 @@ void handleConfigure() {
 
   server.sendContent(form); // Send another chunk of the form
 
-  form = FPSTR(CHANGE_FORM4);
-  String isUseSecurityChecked = "";
-  if (IS_BASIC_AUTH) {
-    isUseSecurityChecked = "checked='checked'";
-  }
-  form.replace("%IS_BASICAUTH_CHECKED%", isUseSecurityChecked);
-  form.replace("%USERID%", String(www_username));
-  form.replace("%STATIONPASSWORD%", String(www_password));
-
-  server.sendContent(form); // Send another chunk of the form
-
   sendFooter();
 
   server.sendContent("");
@@ -554,9 +509,6 @@ void handleConfigure() {
 }
 
 void handleDisplay() {
-  if (!authentication()) {
-    return server.requestAuthentication();
-  }
   enableDisplay(!displayOn);
   String state = "OFF";
   if (displayOn) {
@@ -933,9 +885,6 @@ void savePersistentConfig() {
     f.println("isMetric=" + String(IS_METRIC));
     f.println("refreshRate=" + String(minutesBetweenDataRefresh));
     f.println("minutesBetweenScrolling=" + String(minutesBetweenScrolling));
-    f.println("www_username=" + String(www_username));
-    f.println("www_password=" + String(www_password));
-    f.println("IS_BASIC_AUTH=" + String(IS_BASIC_AUTH));
     f.println("SHOW_CITY=" + String(SHOW_CITY));
     f.println("SHOW_CONDITION=" + String(SHOW_CONDITION));
     f.println("SHOW_HUMIDITY=" + String(SHOW_HUMIDITY));
@@ -1022,22 +971,6 @@ void readPersistentConfig() {
     if (line.indexOf("scrollSpeed=") >= 0) {
       displayScrollSpeed = line.substring(line.lastIndexOf("scrollSpeed=") + 12).toInt();
       Serial.println("displayScrollSpeed=" + String(displayScrollSpeed));
-    }
-    if (line.indexOf("www_username=") >= 0) {
-      String temp = line.substring(line.lastIndexOf("www_username=") + 13);
-      temp.trim();
-      temp.toCharArray(www_username, sizeof(temp));
-      Serial.println("www_username=" + String(www_username));
-    }
-    if (line.indexOf("www_password=") >= 0) {
-      String temp = line.substring(line.lastIndexOf("www_password=") + 13);
-      temp.trim();
-      temp.toCharArray(www_password, sizeof(temp));
-      Serial.println("www_password=" + String(www_password));
-    }
-    if (line.indexOf("IS_BASIC_AUTH=") >= 0) {
-      IS_BASIC_AUTH = line.substring(line.lastIndexOf("IS_BASIC_AUTH=") + 14).toInt();
-      Serial.println("IS_BASIC_AUTH=" + String(IS_BASIC_AUTH));
     }
     if (line.indexOf("SHOW_CITY=") >= 0) {
       SHOW_CITY = line.substring(line.lastIndexOf("SHOW_CITY=") + 10).toInt();
