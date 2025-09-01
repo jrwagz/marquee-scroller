@@ -91,7 +91,6 @@ static const char CHANGE_FORM1[] PROGMEM = "<form class='w3-container' action='/
                       "<input class='w3-input w3-border w3-margin-bottom' type='text' name='wagFamDataSource' value='%WAGFAMDATASOURCE%' maxlength='256'>"
                       "<label>WagFam Calendar API Key</label>"
                       "<input class='w3-input w3-border w3-margin-bottom' type='text' name='wagFamApiKey' value='%WAGFAMAPIKEY%' maxlength='128'>"
-                      "<p><input name='enwagfam' class='w3-check w3-margin-top' type='checkbox' %WAGFAM_ENABLED%> Enable WagFam Calendar</p>"
                       "<hr>";
 
 static const char CHANGE_FORM2[] PROGMEM = "<label>TimeZone DB API Key (get from <a href='https://timezonedb.com/register' target='_BLANK'>here</a>)</label>"
@@ -327,12 +326,11 @@ void loop() {
 
       msg += marqueeMessage + " ";
 
-      if (WAGFAM_ENABLED) {
-        msg += " " + bdayClient.getMessage(bdayMessageIndex) + " ";
-        bdayMessageIndex += 1;
-        if (bdayMessageIndex >= bdayClient.getNumMessages()) {
-          bdayMessageIndex = 0;
-        }
+      // WAGFAM Calendar Specific display
+      msg += " " + bdayClient.getMessage(bdayMessageIndex) + " ";
+      bdayMessageIndex += 1;
+      if (bdayMessageIndex >= bdayClient.getNumMessages()) {
+        bdayMessageIndex = 0;
       }
       scrollMessage(msg);
     }
@@ -419,7 +417,6 @@ void handleSaveConfig() {
   }
   WAGFAM_DATA_URL = server.arg("wagFamDataSource");
   WAGFAM_API_KEY = server.arg("wagFamApiKey");
-  WAGFAM_ENABLED = server.hasArg("enwagfam");
   bdayClient.updateBdayClient(WAGFAM_API_KEY,WAGFAM_DATA_URL);
   TIMEDBKEY = server.arg("TimeZoneDB");
   APIKEY = server.arg("openWeatherMapApiKey");
@@ -525,12 +522,6 @@ void handleConfigure() {
   String form = FPSTR(CHANGE_FORM1);
   form.replace("%WAGFAMDATASOURCE%", WAGFAM_DATA_URL);
   form.replace("%WAGFAMAPIKEY%", WAGFAM_API_KEY);
-
-  String isWagFamEnabled = "";
-  if (WAGFAM_ENABLED) {
-    isWagFamEnabled = "checked='checked'";
-  }
-  form.replace("%WAGFAM_ENABLED%", isWagFamEnabled);
   server.sendContent(form); // Send another chunk of the form
 
 
@@ -695,27 +686,25 @@ void getWeatherData() //client function to send/receive GET request data.
     Serial.println("firstEpoch is: " + String(firstEpoch));
   }
 
-  if (WAGFAM_ENABLED) {
-    serverConfig = bdayClient.updateData();
-    bool needToSave = false;
-    if (serverConfig.dataSourceUrlValid) {
-      WAGFAM_DATA_URL = serverConfig.dataSourceUrl;
-      lastEpoch = 0; // this should force a data pull, since with a new URL that's required
-      needToSave = true;
-    }
-    if (serverConfig.apiKeyValid) {
-      WAGFAM_API_KEY = serverConfig.apiKey;
-      lastEpoch = 0; // this should force a data pull, since with a new API_KEY that's required
-      needToSave = true;
-    }
-    if (serverConfig.eventTodayValid) {
-      WAGFAM_EVENT_TODAY = serverConfig.eventToday;
-      needToSave = true;
-    }
-    if (needToSave) {
-      Serial.println("Saving new config received from server");
-      savePersistentConfig();
-    }
+  serverConfig = bdayClient.updateData();
+  bool needToSave = false;
+  if (serverConfig.dataSourceUrlValid) {
+    WAGFAM_DATA_URL = serverConfig.dataSourceUrl;
+    lastEpoch = 0; // this should force a data pull, since with a new URL that's required
+    needToSave = true;
+  }
+  if (serverConfig.apiKeyValid) {
+    WAGFAM_API_KEY = serverConfig.apiKey;
+    lastEpoch = 0; // this should force a data pull, since with a new API_KEY that's required
+    needToSave = true;
+  }
+  if (serverConfig.eventTodayValid) {
+    WAGFAM_EVENT_TODAY = serverConfig.eventToday;
+    needToSave = true;
+  }
+  if (needToSave) {
+    Serial.println("Saving new config received from server");
+    savePersistentConfig();
   }
 
   Serial.println("Version: " + String(VERSION));
@@ -1031,7 +1020,6 @@ void savePersistentConfig() {
     Serial.println("Saving settings now...");
     f.println("WAGFAM_DATA_URL=" + WAGFAM_DATA_URL);
     f.println("WAGFAM_API_KEY=" + WAGFAM_API_KEY);
-    f.println("WAGFAM_ENABLED=" + String(WAGFAM_ENABLED));
     f.println("WAGFAM_EVENT_TODAY=" + String(WAGFAM_EVENT_TODAY));
     f.println("TIMEDBKEY=" + TIMEDBKEY);
     f.println("APIKEY=" + APIKEY);
@@ -1082,10 +1070,6 @@ void readPersistentConfig() {
       WAGFAM_API_KEY = line.substring(line.lastIndexOf("WAGFAM_API_KEY=") + 15);
       WAGFAM_API_KEY.trim();
       Serial.println("WAGFAM_API_KEY: " + WAGFAM_API_KEY);
-    }
-    if (line.indexOf("WAGFAM_ENABLED=") >= 0) {
-      WAGFAM_ENABLED = line.substring(line.lastIndexOf("WAGFAM_ENABLED=") + 15).toInt();
-      Serial.println("WAGFAM_ENABLED: " + String(WAGFAM_ENABLED));
     }
     if (line.indexOf("WAGFAM_EVENT_TODAY=") >= 0) {
       WAGFAM_EVENT_TODAY = line.substring(line.lastIndexOf("WAGFAM_EVENT_TODAY=") + 19).toInt();
