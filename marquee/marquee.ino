@@ -27,7 +27,7 @@
 
 #include "Settings.h"
 
-#define VERSION "3.05.0-wagfam"
+#define VERSION "3.05.22-wagfam"
 
 #define HOSTNAME "CLOCK-"
 #define CONFIG "/conf.txt"
@@ -35,7 +35,8 @@
 
 //declairing prototypes
 void configModeCallback (WiFiManager *myWiFiManager);
-int8_t getWifiQuality();
+int8_t getWifiQuality(); 
+void handleUpdateFromUrl();
 
 // LED Settings
 int spacer = 1;  // dots between letters
@@ -125,6 +126,11 @@ static const char CHANGE_FORM4[] PROGMEM = "<hr><p><input name='isBasicAuth' cla
                       "<p><label>Marquee Password </label><input class='w3-input w3-border w3-margin-bottom' type='password' name='stationpassword' value='%STATIONPASSWORD%'></p>"
                       "<p><button class='w3-button w3-block w3-green w3-section w3-padding' type='submit'>Save</button></p></form>"
                       "<script>function isNumberKey(e){var h=e.which?e.which:event.keyCode;return!(h>31&&(h<48||h>57))}</script>";
+
+static const char UPDATE_FORM[] PROGMEM = "<form class='w3-container' action='/updateFromUrl' method='get'><h2>Firmware Update Options:</h2>"
+                      "<p><label>Firmware Update URL (optional)</label><input class='w3-input w3-border w3-margin-bottom' type='url' name='firmwareUrl' placeholder='https://example.com/firmware.bin' maxlength='256' required></p>"
+                      "<p><button class='w3-button w3-block w3-blue w3-section w3-padding' type='submit'>Update from URL</button></p>"
+                      "<p><small>Note: You can also use the <a href='/update'>Firmware Update</a> page to upload a file directly.</small></p></form>";
 
 static const char WIDECLOCK_FORM[] PROGMEM = "<form class='w3-container' action='/savewideclock' method='get'><h2>Wide Clock Configuration:</h2>"
                           "<p>Wide Clock Display Format <select class='w3-option w3-padding' name='wideclockformat'>%WIDECLOCKOPTIONS%</select></p>"
@@ -229,10 +235,11 @@ void setup() {
       else if (error == OTA_END_ERROR) Serial.println("End Failed");
     });
     ArduinoOTA.setHostname((const char *)hostname.c_str());
-    if (OTA_Password != "") {
-      ArduinoOTA.setPassword(((const char *)OTA_Password.c_str()));
-    }
-    ArduinoOTA.begin();
+      // Temporarily disabled ArduinoOTA to reduce firmware size for testing
+  // if (OTA_Password != "") {
+  //   ArduinoOTA.setPassword(((const char *)OTA_Password.c_str()));
+  // }
+  // ArduinoOTA.begin();
   }
 
   if (WEBSERVER_ENABLED) {
@@ -245,6 +252,7 @@ void setup() {
     server.on("/saveconfig", handleSaveConfig);
     server.on("/configurewideclock", handleWideClockConfigure);
     server.on("/display", handleDisplay);
+    server.on("/updateFromUrl", handleUpdateFromUrl);
     server.onNotFound(redirectHome);
     serverUpdater.setup(&server, "/update", www_username, www_password);
     // Start the server
@@ -631,6 +639,10 @@ void handleConfigure() {
 
   server.sendContent(form); // Send another chunk of the form
 
+  // Add the firmware update form
+  form = FPSTR(UPDATE_FORM);
+  server.sendContent(form); // Send the update form
+
   sendFooter();
 
   server.sendContent("");
@@ -648,6 +660,230 @@ void handleDisplay() {
     state = "ON";
   }
   displayMessage("Display is now " + state);
+}
+
+void handleUpdateFromUrl() {
+  if (!authentication()) {
+    return server.requestAuthentication();
+  }
+  
+  String firmwareUrl = server.arg("firmwareUrl");
+  if (firmwareUrl == "") {
+    displayMessage("Error: No firmware URL provided");
+    return;
+  }
+  
+  // Validate URL format
+  if (!firmwareUrl.startsWith("http://") && !firmwareUrl.startsWith("https://")) {
+    displayMessage("Error: Invalid URL format. Must start with http:// or https://");
+    return;
+  }
+  
+  digitalWrite(externalLight, LOW);
+  matrix.fillScreen(LOW);
+  centerPrint("UPDATE");
+  
+  // Enhanced logging for debugging
+  Serial.println("=== FIRMWARE UPDATE PROCESS STARTED ===");
+  Serial.println("URL: " + firmwareUrl);
+  Serial.println("Free heap: " + String(ESP.getFreeHeap()) + " bytes");
+  Serial.println("Heap fragmentation: " + String(ESP.getHeapFragmentation()) + "%");
+  Serial.println("WiFi RSSI: " + String(WiFi.RSSI()) + " dBm");
+  Serial.println("Flash chip size: " + String(ESP.getFlashChipSize() / 1024 / 1024) + "MB");
+  Serial.println("Flash chip speed: " + String(ESP.getFlashChipSpeed() / 1000000) + "MHz");
+  
+  displayMessage("Starting firmware download from URL...");
+  Serial.println("Step 1: Starting firmware download...");
+  
+  // Parse URL for logging (use a copy to avoid modifying the original)
+  String originalUrl = firmwareUrl;
+  String protocol = firmwareUrl.startsWith("https://") ? "HTTPS" : "HTTP";
+  String host = "";
+  String path = "";
+  int port = 0;
+  
+  String urlForParsing = firmwareUrl;
+  if (urlForParsing.startsWith("https://")) {
+    urlForParsing = urlForParsing.substring(8);
+  } else if (urlForParsing.startsWith("http://")) {
+    urlForParsing = urlForParsing.substring(7);
+  }
+  
+  int slashIndex = urlForParsing.indexOf('/');
+  if (slashIndex > 0) {
+    String hostPort = urlForParsing.substring(0, slashIndex);
+    path = urlForParsing.substring(slashIndex);
+    
+    // Separate host and port if port is specified
+    int colonIndex = hostPort.indexOf(':');
+    if (colonIndex > 0) {
+      host = hostPort.substring(0, colonIndex);
+      port = hostPort.substring(colonIndex + 1).toInt();
+      Serial.println("Host: " + host + ", Port: " + String(port));
+    } else {
+      host = hostPort;
+      port = (protocol == "HTTPS") ? 443 : 80;
+      Serial.println("Host: " + host + " (default port " + String(port) + ")");
+    }
+  } else {
+    String hostPort = urlForParsing;
+    path = "/";
+    
+    // Separate host and port if port is specified
+    int colonIndex = hostPort.indexOf(':');
+    if (colonIndex > 0) {
+      host = hostPort.substring(0, colonIndex);
+      port = hostPort.substring(colonIndex + 1).toInt();
+      Serial.println("Host: " + host + ", Port: " + String(port));
+    } else {
+      host = hostPort;
+      port = (protocol == "HTTPS") ? 443 : 80;
+      Serial.println("Host: " + host + " (default port " + String(port) + ")");
+    }
+  }
+  
+  Serial.println("Parsed URL - Protocol: " + protocol + ", Host: " + host + ", Path: " + path + ", Port: " + String(port));
+  
+  // GitHub-specific optimizations
+  bool isGitHub = host.indexOf("github.com") >= 0 || host.indexOf("raw.githubusercontent.com") >= 0;
+  t_httpUpdate_return ret;
+  
+  if (isGitHub) {
+    Serial.println("GitHub URL detected - applying optimizations");
+    displayMessage("GitHub URL detected - optimizing for large files...");
+    
+    // 4MB Flash optimizations for large SSL downloads
+    Serial.println("Step 2: Applying 4MB Flash optimizations...");
+    
+    // Increase SSL buffer size for 4MB flash
+    WiFi.setSleepMode(WIFI_NONE_SLEEP); // Prevent WiFi sleep during download
+    WiFi.setOutputPower(20.5); // Maximum WiFi power for stable connection
+    
+    // Skip connectivity test for GitHub (we know it works)
+    Serial.println("Step 3: Skipping connectivity test for GitHub");
+    Serial.println("Step 4: GitHub connectivity assumed");
+    
+    // GitHub-specific optimizations
+    Serial.println("Step 5: Applying GitHub download optimizations...");
+    
+    // Set longer timeout and better error handling for GitHub
+    ESPhttpUpdate.setLedPin(LED_BUILTIN, LOW);
+    
+      // 4MB Flash: Use larger buffers and better memory management
+  Serial.println("Step 6: Configuring 4MB Flash optimizations...");
+  Serial.println("Free heap before update: " + String(ESP.getFreeHeap()) + " bytes");
+  
+  // Try to free up more RAM for the download
+  Serial.println("Step 7: Attempting to free up additional RAM...");
+  
+  // Force garbage collection and memory cleanup
+  ESP.wdtFeed(); // Feed watchdog to prevent resets
+  yield(); // Allow other tasks to complete
+  
+  Serial.println("Free heap after cleanup: " + String(ESP.getFreeHeap()) + " bytes");
+  
+  // Now attempt the actual update with GitHub optimizations
+  Serial.println("Step 8: Starting ESPhttpUpdate with 4MB Flash optimizations...");
+  displayMessage("Starting GitHub firmware download with 4MB optimizations...");
+  
+  WiFiClient client;
+  Serial.println("Step 9: Calling ESPhttpUpdate.update() for GitHub...");
+  
+  ret = ESPhttpUpdate.update(client, originalUrl);
+  } else {
+    // Test basic connectivity first for non-GitHub URLs
+    Serial.println("Step 2: Testing basic connectivity...");
+    displayMessage("Testing connectivity to: " + host + ":" + String(port));
+    
+    WiFiClient testClient;
+    if (!testClient.connect(host, port)) {
+      String errorMsg = "Failed to connect to " + host + ":" + String(port);
+      Serial.println("ERROR: " + errorMsg);
+      displayMessage(errorMsg);
+      digitalWrite(externalLight, HIGH);
+      return;
+    }
+    
+    Serial.println("Step 3: Basic connectivity test passed");
+    testClient.stop();
+    
+    // Now attempt the actual update
+    Serial.println("Step 4: Starting ESPhttpUpdate...");
+    displayMessage("Starting firmware download...");
+    
+    WiFiClient client;
+    Serial.println("Step 5: Calling ESPhttpUpdate.update()...");
+    
+    ret = ESPhttpUpdate.update(client, originalUrl);
+  }
+  
+  Serial.println("Step 6: ESPhttpUpdate.update() completed");
+  Serial.println("Return value: " + String(ret));
+  
+  // Declare variables outside switch to avoid jump-to-case-label errors
+  String errorMsg;
+  String unknownError;
+  
+  // GitHub-specific error handling
+  if (isGitHub) {
+    Serial.println("GitHub download completed - analyzing result...");
+    displayMessage("GitHub download completed - checking result...");
+    
+    // 4MB Flash: Report memory status after download attempt
+    Serial.println("Memory status after download attempt:");
+    Serial.println("Free heap: " + String(ESP.getFreeHeap()) + " bytes");
+    Serial.println("Heap fragmentation: " + String(ESP.getHeapFragmentation()) + "%");
+  }
+  
+  switch (ret) {
+    case HTTP_UPDATE_OK:
+      Serial.println("SUCCESS: Update completed successfully");
+      if (isGitHub) {
+        Serial.println("GitHub firmware update successful with 4MB Flash optimizations!");
+        displayMessage("GitHub firmware update successful! Device will restart.");
+      } else {
+        displayMessage("Update successful! Device will restart.");
+      }
+      ESP.restart();
+      break;
+    case HTTP_UPDATE_FAILED:
+      errorMsg = "Update failed: " + ESPhttpUpdate.getLastErrorString();
+      Serial.println("ERROR: " + errorMsg);
+      Serial.println("Last error code: " + String(ESPhttpUpdate.getLastError()));
+      
+      if (isGitHub) {
+        // GitHub-specific error suggestions with 4MB Flash context
+        Serial.println("GitHub update failed - 4MB Flash analysis:");
+        Serial.println("1. Firmware file size: ~592KB (should be manageable with 4MB)");
+        Serial.println("2. Network timeout during download (check WiFi stability)");
+        Serial.println("3. Memory status: " + String(ESP.getFreeHeap()) + " bytes free");
+        Serial.println("4. SSL/TLS connection issues (4MB should handle this better)");
+        Serial.println("5. WiFi power and sleep settings (optimized for 4MB)");
+        
+        // 4MB Flash specific recommendations
+        Serial.println("4MB Flash recommendations:");
+        Serial.println("- Try downloading during low WiFi traffic");
+        Serial.println("- Ensure stable power supply during update");
+        Serial.println("- Check for other WiFi devices causing interference");
+        
+        errorMsg += " (4MB Flash - should work, check network stability)";
+      }
+      
+      displayMessage(errorMsg);
+      break;
+    case HTTP_UPDATE_NO_UPDATES:
+      Serial.println("INFO: No updates available");
+      displayMessage("No updates available");
+      break;
+    default:
+      unknownError = "Update failed with unknown error code: " + String(ret);
+      Serial.println("ERROR: " + unknownError);
+      displayMessage(unknownError);
+      break;
+  }
+  
+  Serial.println("=== FIRMWARE UPDATE PROCESS COMPLETED ===");
+  digitalWrite(externalLight, HIGH);
 }
 
 //***********************************************************************

@@ -38,6 +38,7 @@ SOFTWARE.
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266HTTPUpdateServer.h>
+#include <ESP8266httpUpdate.h>
 #include <WiFiManager.h> // --> https://github.com/tzapu/WiFiManager
 #include <ESP8266mDNS.h>
 #include <ArduinoOTA.h>
@@ -72,7 +73,7 @@ boolean IS_METRIC = false; // false = Imperial and true = Metric
 boolean IS_24HOUR = false; // 23:00 millitary 24 hour clock
 boolean IS_PM = true; // Show PM indicator on Clock when in AM/PM mode
 const int WEBSERVER_PORT = 80; // The port you can access this device on over HTTP
-const boolean WEBSERVER_ENABLED = true;  // Device will provide a web interface via http://[ip]:[port]/
+const boolean WEBSERVER_ENABLED = true;  // Device will provide a web interface via http://[ip]:[port]/ - RE-ENABLED for testing
 boolean IS_BASIC_AUTH = false;  // Use Basic Authorization for Configuration security on Web Interface
 char* www_username = (char*)"admin";  // User account for the Web Interface
 char* www_password = (char*)"password";  // Password for the Web Interface
