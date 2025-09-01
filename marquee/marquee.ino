@@ -693,7 +693,6 @@ void displayHomePage() {
     html += temperature + " " + getTempSymbol(true) + "<br>";
     html += String(weatherClient.getTemperatureHigh(),0) + "/" + String(weatherClient.getTemperatureLow(),0) + " " + getTempSymbol(true) + "<br>";
     html += time + "<br>";
-    html += "<a href='https://www.google.com/maps/@" + String(weatherClient.getLat()) + "," + String(weatherClient.getLon()) + ",10000m/data=!3m1!1e3' target='_BLANK'><i class='fas fa-map-marker' style='color:red'></i> Map It!</a><br>";
     html += "</p></div></div><hr>";
   }
 
