@@ -47,7 +47,8 @@ SOFTWARE.
 #include <Max72xxPanel.h> // --> https://github.com/markruys/arduino-Max72xxPanel
 #include <pgmspace.h>
 #include "OpenWeatherMapClient.h"
-#include "TimeDB.h"
+#include "TimeNTP.h"
+#include "TimeStr.h"
 #include "WagFamBdayClient.h"
 
 //******************************
@@ -62,7 +63,6 @@ int TODAY_DISPLAY_DOT_SPACING = 5;  // How far apart the dots for the Today disp
 int TODAY_DISPLAY_DOT_SPEED_MS = 333; // How many milliseconds between dot moves for the today display
 
 
-String TIMEDBKEY = ""; // Your API Key from https://timezonedb.com/register
 String APIKEY = ""; // Your API Key from http://openweathermap.org/
 // Default GEO Location (use http://openweathermap.org/find to find location name being "cityname,countrycode" or "city ID" or GPS "latitude,longitude")
 String geoLocation = "";
