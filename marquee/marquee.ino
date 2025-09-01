@@ -671,7 +671,7 @@ void getWeatherData() //client function to send/receive GET request data.
   matrix.drawPixel(0, 4, HIGH);
   matrix.drawPixel(0, 3, HIGH);
   matrix.drawPixel(0, 2, HIGH);
-  Serial.println("matrix Width:" + matrix.width());
+  Serial.println("matrix Width:" + String(matrix.width()));
   matrix.write();
   TimeDB.updateConfig(TIMEDBKEY, String(weatherClient.getLat()), String(weatherClient.getLon()));
   time_t currentTime = TimeDB.getTime();
