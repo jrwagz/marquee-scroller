@@ -32,22 +32,52 @@
 #define HOSTNAME "CLOCK-"
 #define CONFIG "/conf.txt"
 
-//declairing prototypes
+//declaring prototypes
+void setup();
+void loop();
+void processEverySecond();
+void processEveryMinute();
+String hourMinutes(bool isRefresh);
+char secondsIndicator(bool isRefresh);
+void handlePull();
+void handleSaveConfig();
+void handleSystemReset();
+void handleForgetWifi();
+void handleConfigure();
+void getWeatherData();
+void redirectHome();
+void sendHeader();
+void sendFooter();
+void displayHomePage();
 void configModeCallback (WiFiManager *myWiFiManager);
+void flashLED(int number, int delayTime);
+String getTempSymbol(bool forWeb = false);
+String getSpeedSymbol();
+String getPressureSymbol();
 int8_t getWifiQuality();
+String getTimeTillUpdate();
+int getMinutesFromLastRefresh();
+void savePersistentConfig();
+void readPersistentConfig();
+void scrollMessageWait(const String &msg);
+void centerPrint(const String &msg, bool extraStuff = false);
+String EncodeUrlSpecialChars(const char *msg);
+
 
 // LED Settings
 int spacer = 1;  // dots between letters
 int width = 5 + spacer; // The font width is 5 pixels + spacer
+
+// Matrix panel
 Max72xxPanel matrix = Max72xxPanel(pinCS, numberOfHorizontalDisplays, numberOfVerticalDisplays);
-float UtcOffset;  //time zone offsets that correspond with the CityID above (offset from GMT)
 
 // Time
-TimeDB TimeDB("");
-String lastMinute = "xx";
+int lastMinute;
+int lastSecond;
 int displayRefreshCount = 1;
-long lastEpoch = 0;
-long firstEpoch = 0;
+uint32_t firstTimeSync;
+uint32_t lastRefreshDataTimestamp;
+String displayTime;
 
 // WagFam Calendar Client
 WagFamBdayClient bdayClient(WAGFAM_API_KEY, WAGFAM_DATA_URL);
@@ -87,9 +117,7 @@ static const char CHANGE_FORM1[] PROGMEM = "<form class='w3-container' action='/
                       "<input class='w3-input w3-border w3-margin-bottom' type='text' name='wagFamApiKey' value='%WAGFAMAPIKEY%' maxlength='128'>"
                       "<hr>";
 
-static const char CHANGE_FORM2[] PROGMEM = "<label>TimeZone DB API Key (get from <a href='https://timezonedb.com/register' target='_BLANK'>here</a>)</label>"
-                      "<input class='w3-input w3-border w3-margin-bottom' type='text' name='TimeZoneDB' value='%TIMEDBKEY%' maxlength='60'>"
-                      "<label>OpenWeatherMap API Key (get from <a href='https://openweathermap.org/' target='_BLANK'>here</a>)</label>"
+static const char CHANGE_FORM2[] PROGMEM = "<label>OpenWeatherMap API Key (get from <a href='https://openweathermap.org/' target='_BLANK'>here</a>)</label>"
                       "<input class='w3-input w3-border w3-margin-bottom' type='text' name='openWeatherMapApiKey' value='%WEATHERKEY%' maxlength='70'>"
                       "<p><label>%CITYNAME1% (<a href='http://openweathermap.org/find' target='_BLANK'><i class='fas fa-search'></i> Search for City ID</a>)</label>"
                       "<input class='w3-input w3-border w3-margin-bottom' type='text' name='city1' value='%CITY1%' onkeypress='return isNumberKey(event)'></p>"
@@ -139,9 +167,9 @@ void setup() {
     matrix.setPosition(i, maxPos - i - 1, 0);
   }
 
-  Serial.println("matrix created");
+  Serial.println(F("matrix created"));
   matrix.fillScreen(LOW); // show black
-  centerPrint("hello");
+  centerPrint(F("hello"));
 
   for (int inx = 0; inx <= 15; inx++) {
     matrix.setIntensity(inx);
@@ -154,7 +182,7 @@ void setup() {
   delay(1000);
   matrix.setIntensity(displayIntensity);
 
-  scrollMessage("Welcome to the Wagner Family Calendar Clock!!!");
+  scrollMessageWait(F("Welcome to the Wagner Family Calendar Clock!!!"));
 
   //WiFiManager
   //Local intialization. Once its business is done, there is no need to keep it around
@@ -177,7 +205,7 @@ void setup() {
   }
 
   // print the received signal strength:
-  Serial.print("Signal Strength (RSSI): ");
+  Serial.print(F("Signal Strength (RSSI): "));
   Serial.print(getWifiQuality());
   Serial.println("%");
 
@@ -214,11 +242,14 @@ void setup() {
   serverUpdater.setup(&server, "/update", "", "");
   // Start the server
   server.begin();
-  Serial.println("Server started");
+  Serial.println(F("Server started"));
   // Print the IP address
   String webAddress = "http://" + WiFi.localIP().toString() + ":" + String(WEBSERVER_PORT) + "/";
   Serial.println("Use this URL : " + webAddress);
-  scrollMessage(" v" + String(VERSION) + "  IP: " + WiFi.localIP().toString() + "  ");
+  scrollMessageWait(" v" + String(VERSION) + "  IP: " + WiFi.localIP().toString() + "  ");
+
+  // Start NTP , although it can't do anything while in config mode or when no WiFi AP connected
+  timeNTPsetup();
 
   flashLED(1, 500);
 }
@@ -227,76 +258,21 @@ void setup() {
 // Main Loop
 //************************************************************
 void loop() {
-  //Get some Weather Data to serve
-  if ((getMinutesFromLastRefresh() >= minutesBetweenDataRefresh) || lastEpoch == 0) {
-    getWeatherData();
+
+  if (lastSecond != second()) {
+    lastSecond = second();
+    processEverySecond();
   }
 
-  if (lastMinute != TimeDB.zeroPad(minute())) {
-    lastMinute = TimeDB.zeroPad(minute());
-
-    if (weatherClient.getErrorMessage() != "") {
-      scrollMessage(weatherClient.getErrorMessage());
-      return;
-    }
-
-    matrix.shutdown(false);
-    matrix.fillScreen(LOW); // show black
-
-    displayRefreshCount --;
-    // Check to see if we need to Scroll some Data
-    if ((displayRefreshCount <= 0) && weatherClient.getWeatherDataValid() && (weatherClient.getErrorMessage().length() == 0)) {
-      displayRefreshCount = minutesBetweenScrolling;
-      String msg = " ";
-      String temperature = String(weatherClient.getTemperature(),0);
-      String description = weatherClient.getWeatherDescription();
-      description.toUpperCase();
-
-      if (SHOW_DATE) {
-        msg += TimeDB.getDayName() + ", ";
-        msg += TimeDB.getMonthName() + " " + day() + "  ";
-      }
-      if (SHOW_CITY) {
-        msg += weatherClient.getCity() + "  ";
-        // Only show the temperature if the city is shown also
-        msg += temperature + getTempSymbol() + "  ";
-      }
-
-      //show high/low temperature
-      if (SHOW_HIGHLOW) {
-        msg += "High/Low:" + String(weatherClient.getTemperatureHigh(),0) + "/" + String(weatherClient.getTemperatureLow(),0) + " " + getTempSymbol() + " ";
-      }
-
-      if (SHOW_CONDITION) {
-        msg += description + "  ";
-      }
-      if (SHOW_HUMIDITY) {
-        msg += "Humidity:" + String(weatherClient.getHumidity()) + "%  ";
-      }
-      if (SHOW_WIND) {
-        String windspeed = String(weatherClient.getWindSpeed(),0);
-        windspeed.trim();
-        msg += "Wind: " + weatherClient.getWindDirectionText() + " " + windspeed + getSpeedSymbol() + "  ";
-      }
-      //line to show barometric pressure
-      if (SHOW_PRESSURE) {
-        msg += "Pressure:" + String(weatherClient.getPressure()) + getPressureSymbol() + "  ";
-      }
-
-      // WAGFAM Calendar Specific display
-      msg += " " + bdayClient.getMessage(bdayMessageIndex) + " ";
-      bdayMessageIndex += 1;
-      if (bdayMessageIndex >= bdayClient.getNumMessages()) {
-        bdayMessageIndex = 0;
-      }
-      scrollMessage(msg);
-    }
+  if (lastMinute != minute()) {
+    lastMinute = minute();
+    processEveryMinute();
   }
 
-  String currentTime = hourMinutes(false);
+  displayTime = hourMinutes(false);
 
   matrix.fillScreen(LOW);
-  centerPrint(currentTime, true);
+  centerPrint(displayTime, true);
 
   // Web Server is always enabled
   server.handleClient();
@@ -304,26 +280,84 @@ void loop() {
   ArduinoOTA.handle();
 }
 
-String zeroPad(int value) {
-  String rtnValue = String(value);
-  if (value < 10) {
-    rtnValue = "0" + rtnValue;
+void processEverySecond() {
+  //Get some Weather Data to serve
+  if ((getMinutesFromLastRefresh() >= minutesBetweenDataRefresh) || lastRefreshDataTimestamp == 0) {
+    getWeatherData();
   }
-  return rtnValue;
 }
 
-String hourMinutes(boolean isRefresh) {
+void processEveryMinute() {
+  if (weatherClient.getErrorMessage() != "") {
+    scrollMessageWait(weatherClient.getErrorMessage());
+    return;
+  }
+
+  matrix.shutdown(false);
+  matrix.fillScreen(LOW); // show black
+
+  displayRefreshCount --;
+  // Check to see if we need to Scroll some Data
+  if ((displayRefreshCount <= 0) && weatherClient.getWeatherDataValid() && (weatherClient.getErrorMessage().length() == 0)) {
+    displayRefreshCount = minutesBetweenScrolling;
+    String msg = " ";
+    String temperature = String(weatherClient.getTemperature(),0);
+    String description = weatherClient.getWeatherDescription();
+    description.toUpperCase();
+
+    if (SHOW_DATE) {
+      msg += getDayName(weekday()) + ", ";
+      msg += getMonthName(month()) + " " + day() + "  ";
+    }
+    if (SHOW_CITY) {
+      msg += weatherClient.getCity() + "  ";
+      // Only show the temperature if the city is shown also
+      msg += temperature + getTempSymbol() + "  ";
+    }
+
+    //show high/low temperature
+    if (SHOW_HIGHLOW) {
+      msg += "High/Low:" + String(weatherClient.getTemperatureHigh(),0) + "/" + String(weatherClient.getTemperatureLow(),0) + " " + getTempSymbol() + " ";
+    }
+
+    if (SHOW_CONDITION) {
+      msg += description + "  ";
+    }
+    if (SHOW_HUMIDITY) {
+      msg += "Humidity:" + String(weatherClient.getHumidity()) + "%  ";
+    }
+    if (SHOW_WIND) {
+      String windspeed = String(weatherClient.getWindSpeed(),0);
+      windspeed.trim();
+      msg += "Wind: " + weatherClient.getWindDirectionText() + " " + windspeed + getSpeedSymbol() + "  ";
+    }
+    //line to show barometric pressure
+    if (SHOW_PRESSURE) {
+      msg += "Pressure:" + String(weatherClient.getPressure()) + getPressureSymbol() + "  ";
+    }
+
+    // WAGFAM Calendar Specific display
+    msg += " " + bdayClient.getMessage(bdayMessageIndex) + " ";
+    bdayMessageIndex += 1;
+    if (bdayMessageIndex >= bdayClient.getNumMessages()) {
+      bdayMessageIndex = 0;
+    }
+    scrollMessageWait(msg);
+  }
+}
+
+String hourMinutes(bool isRefresh) {
   if (IS_24HOUR) {
-    return String(hour()) + secondsIndicator(isRefresh) + TimeDB.zeroPad(minute());
+    return spacePad(hour()) + secondsIndicator(isRefresh) + zeroPad(minute());
   } else {
-    return String(hourFormat12()) + secondsIndicator(isRefresh) + TimeDB.zeroPad(minute());
+    return spacePad(hourFormat12()) + secondsIndicator(isRefresh) + zeroPad(minute());
   }
 }
 
-String secondsIndicator(boolean isRefresh) {
-  String rtnValue = ":";
-  if (isRefresh == false && (flashOnSeconds && (second() % 2) == 0)) {
-    rtnValue = " ";
+char secondsIndicator(bool isRefresh) {
+  char rtnValue = ':';
+  if (!isRefresh && (flashOnSeconds && ((second() % 2) == 0))) {
+    rtnValue = ' ';
   }
   return rtnValue;
 }
@@ -337,7 +371,6 @@ void handleSaveConfig() {
   WAGFAM_DATA_URL = server.arg("wagFamDataSource");
   WAGFAM_API_KEY = server.arg("wagFamApiKey");
   bdayClient.updateBdayClient(WAGFAM_API_KEY,WAGFAM_DATA_URL);
-  TIMEDBKEY = server.arg("TimeZoneDB");
   APIKEY = server.arg("openWeatherMapApiKey");
   geoLocation = server.arg("city1");
   flashOnSeconds = server.hasArg("flashseconds");
@@ -398,7 +431,6 @@ void handleConfigure() {
 
 
   form = FPSTR(CHANGE_FORM2);
-  form.replace("%TIMEDBKEY%", TIMEDBKEY);
   form.replace("%WEATHERKEY%", APIKEY);
 
   String cityName = "";
@@ -495,8 +527,8 @@ void getWeatherData() //client function to send/receive GET request data.
   Serial.println();
 
   // pull the weather data
-  if (firstEpoch != 0) {
-    centerPrint(hourMinutes(true), true);
+  if (firstTimeSync != 0) {
+    centerPrint(displayTime, true);
   } else {
     centerPrint("...");
   }
@@ -507,39 +539,54 @@ void getWeatherData() //client function to send/receive GET request data.
 
   weatherClient.updateWeather();
   if (weatherClient.getErrorMessage() != "") {
-    scrollMessage(weatherClient.getErrorMessage());
+    scrollMessageWait(weatherClient.getErrorMessage());
+  } else {
+    // Set current timezone (adapts to DST when region supports that)
+    // when time was potentially changed, stop quick auto sync
+    if (set_timeZoneSec(weatherClient.getTimeZoneSeconds())) {
+      // Stop automatic NTP sync and do it explicitly below
+      setSyncProvider(NULL);
+    }
   }
+  lastRefreshDataTimestamp = now();
 
+  Serial.printf("Timestatus=%d\n", timeStatus());  // status timeNeedsSync(1) is NEVER set
   Serial.println("Updating Time...");
   //Update the Time
   matrix.drawPixel(0, 4, HIGH);
   matrix.drawPixel(0, 3, HIGH);
   matrix.drawPixel(0, 2, HIGH);
-  Serial.println("matrix Width:" + String(matrix.width()));
   matrix.write();
-  TimeDB.updateConfig(TIMEDBKEY, String(weatherClient.getLat()), String(weatherClient.getLon()));
-  time_t currentTime = TimeDB.getTime();
-  if(currentTime > 5000 || firstEpoch == 0) {
-    setTime(currentTime);
-  } else {
-    Serial.println("Time update unsuccessful!");
+
+  // Explicitly get the NTP time
+  time_t t = getNtpTime();
+  if (t > TIME_VALID_MIN) {
+    // warning: adding ctime() causes 5kB extra codesize!
+    //Serial.printf_P(PSTR("setTime %u=%s"), uint32_t(t), ctime(&t));
+    Serial.printf_P(PSTR("setTime %u\n"), uint32_t(t));
+    setTime(t);
   }
-  lastEpoch = now();
-  if (firstEpoch == 0) {
-    firstEpoch = now();
-    Serial.println("firstEpoch is: " + String(firstEpoch));
+  if (firstTimeSync == 0) {
+    firstTimeSync = now();
+    if (firstTimeSync > TIME_VALID_MIN) {
+      setSyncInterval(222); // used for testing, value doesn't really matter
+      Serial.printf_P(PSTR("firstTimeSync is: %d\n"), firstTimeSync);
+    } else {
+      // on a failed ntp sync we have seen that firstTimeSync was set to a low value: reset firstTimeSync
+      firstTimeSync = 0;
+    }
   }
 
   serverConfig = bdayClient.updateData();
   bool needToSave = false;
   if (serverConfig.dataSourceUrlValid) {
     WAGFAM_DATA_URL = serverConfig.dataSourceUrl;
-    lastEpoch = 0; // this should force a data pull, since with a new URL that's required
+    lastRefreshDataTimestamp = 0; // this should force a data pull, since with a new URL that's required
     needToSave = true;
   }
   if (serverConfig.apiKeyValid) {
     WAGFAM_API_KEY = serverConfig.apiKey;
-    lastEpoch = 0; // this should force a data pull, since with a new API_KEY that's required
+    lastRefreshDataTimestamp = 0; // this should force a data pull, since with a new API_KEY that's required
     needToSave = true;
   }
   if (serverConfig.eventTodayValid) {
@@ -553,23 +600,6 @@ void getWeatherData() //client function to send/receive GET request data.
 
   Serial.println("Version: " + String(VERSION));
   Serial.println();
-  digitalWrite(externalLight, HIGH);
-}
-
-void displayMessage(String message) {
-  digitalWrite(externalLight, LOW);
-
-  server.sendHeader("Cache-Control", "no-cache, no-store");
-  server.sendHeader("Pragma", "no-cache");
-  server.sendHeader("Expires", "-1");
-  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
-  server.send(200, "text/html", "");
-  sendHeader();
-  server.sendContent(message);
-  sendFooter();
-  server.sendContent("");
-  server.client().stop();
-
   digitalWrite(externalLight, HIGH);
 }
 
@@ -669,11 +699,7 @@ void displayHomePage() {
     temperature.remove(temperature.indexOf(".") + 2);
   }
 
-  String time = TimeDB.getDayName() + ", " + TimeDB.getMonthName() + " " + day() + ", " + hourFormat12() + ":" + TimeDB.zeroPad(minute()) + " " + TimeDB.getAmPm();
-
-  if (TIMEDBKEY == "") {
-    html += "<p>Please <a href='/configure'>Configure TimeZoneDB</a> with API key.</p>";
-  }
+  String time = getDayName(weekday()) + ", " + getMonthName(month()) + " " + day() + ", " + hourFormat12() + ":" + zeroPad(minute()) + " " + getAmPm(isPM());
 
   if (weatherClient.getCity() == "") {
     html += "<p>Please <a href='/configure'>Configure Weather</a> API</p>";
@@ -712,7 +738,7 @@ void configModeCallback (WiFiManager *myWiFiManager) {
   Serial.println("Please connect to AP");
   Serial.println(myWiFiManager->getConfigPortalSSID());
   Serial.println("To setup Wifi Configuration");
-  scrollMessage("Please Connect to AP: " + String(myWiFiManager->getConfigPortalSSID()));
+  scrollMessageWait("Please Connect to AP: " + String(myWiFiManager->getConfigPortalSSID()));
   centerPrint("wifi");
 }
 
@@ -726,40 +752,17 @@ void flashLED(int number, int delayTime) {
   }
 }
 
-String getTempSymbol() {
-  return getTempSymbol(false);
-}
-
 String getTempSymbol(bool forWeb) {
-  String rtnValue = "F";
-  if (IS_METRIC) {
-    rtnValue = "C";
-  }
-  if (forWeb) {
-    rtnValue = "°" + rtnValue;
-  } else {
-    rtnValue = char(247) + rtnValue;
-  }
-  return rtnValue;
+  // Note: The forWeb degrees character is an UTF8 double byte character!
+  return String((forWeb) ? "°" : String(char(247))) + String((IS_METRIC) ? 'C' : 'F');
 }
-
 
 String getSpeedSymbol() {
-  String rtnValue = "mph";
-  if (IS_METRIC) {
-    rtnValue = "kph";
-  }
-  return rtnValue;
+  return String((IS_METRIC) ? "kmh" : "mph");
 }
 
-String getPressureSymbol()
-{
-  String rtnValue = "";
-  if (IS_METRIC)
-  {
-    rtnValue = "mb";
-  }
-  return rtnValue;
+String getPressureSymbol() {
+  return String((IS_METRIC) ? "mb" : "inHg");
 }
 
 // converts the dBm to a range between 0 and 100%
@@ -775,29 +778,19 @@ int8_t getWifiQuality() {
 }
 
 String getTimeTillUpdate() {
-  String rtnValue = "";
-
-  long timeToUpdate = (((minutesBetweenDataRefresh * 60) + lastEpoch) - now());
+  char hms[10];
+  long timeToUpdate = (((minutesBetweenDataRefresh * 60) + lastRefreshDataTimestamp) - now());
 
   int hours = numberOfHours(timeToUpdate);
   int minutes = numberOfMinutes(timeToUpdate);
   int seconds = numberOfSeconds(timeToUpdate);
+  sprintf_P(hms, PSTR("%d:%02d:%02d"), hours, minutes, seconds);
 
-  rtnValue += String(hours) + ":";
-  if (minutes < 10) {
-    rtnValue += "0";
-  }
-  rtnValue += String(minutes) + ":";
-  if (seconds < 10) {
-    rtnValue += "0";
-  }
-  rtnValue += String(seconds);
-
-  return rtnValue;
+  return String(hms);
 }
 
 int getMinutesFromLastRefresh() {
-  int minutes = (now() - lastEpoch) / 60;
+  int minutes = (now() - lastRefreshDataTimestamp) / 60;
   return minutes;
 }
 
@@ -811,7 +804,6 @@ void savePersistentConfig() {
     f.println("WAGFAM_DATA_URL=" + WAGFAM_DATA_URL);
     f.println("WAGFAM_API_KEY=" + WAGFAM_API_KEY);
     f.println("WAGFAM_EVENT_TODAY=" + String(WAGFAM_EVENT_TODAY));
-    f.println("TIMEDBKEY=" + TIMEDBKEY);
     f.println("APIKEY=" + APIKEY);
     f.println("CityID=" + geoLocation);
     f.println("ledIntensity=" + String(displayIntensity));
@@ -857,11 +849,6 @@ void readPersistentConfig() {
     if (line.indexOf("WAGFAM_EVENT_TODAY=") >= 0) {
       WAGFAM_EVENT_TODAY = line.substring(line.lastIndexOf("WAGFAM_EVENT_TODAY=") + 19).toInt();
       Serial.println("WAGFAM_EVENT_TODAY: " + String(WAGFAM_EVENT_TODAY));
-    }
-    if (line.indexOf("TIMEDBKEY=") >= 0) {
-      TIMEDBKEY = line.substring(line.lastIndexOf("TIMEDBKEY=") + 10);
-      TIMEDBKEY.trim();
-      Serial.println("TIMEDBKEY: " + TIMEDBKEY);
     }
     if (line.indexOf("APIKEY=") >= 0) {
       APIKEY = line.substring(line.lastIndexOf("APIKEY=") + 7);
@@ -946,9 +933,8 @@ void readPersistentConfig() {
   bdayClient.updateBdayClient(WAGFAM_API_KEY,WAGFAM_DATA_URL);
 }
 
-void scrollMessage(String msg) {
-  msg += " "; // add a space at the end
-  for ( int i = 0 ; i < width * msg.length() + matrix.width() - 1 - spacer; i++ ) {
+void scrollMessageWait(const String &msg) {
+  for ( int i = 0 ; i < width * (int)msg.length() + matrix.width() - 1 - spacer; i++ ) {
     // Web server is always enabled
     server.handleClient();
     // OTA Updater is always enabled
@@ -960,7 +946,7 @@ void scrollMessage(String msg) {
     int y = (matrix.height() - 8) / 2; // center the text vertically
 
     while ( x + width - spacer >= 0 && letter >= 0 ) {
-      if ( letter < msg.length() ) {
+      if ( letter < (int)msg.length() ) {
         matrix.drawChar(x, y, msg[letter], HIGH, LOW, 1);
       }
 
@@ -974,11 +960,7 @@ void scrollMessage(String msg) {
   matrix.setCursor(0, 0);
 }
 
-void centerPrint(String msg) {
-  centerPrint(msg, false);
-}
-
-void centerPrint(String msg, boolean extraStuff) {
+void centerPrint(const String &msg, boolean extraStuff) {
   int x = (matrix.width() - (msg.length() * width)) / 2;
 
   // Print the static portions of the display before the main Message
@@ -1015,8 +997,7 @@ void centerPrint(String msg, boolean extraStuff) {
   matrix.write();
 }
 
-String EncodeUrlSpecialChars(const char *msg)
-{
+String EncodeUrlSpecialChars(const char *msg) {
 const static char special[] = {'\x20','\x22','\x23','\x24','\x25','\x26','\x2B','\x3B','\x3C','\x3D','\x3E','\x3F','\x40'};
   String encoded;
   int inIdx;
