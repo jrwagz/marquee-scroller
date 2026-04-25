@@ -37,6 +37,7 @@ OpenWeatherMapClient::OpenWeatherMapClient(const String &ApiKey, bool isMetric) 
 // UTF-8 to ANSI and viceversa)
 //
 int OpenWeatherMapClient::setGeoLocation(const String &location) {
+  if (location.length() == 0) return 1;
   int comma = location.indexOf(',');
   int comma2 = location.lastIndexOf(',');
   int decimal = location.indexOf('.');
@@ -70,7 +71,7 @@ int OpenWeatherMapClient::setGeoLocation(const String &location) {
     myGeoLocationType = LOC_CITYID;
     // USE http://api.openweathermap.org/data/2.5/weather?id={city-id}&appid={API-key}
   }
-  if ((len > 5) && (comma > 0) && (comma2 == 0) && (ch_cnt_digits >= len-3)) {
+  if ((len > 5) && (comma > 0) && (comma2 == comma) && (ch_cnt_digits >= len-3)) {
     myGeoLocationType = LOC_LATLON;
     myGeoLocation_lat = location.toFloat();
     myGeoLocation_lon = location.substring(comma+1).toFloat();
