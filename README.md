@@ -1,12 +1,14 @@
 # WagFam CalClock
 
-A personal fork of [Marquee Scroller](https://github.com/Tronixstuff/marquee-scroller) by David Payne, customized as a family calendar + weather clock for a Wemos D1 Mini (ESP8266) with a MAX7219 LED matrix display.
+A personal fork of [Marquee Scroller](https://github.com/Tronixstuff/marquee-scroller) by David Payne,
+customized as a family calendar + weather clock for a Wemos D1 Mini (ESP8266) with a MAX7219 LED matrix display.
 
 ## Features
 
 - Clock display with NTP time sync (12h or 24h, with optional PM indicator)
 - Local weather from OpenWeatherMap (temperature, conditions, wind, humidity, pressure, high/low)
-- **WagFam Calendar** — scrolls upcoming family events/birthdays fetched from a private JSON endpoint; animated border on event days
+- **WagFam Calendar** — scrolls upcoming family events/birthdays fetched from a private JSON endpoint;
+  animated border on event days
 - Configured entirely through a web interface (no re-flashing required for settings changes)
 - OTA firmware updates via web interface (file upload or URL)
 - Configurable scroll speed, brightness, and refresh interval
@@ -30,7 +32,8 @@ A personal fork of [Marquee Scroller](https://github.com/Tronixstuff/marquee-scr
 
 ### PlatformIO (recommended)
 
-Open the project folder in VS Code with the [PlatformIO](https://platformio.org/) (or [PIOArduino](https://marketplace.visualstudio.com/items?itemName=pioarduino.pioarduino-ide)) extension installed.
+Open the project folder in VS Code with the [PlatformIO](https://platformio.org/)
+(or [PIOArduino](https://marketplace.visualstudio.com/items?itemName=pioarduino.pioarduino-ide)) extension installed.
 
 ```bash
 pio run                          # Build
@@ -73,7 +76,8 @@ Upload via the web interface at `http://<device-ip>/update`.
 
 ## Initial Setup
 
-On first boot (or after "Forget WiFi"), the device creates a WiFi AP named `CLOCK-<chip-id>`. Connect to it with a phone or laptop to enter your WiFi credentials.
+On first boot (or after "Forget WiFi"), the device creates a WiFi AP named `CLOCK-<chip-id>`.
+Connect to it with a phone or laptop to enter your WiFi credentials.
 
 Once connected to WiFi, the device displays its IP address. Open `http://<ip>/` in a browser to access the web interface.
 
@@ -81,7 +85,8 @@ Default web UI credentials: **admin / password**
 
 ## Configuration
 
-All settings are managed through the web interface and persisted to the device filesystem. Editing `Settings.h` only affects defaults for a completely fresh start (filesystem erased).
+All settings are managed through the web interface and persisted to the device filesystem.
+Editing `Settings.h` only affects defaults for a completely fresh start (filesystem erased).
 
 ### API Keys
 
@@ -110,16 +115,19 @@ The calendar client fetches a JSON array from the configured URL (HTTPS supporte
 ```
 
 - Up to 10 messages are supported; they cycle through the marquee scroll
-- The `config` block is optional; if present, `eventToday: 1` enables an animated dot border around the clock display for the day
+- The `config` block is optional; if present, `eventToday: 1` enables an animated dot border around the clock display
+  for the day
 - The `config` block can also remotely update `dataSourceUrl` and `apiKey` on the device
 
 ### Geo Location
 
-Enter a city ID, city name + country code (`Chicago,US`), or GPS coordinates (`lat,lon`) — whatever format OpenWeatherMap accepts.
+Enter a city ID, city name + country code (`Chicago,US`), or GPS coordinates (`lat,lon`) —
+whatever format OpenWeatherMap accepts.
 
 ## Firmware Update from URL
 
-From the Configure page, a firmware URL (HTTP only — HTTPS is not supported) can be entered to trigger an OTA update directly from a hosted `.bin` file. The device will restart automatically on success.
+From the Configure page, a firmware URL (HTTP only — HTTPS is not supported) can be entered to trigger an OTA update
+directly from a hosted `.bin` file. The device will restart automatically on success.
 
 ## Web Interface Routes
 
