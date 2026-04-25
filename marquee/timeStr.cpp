@@ -6,7 +6,7 @@
  *
  */
 #include <Arduino.h>
-#include "timeLib.h"
+#include "TimeLib.h"
 #include "timeStr.h"
 
 String getDayName(int weekday) {

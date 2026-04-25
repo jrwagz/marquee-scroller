@@ -2,4 +2,6 @@ build/
 .vscode/
 .pio/
 .passwd
+.platformio/
 artifacts/
+**/__pycache__/

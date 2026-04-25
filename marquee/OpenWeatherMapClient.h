@@ -11,19 +11,22 @@
 
 class OpenWeatherMapClient {
 
-private:
-  String myApiKey;
-
-  const char* servername = "api.openweathermap.org";  // remote server we will connect to
-
-  String myGeoLocation;
+public:
   enum locationtype_e {
     LOC_UNSET,
     LOC_UNKNOWN,
     LOC_CITYID,
     LOC_LATLON,
     LOC_NAME
-  } myGeoLocationType;
+  };
+
+private:
+  String myApiKey;
+
+  const char* servername = "api.openweathermap.org";  // remote server we will connect to
+
+  String myGeoLocation;
+  locationtype_e myGeoLocationType;
   int myGeoLocation_CityID;
   float myGeoLocation_lat;
   float myGeoLocation_lon;
@@ -85,6 +88,7 @@ public:
   inline String getWeatherDescription() {return weather.description;};
   inline String getIcon() {return weather.icon;};
   inline bool getWeatherDataValid() {return weather.isValid;};
+  inline locationtype_e getGeoLocationType() {return myGeoLocationType;};
   inline String getErrorMessage() {return errorMsg;};
   inline int getTimeZone() {return weather.timeZone/3600;}; // Local TimeZone delta with UTC in Hours
   inline int getTimeZoneSeconds() {return weather.timeZone;};
