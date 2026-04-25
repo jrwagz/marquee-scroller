@@ -95,7 +95,6 @@ boolean SHOW_CITY = true;
 boolean SHOW_CONDITION = false;
 boolean SHOW_HUMIDITY = false;
 boolean SHOW_WIND = false;
-boolean SHOW_WINDDIR = false;
 boolean SHOW_PRESSURE = false;
 boolean SHOW_HIGHLOW = false;
 
@@ -142,7 +141,7 @@ static const char CHANGE_FORM4[] PROGMEM = "<p><button class='w3-button w3-block
                       "<script>function isNumberKey(e){var h=e.which?e.which:event.keyCode;return!(h>31&&(h<48||h>57))}</script>";
 
 static const char UPDATE_FORM[] PROGMEM = "<form class='w3-container' action='/updateFromUrl' method='get'><h2>Firmware Update Options:</h2>"
-                      "<p><label>Firmware Update URL (optional)</label><input class='w3-input w3-border w3-margin-bottom' type='url' name='firmwareUrl' placeholder='https://example.com/firmware.bin' maxlength='256' required></p>"
+                      "<p><label>Firmware Update URL (optional)</label><input class='w3-input w3-border w3-margin-bottom' type='url' name='firmwareUrl' placeholder='http://example.com/firmware.bin' maxlength='256' required></p>"
                       "<p><button class='w3-button w3-block w3-blue w3-section w3-padding' type='submit'>Update from URL</button></p>"
                       "<p><small>Note: You can also use the <a href='/update'>Firmware Update</a> page to upload a file directly.</small></p></form>";
 
