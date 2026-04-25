@@ -8,6 +8,9 @@ endif
 MD_FILES:=$(shell find . -name "*.md" -not -path "./.venv/*" -not -path "./.pytest_cache/*" -not -path "./lib/*" -not -path "./.pio/*")
 
 MARKDOWNLINT_IMAGE:=davidanson/markdownlint-cli2:v0.22.0
+PIO_IMAGE:=ghcr.io/jrwagz/pio-image:v6.1.19
+LOCAL_PIO_CACHE:=./.platformio
+PIO_CACHE:=$(HOME)/.platformio
 
 .PHONY: help
 help:
@@ -16,10 +19,29 @@ help:
 	@echo "  lint-markdown     - Run markdownlint on all Markdown files"
 	@echo "  lint-markdown-fix - Auto-fix markdownlint issues"
 	@echo "  lint              - Run lint-markdown"
+	@echo "  test-native       - Run native C++ unit tests (no device required)"
 	@echo "  ready             - Full pipeline"
 
 .passwd:
 	echo "${USER}:x:$(shell id -u):$(shell id -g)::${HOME}:/bin/bash" > .passwd
+
+
+.PHONY: clean-pio
+clean-pio:
+	rm -rf .pio/
+	rm -rf .platformio/
+
+.PHONY: clean-passwd
+clean-passwd:
+	rm -rf .passwd
+
+.PHONY: clean-artifacts
+clean-artifacts:
+	rm -rf artifacts/
+
+
+.PHONY: clean
+clean: clean-pio clean-passwd clean-artifacts
 
 .PHONY: lint-markdown
 lint-markdown: .passwd
@@ -47,8 +69,20 @@ lint-markdown-fix: .passwd
 lint: lint-markdown
 
 .PHONY: test
-test:
-	@echo "No tests written yet!"
+test: test-native
+
+.PHONY: test-native
+test-native: .passwd
+	mkdir -p $(LOCAL_PIO_CACHE) artifacts
+	docker run \
+		--rm $(DOCKER_TTY_ARGS) \
+		-v ${PWD}:${PWD} \
+		-w ${PWD} \
+		-v ${PWD}/.passwd:/etc/passwd:ro \
+		-v $(LOCAL_PIO_CACHE):$(PIO_CACHE) \
+		-u $(shell id -u):$(shell id -g) \
+		$(PIO_IMAGE) \
+		pio test -e native_test --junit-output-path artifacts/test-native-results.xml
 
 .PHONY: build
 build:
@@ -61,4 +95,4 @@ artifacts:
 	touch artifacts/empty.txt
 
 .PHONY: ready
-ready: lint test build artifacts
+ready: clean lint test build artifacts
