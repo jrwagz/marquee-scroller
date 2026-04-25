@@ -27,18 +27,38 @@ Local library copies (not managed by PlatformIO) are in [lib/](lib/):
 ## Main Loop Logic
 
 - **Every frame**: Render current time via `centerPrint()`; handle web server and OTA requests
-- **Every second** (`processEverySecond`): Calls `getWeatherData()` — which fetches both weather and calendar data together — if `minutesBetweenDataRefresh` has elapsed
+- **Every second** (`processEverySecond`): Calls `getWeatherData()` — which fetches both weather and calendar data
+  together — if `minutesBetweenDataRefresh` has elapsed
 - **Every minute** (`processEveryMinute`): Scroll the marquee message (weather data + next calendar message from `bdayClient`)
 
 ## Configuration Storage
 
-Runtime config is persisted via LittleFS (aliased as `SPIFFS` in the sketch) at `/conf.txt` as `key=value` pairs. The functions `savePersistentConfig()` and `readPersistentConfig()` in [marquee.ino](marquee/marquee.ino) own all reads and writes to this file. [Settings.h](marquee/Settings.h) contains compile-time defaults only — changes there require a filesystem erase to take effect.
+Runtime config is persisted via LittleFS (aliased as `SPIFFS` in the sketch) at `/conf.txt` as `key=value` pairs.
+The functions `savePersistentConfig()` and `readPersistentConfig()` in [marquee.ino](marquee/marquee.ino)
+own all reads and writes to this file. [Settings.h](marquee/Settings.h) contains compile-time defaults only —
+changes there require a filesystem erase to take effect.
 
-`WAGFAM_EVENT_TODAY` is not user-configurable via the web form — it is set exclusively by the server's `config.eventToday` field in the calendar JSON response and persisted across reboots via `/conf.txt`.
+`WAGFAM_EVENT_TODAY` is not user-configurable via the web form — it is set exclusively by the server's
+`config.eventToday` field in the calendar JSON response and persisted across reboots via `/conf.txt`.
+
+## Markdown Style
+
+`make lint` enforces markdownlint on all `.md` files. Rules in effect (`.markdownlint.yaml`):
+
+- **MD013**: max **120 chars** per line for body text and list items; max **100 chars** for headings
+  - Table rows and fenced code block content are **exempt**
+  - When a line would exceed the limit, wrap at a natural word/clause boundary
+  - List item continuation lines must be indented **2 spaces** to stay in the same list item
+- MD033 (inline HTML), MD024 (duplicate headings), MD041 (first-line h1) are **disabled**
+
+Run `make lint-markdown` locally to check before committing any `.md` changes.
 
 ## Key Constraints
 
-- Flash memory is tight on ESP8266 — avoid large string literals on the stack; use the `F()` macro or `PROGMEM` / `FPSTR()` for string constants (see existing `CHANGE_FORM*` and `WEB_ACTIONS*` constants in [marquee.ino](marquee/marquee.ino))
+- Flash memory is tight on ESP8266 — avoid large string literals on the stack;
+  use the `F()` macro or `PROGMEM` / `FPSTR()` for string constants
+  (see existing `CHANGE_FORM*` and `WEB_ACTIONS*` constants in [marquee.ino](marquee/marquee.ino))
 - The LED display font is 5px wide + 1px spacer; `scrollMessageWait()` computes scroll distance from message length
 - `WagFamBdayClient` uses BearSSL with `setInsecure()` (no cert validation) — intentional for embedded use
-- ArduinoJson v7 is used (`^7.4` in `platformio.ini`) — do not generate v6-style `DynamicJsonDocument` / `StaticJsonDocument` code; use `JsonDocument` instead
+- ArduinoJson v7 is used (`^7.4` in `platformio.ini`) — do not generate v6-style
+  `DynamicJsonDocument` / `StaticJsonDocument` code; use `JsonDocument` instead

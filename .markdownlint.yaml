@@ -1,0 +1,27 @@
+# MD013/line-length - Line length
+MD013:
+  # Number of characters
+  line_length: 120
+  # Number of characters for headings
+  heading_line_length: 100
+  # Number of characters for code blocks
+  code_block_line_length: 120
+  # Include code blocks
+  code_blocks: false
+  # Include tables
+  tables: false
+  # Include headings
+  headings: true
+  # Strict length checking
+  strict: false
+  # Stern length checking
+  stern: false
+
+MD033: false
+
+MD024: false
+
+# This requires the first line to be `#`. Which is a great requirement unless
+# we are writing fancy readmes with HTML. As long as GitHub renders it properly
+# we are good.
+MD041: false
