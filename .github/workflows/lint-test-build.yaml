@@ -1,0 +1,82 @@
+name: Lint, Test, and Build
+
+on:
+  push:
+    branches: ["master"]
+    # Publish semver tags as releases.
+    tags: ["v*.*.*"]
+  pull_request:
+    branches: ["master"]
+
+# Only allow a single running job for each PR/tag/branch
+# and cancel any running jobs if a new one is created on top of it
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-test-build:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      attestations: write
+      id-token: write
+      artifact-metadata: write
+      actions: read
+      checks: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Lint
+        run: make lint
+
+      - name: Test
+        run: make test
+
+      - name: Build
+        run: make build
+
+      - name: Gather Artifacts
+        run: make artifacts
+
+      - name: Keep Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          path: artifacts/
+
+      - name: Generate artifact attestation
+        uses: actions/attest@v4
+        with:
+          subject-path: 'artifacts/*'
+
+      - name: Create release
+        if: github.event_name == 'push' && startsWith( github.ref, 'refs/tags/' )
+        id: create_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RELEASE_URL=$(gh release create "${{ github.ref_name }}" \
+            --title "${{ github.ref_name }}" \
+            --generate-notes)
+          echo "html_url=$RELEASE_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Package release artifacts
+        if: github.event_name == 'push' && startsWith( github.ref, 'refs/tags/' )
+        run: zip -r "${{ github.event.repository.name }}-${{ github.ref_name }}-artifacts.zip" artifacts/
+
+      - name: Upload release artifacts
+        if: github.event_name == 'push' && startsWith( github.ref, 'refs/tags/' )
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.ref_name }}" \
+            "${{ github.event.repository.name }}-${{ github.ref_name }}-artifacts.zip"
+
+      - name: Write release summary
+        if: github.event_name == 'push' && startsWith( github.ref, 'refs/tags/' )
+        run: |
+          echo "## Release" >> "$GITHUB_STEP_SUMMARY"
+          echo "[${{ github.ref_name }}](${{ steps.create_release.outputs.html_url }})" >> "$GITHUB_STEP_SUMMARY"
