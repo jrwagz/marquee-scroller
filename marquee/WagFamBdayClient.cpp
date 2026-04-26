@@ -42,6 +42,9 @@ WagFamBdayClient::configValues WagFamBdayClient::updateData() {
 
   std::unique_ptr<BearSSL::WiFiClientSecure> client(new BearSSL::WiFiClientSecure);
   client->setInsecure();
+  // Reduce TLS record buffers from the 16KB default to something appropriate
+  // for our small JSON payloads. Saves ~12-19KB of heap on every calendar fetch.
+  client->setBufferSizes(2048, 512);
 
   HTTPClient https;
 
