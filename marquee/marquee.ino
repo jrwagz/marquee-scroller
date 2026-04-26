@@ -27,10 +27,12 @@
 
 #include "Settings.h"
 
-#define VERSION "3.07.0-wagfam"
+#define VERSION "3.08.0-wagfam"
 
 #define HOSTNAME "CLOCK-"
 #define CONFIG "/conf.txt"
+#define OTA_PENDING_FILE "/ota_pending.txt"
+#define OTA_CONFIRM_MS (5UL * 60UL * 1000UL)  // 5 minutes of stable uptime to confirm an update
 
 //declaring prototypes
 void setup();
@@ -62,12 +64,15 @@ void readPersistentConfig();
 void scrollMessageWait(const String &msg);
 void centerPrint(const String &msg, bool extraStuff = false);
 String EncodeUrlSpecialChars(const char *msg);
+void performAutoUpdate(const String &firmwareUrl);
+void checkOtaRollback();
 
 void handleUpdateFromUrl();
 
 // LED Settings
 int spacer = 1;  // dots between letters
 int width = 5 + spacer; // The font width is 5 pixels + spacer
+bool displayDirty = true; // true = framebuffer needs redraw before next write
 
 // Matrix panel
 Max72xxPanel matrix = Max72xxPanel(pinCS, numberOfHorizontalDisplays, numberOfVerticalDisplays);
@@ -84,8 +89,8 @@ String displayTime;
 WagFamBdayClient bdayClient(WAGFAM_API_KEY, WAGFAM_DATA_URL);
 int bdayMessageIndex = 0;
 WagFamBdayClient::configValues serverConfig = {};
-int todayDisplayMilliSecond = 0;
-int todayDisplayStartingLED = 0;
+uint32_t todayDisplayMilliSecond = 0;
+uint32_t todayDisplayStartingLED = 0;
 
 // Weather Client
 OpenWeatherMapClient weatherClient(APIKEY, IS_METRIC);
@@ -119,7 +124,7 @@ static const char CHANGE_FORM1[] PROGMEM = "<form class='w3-container' action='/
 
 static const char CHANGE_FORM2[] PROGMEM = "<label>OpenWeatherMap API Key (get from <a href='https://openweathermap.org/' target='_BLANK'>here</a>)</label>"
                       "<input class='w3-input w3-border w3-margin-bottom' type='text' name='openWeatherMapApiKey' value='%WEATHERKEY%' maxlength='70'>"
-                      "<p><label>%CITYNAME1% (<a href='http://openweathermap.org/find' target='_BLANK'><i class='fas fa-search'></i> Search for City ID</a>)</label>"
+                      "<p><label>%CITYNAME1% (<a href='https://openweathermap.org/find' target='_BLANK'><i class='fas fa-search'></i> Search for City ID</a>)</label>"
                       "<input class='w3-input w3-border w3-margin-bottom' type='text' name='city1' value='%CITY1%' onkeypress='return isNumberKey(event)'></p>"
                       "<p><input name='metric' class='w3-check w3-margin-top' type='checkbox' %CHECKED%> Use Metric (Celsius)</p>"
                       "<p><input name='showdate' class='w3-check w3-margin-top' type='checkbox' %DATE_CHECKED%> Display Date</p>"
@@ -145,8 +150,10 @@ static const char UPDATE_FORM[] PROGMEM = "<form class='w3-container' action='/u
                       "<p><button class='w3-button w3-block w3-blue w3-section w3-padding' type='submit'>Update from URL</button></p>"
                       "<p><small>Note: You can also use the <a href='/update'>Firmware Update</a> page to upload a file directly.</small></p></form>";
 
-const int TIMEOUT = 500; // 500 = 1/2 second
-int timeoutCount = 0;
+// OTA auto-update state
+String OTA_SAFE_URL = "";       // URL of last confirmed firmware; rollback target for next update
+uint32_t otaConfirmAt = 0;      // non-zero: millis() target after which the pending update is confirmed
+String otaPendingNewUrl = "";   // URL of firmware pending confirmation (becomes OTA_SAFE_URL on confirm)
 
 // Change the externalLight to the pin you wish to use if other than the Built-in LED
 int externalLight = LED_BUILTIN; // LED_BUILTIN is is the built in LED on the Wemos
@@ -216,26 +223,8 @@ void setup() {
   Serial.print(getWifiQuality());
   Serial.println("%");
 
-  // OTA Updater is always enabled without password requirement
-  ArduinoOTA.onStart([]() {
-    Serial.println("Start");
-  });
-  ArduinoOTA.onEnd([]() {
-    Serial.println("\nEnd");
-  });
-  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
-  });
-  ArduinoOTA.onError([](ota_error_t error) {
-    Serial.printf("Error[%u]: ", error);
-    if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
-    else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
-    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
-    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
-    else if (error == OTA_END_ERROR) Serial.println("End Failed");
-  });
-  ArduinoOTA.setHostname((const char *)hostname.c_str());
-  ArduinoOTA.begin();
+  // Check for a pending OTA confirmation or crash-loop rollback
+  checkOtaRollback();
 
   // Web Server is always enabled
   server.on("/", displayHomePage);
@@ -269,6 +258,8 @@ void loop() {
 
   if (lastSecond != second()) {
     lastSecond = second();
+    displayTime = hourMinutes(false); // rebuild once per second, not every frame
+    displayDirty = true;
     processEverySecond();
   }
 
@@ -277,18 +268,29 @@ void loop() {
     processEveryMinute();
   }
 
-  displayTime = hourMinutes(false);
-
-  matrix.fillScreen(LOW);
-  centerPrint(displayTime, true);
+  // Only redraw when content has changed. The animated event-day border
+  // requires per-frame updates, so always redraw when it is active.
+  if (displayDirty || WAGFAM_EVENT_TODAY) {
+    matrix.fillScreen(LOW);
+    centerPrint(displayTime, true);
+    displayDirty = false;
+  }
 
   // Web Server is always enabled
   server.handleClient();
-  // OTA Updater is always enabled
-  ArduinoOTA.handle();
 }
 
 void processEverySecond() {
+  // Confirm a pending OTA update after stable uptime
+  if (otaConfirmAt != 0 && millis() >= otaConfirmAt) {
+    Serial.println(F("[OTA] Update confirmed stable"));
+    SPIFFS.remove(OTA_PENDING_FILE);
+    OTA_SAFE_URL = otaPendingNewUrl;
+    otaConfirmAt = 0;
+    otaPendingNewUrl = "";
+    savePersistentConfig();
+  }
+
   //Get some Weather Data to serve
   if ((getMinutesFromLastRefresh() >= minutesBetweenDataRefresh) || lastRefreshDataTimestamp == 0) {
     getWeatherData();
@@ -301,7 +303,6 @@ void processEveryMinute() {
     return;
   }
 
-  matrix.shutdown(false);
   matrix.fillScreen(LOW); // show black
 
   displayRefreshCount --;
@@ -391,10 +392,10 @@ void handleSaveConfig() {
   SHOW_PRESSURE = server.hasArg("showpressure");
   SHOW_HIGHLOW = server.hasArg("showhighlow");
   IS_METRIC = server.hasArg("metric");
-  displayIntensity = server.arg("ledintensity").toInt();
-  minutesBetweenDataRefresh = server.arg("refresh").toInt();
-  minutesBetweenScrolling = server.arg("refreshDisplay").toInt();
-  displayScrollSpeed = server.arg("scrollspeed").toInt();
+  displayIntensity = constrain(server.arg("ledintensity").toInt(), 0, 15);
+  minutesBetweenDataRefresh = max(1, (int)server.arg("refresh").toInt());
+  minutesBetweenScrolling = max(1, (int)server.arg("refreshDisplay").toInt());
+  displayScrollSpeed = max(1, (int)server.arg("scrollspeed").toInt());
   weatherClient.setMetric(IS_METRIC);
   weatherClient.setGeoLocation(geoLocation);
   matrix.fillScreen(LOW); // show black
@@ -527,6 +528,25 @@ void handleConfigure() {
   digitalWrite(externalLight, HIGH);
 }
 
+// Shared OTA flash core used by both handleUpdateFromUrl() and performAutoUpdate().
+// Writes a rollback record to LittleFS, calls ESPhttpUpdate, then cleans up on failure.
+// Never returns on success — the device reboots automatically after a successful flash.
+static void doOtaFlash(const String &firmwareUrl) {
+  File f = SPIFFS.open(OTA_PENDING_FILE, "w");
+  f.println("safeUrl=" + OTA_SAFE_URL);
+  f.println("newUrl=" + firmwareUrl);
+  f.println("boots=0");
+  f.close();
+
+  WiFiClient client;
+  t_httpUpdate_return ret = ESPhttpUpdate.update(client, firmwareUrl);
+
+  // Only reached on failure — remove pending record so next boot is clean
+  SPIFFS.remove(OTA_PENDING_FILE);
+  Serial.printf_P(PSTR("[OTA] Flash failed (code %d): %s\n"),
+    ret, ESPhttpUpdate.getLastErrorString().c_str());
+}
+
 void handleUpdateFromUrl() {
   String firmwareUrl = server.arg("firmwareUrl");
   server.sendHeader("Cache-Control", "no-cache, no-store");
@@ -571,32 +591,83 @@ void handleUpdateFromUrl() {
   scrollMessageWait("   ...Updating...");
   centerPrint("...");
 
-  // Enhanced logging for debugging
-  Serial.printf_P(PSTR("=== FIRMWARE UPDATE PROCESS STARTED ===\n"));
-  Serial.printf_P(PSTR("URL: %s\n"), firmwareUrl.c_str());
+  Serial.printf_P(PSTR("[OTA] Starting update from URL: %s\n"), firmwareUrl.c_str());
+  doOtaFlash(firmwareUrl);
 
-  t_httpUpdate_return ret;
+  // Only reached on failure
+  digitalWrite(externalLight, HIGH);
+}
 
-  WiFiClient client;
-  ret = ESPhttpUpdate.update(client, firmwareUrl);
+// Trigger an OTA update from the given HTTP URL (called from the auto-update path).
+// Writes a rollback record to LittleFS before flashing so crash-loop recovery is possible.
+// On ESPhttpUpdate success the device reboots; this function only returns on failure.
+void performAutoUpdate(const String &firmwareUrl) {
+  Serial.printf_P(PSTR("[OTA] Auto-update from: %s\n"), firmwareUrl.c_str());
 
-  // IF WE GET HERE IT MEANS OUR UPDATE DIDN'T TAKE!!!!
-  Serial.printf_P(PSTR("ERROR: ESPhttpUpdate.update() failed! Return value: %d \n"), ret);
+  matrix.fillScreen(LOW);
+  scrollMessageWait(F("   ...Auto Updating..."));
+  centerPrint(F("..."));
 
-  switch (ret) {
-    case HTTP_UPDATE_FAILED:
-      Serial.printf_P(PSTR("ERROR: Update failed: %s\n"),ESPhttpUpdate.getLastErrorString());
-      Serial.printf_P(PSTR("Last error code: %d \n"), ESPhttpUpdate.getLastError());
-      break;
-    case HTTP_UPDATE_NO_UPDATES:
-      Serial.printf_P(PSTR("INFO: No updates available\n"));
-      break;
-    default:
-      Serial.printf_P(PSTR("ERROR: Update failed with unknown error code: %d \n"),ret);
-      break;
+  doOtaFlash(firmwareUrl);
+
+  // Only reached on failure
+  Serial.printf_P(PSTR("[OTA] Auto-update failed.\n"));
+}
+
+// Called once in setup() after WiFi connects.
+// If a previous OTA update did not complete its 5-minute confirmation window,
+// this function detects the crash loop and re-flashes the last known-good firmware.
+void checkOtaRollback() {
+  if (!SPIFFS.exists(OTA_PENDING_FILE)) return;
+
+  String safeUrl = "";
+  String newUrl = "";
+  int boots = 0;
+
+  File f = SPIFFS.open(OTA_PENDING_FILE, "r");
+  while (f.available()) {
+    String line = f.readStringUntil('\n');
+    line.trim();
+    int eq = line.indexOf('=');
+    if (eq <= 0) continue;
+    String k = line.substring(0, eq);
+    String v = line.substring(eq + 1);
+    if (k == "safeUrl") safeUrl = v;
+    else if (k == "newUrl") newUrl = v;
+    else if (k == "boots") boots = v.toInt();
+  }
+  f.close();
+
+  boots++;
+
+  if (boots >= 2) {
+    // Two unconfirmed boots — assume crash loop; roll back to safe firmware
+    SPIFFS.remove(OTA_PENDING_FILE);
+    if (safeUrl != "" && safeUrl.startsWith("http://")) {
+      Serial.println("[OTA] Crash-loop detected — rolling back to: " + safeUrl);
+      matrix.fillScreen(LOW);
+      scrollMessageWait(F("   ...Rolling Back..."));
+      centerPrint(F("..."));
+      WiFiClient client;
+      ESPhttpUpdate.update(client, safeUrl);
+      // If we get here the rollback itself failed; continue with current firmware
+      Serial.println(F("[OTA] Rollback failed; continuing with current firmware"));
+    } else {
+      Serial.println(F("[OTA] Crash-loop detected but no safe URL; cannot roll back"));
+    }
+    return;
   }
 
-  digitalWrite(externalLight, HIGH);
+  // First boot after an update — record it and start the confirmation timer
+  File fw = SPIFFS.open(OTA_PENDING_FILE, "w");
+  fw.println("safeUrl=" + safeUrl);
+  fw.println("newUrl=" + newUrl);
+  fw.println("boots=" + String(boots));
+  fw.close();
+
+  otaConfirmAt = millis() + OTA_CONFIRM_MS;
+  otaPendingNewUrl = newUrl;
+  Serial.println(F("[OTA] Update pending confirmation (5 min of stable uptime required)"));
 }
 
 //***********************************************************************
@@ -678,6 +749,17 @@ void getWeatherData() //client function to send/receive GET request data.
     savePersistentConfig();
   }
 
+  // Check for a remote firmware update pushed via the calendar config
+  if (serverConfig.latestVersionValid && serverConfig.firmwareUrlValid
+      && serverConfig.latestVersion != String(VERSION)
+      && serverConfig.firmwareUrl.startsWith("http://")
+      && otaConfirmAt == 0
+      && millis() > OTA_CONFIRM_MS) {
+    Serial.println("[OTA] Server version: " + serverConfig.latestVersion + ", current: " + String(VERSION));
+    performAutoUpdate(serverConfig.firmwareUrl);
+    // If we return here the update failed; continue normal operation
+  }
+
   Serial.println("Version: " + String(VERSION));
   Serial.println();
   digitalWrite(externalLight, HIGH);
@@ -707,7 +789,7 @@ void sendHeader() {
   html = "<nav class='w3-sidebar w3-bar-block w3-card' style='margin-top:88px' id='mySidebar'>";
   html += "<div class='w3-container w3-theme-d2'>";
   html += "<span onclick='closeSidebar()' class='w3-button w3-display-topright w3-large'><i class='fas fa-times'></i></span>";
-  html += "<div class='w3-left'><img src='http://openweathermap.org/img/w/" + weatherClient.getIcon() + ".png' alt='" + weatherClient.getWeatherDescription() + "'></div>";
+  html += "<div class='w3-left'><img src='https://openweathermap.org/img/w/" + weatherClient.getIcon() + ".png' alt='" + weatherClient.getWeatherDescription() + "'></div>";
   html += "<div class='w3-padding'>Menu</div></div>";
   server.sendContent(html);
 
@@ -789,7 +871,7 @@ void displayHomePage() {
   } else {
     html += "<div class='w3-cell-row' style='width:100%'><h2>Weather for " + weatherClient.getCity() + ", " + weatherClient.getCountry() + "</h2></div><div class='w3-cell-row'>";
     html += "<div class='w3-cell w3-left w3-medium' style='width:120px'>";
-    html += "<img src='http://openweathermap.org/img/w/" + weatherClient.getIcon() + ".png' alt='" + weatherClient.getWeatherDescription() + "'><br>";
+    html += "<img src='https://openweathermap.org/img/w/" + weatherClient.getIcon() + ".png' alt='" + weatherClient.getWeatherDescription() + "'><br>";
     html += String(weatherClient.getHumidity(),0) + "% Humidity<br>";
     html += weatherClient.getWindDirectionText() + " / " + String(weatherClient.getWindSpeed(),0) + " <span class='w3-tiny'>" + getSpeedSymbol() + "</span> Wind<br>";
     html += String(weatherClient.getPressure()) + " Pressure<br>";
@@ -900,9 +982,17 @@ void savePersistentConfig() {
     f.println("SHOW_PRESSURE=" + String(SHOW_PRESSURE));
     f.println("SHOW_HIGHLOW=" + String(SHOW_HIGHLOW));
     f.println("SHOW_DATE=" + String(SHOW_DATE));
+    f.println("OTA_SAFE_URL=" + OTA_SAFE_URL);
   }
   f.close();
-  readPersistentConfig();
+  // Apply current settings to hardware and clients directly.
+  // (Previously this called readPersistentConfig(), creating mutual recursion
+  // and an infinite loop if the filesystem write ever failed.)
+  matrix.setIntensity(displayIntensity);
+  weatherClient.setWeatherApiKey(APIKEY);
+  weatherClient.setMetric(IS_METRIC);
+  weatherClient.setGeoLocation(geoLocation);
+  bdayClient.updateBdayClient(WAGFAM_API_KEY, WAGFAM_DATA_URL);
 }
 
 void readPersistentConfig() {
@@ -912,92 +1002,77 @@ void readPersistentConfig() {
     return;
   }
   File fr = SPIFFS.open(CONFIG, "r");
-  String line;
   while (fr.available()) {
-    line = fr.readStringUntil('\n');
-    if (line.indexOf("WAGFAM_DATA_URL=") >= 0) {
-      WAGFAM_DATA_URL = line.substring(line.lastIndexOf("WAGFAM_DATA_URL=") + 16);
-      WAGFAM_DATA_URL.trim();
+    String line = fr.readStringUntil('\n');
+    line.trim(); // strip \r and leading/trailing whitespace
+    int eqPos = line.indexOf('=');
+    if (eqPos <= 0) continue; // skip blank or malformed lines
+    String key = line.substring(0, eqPos);
+    String value = line.substring(eqPos + 1);
+
+    if (key == "WAGFAM_DATA_URL") {
+      WAGFAM_DATA_URL = value;
       Serial.println("WAGFAM_DATA_URL: " + WAGFAM_DATA_URL);
-    }
-    if (line.indexOf("WAGFAM_API_KEY=") >= 0) {
-      WAGFAM_API_KEY = line.substring(line.lastIndexOf("WAGFAM_API_KEY=") + 15);
-      WAGFAM_API_KEY.trim();
-      Serial.println("WAGFAM_API_KEY: " + WAGFAM_API_KEY);
-    }
-    if (line.indexOf("WAGFAM_EVENT_TODAY=") >= 0) {
-      WAGFAM_EVENT_TODAY = line.substring(line.lastIndexOf("WAGFAM_EVENT_TODAY=") + 19).toInt();
+    } else if (key == "WAGFAM_API_KEY") {
+      WAGFAM_API_KEY = value;
+      Serial.println("WAGFAM_API_KEY: [set]");
+    } else if (key == "WAGFAM_EVENT_TODAY") {
+      WAGFAM_EVENT_TODAY = value.toInt();
       Serial.println("WAGFAM_EVENT_TODAY: " + String(WAGFAM_EVENT_TODAY));
-    }
-    if (line.indexOf("APIKEY=") >= 0) {
-      APIKEY = line.substring(line.lastIndexOf("APIKEY=") + 7);
-      APIKEY.trim();
-      Serial.println("APIKEY: " + APIKEY);
-    }
-    if (line.indexOf("CityID=") >= 0) {
-      geoLocation = line.substring(line.lastIndexOf("CityID=") + 7);
-      geoLocation.trim();
+    } else if (key == "APIKEY") {
+      APIKEY = value;
+      Serial.println("APIKEY: [set]");
+    } else if (key == "CityID") {
+      geoLocation = value;
       Serial.println("CityID: " + geoLocation);
-    }
-    if (line.indexOf("is24hour=") >= 0) {
-      IS_24HOUR = line.substring(line.lastIndexOf("is24hour=") + 9).toInt();
+    } else if (key == "is24hour") {
+      IS_24HOUR = value.toInt();
       Serial.println("IS_24HOUR=" + String(IS_24HOUR));
-    }
-    if (line.indexOf("isPM=") >= 0) {
-      IS_PM = line.substring(line.lastIndexOf("isPM=") + 5).toInt();
+    } else if (key == "isPM") {
+      IS_PM = value.toInt();
       Serial.println("IS_PM=" + String(IS_PM));
-    }
-    if (line.indexOf("isMetric=") >= 0) {
-      IS_METRIC = line.substring(line.lastIndexOf("isMetric=") + 9).toInt();
+    } else if (key == "isMetric") {
+      IS_METRIC = value.toInt();
       Serial.println("IS_METRIC=" + String(IS_METRIC));
-    }
-    if (line.indexOf("refreshRate=") >= 0) {
-      minutesBetweenDataRefresh = line.substring(line.lastIndexOf("refreshRate=") + 12).toInt();
-      if (minutesBetweenDataRefresh == 0) {
-        minutesBetweenDataRefresh = 15; // can't be zero
-      }
+    } else if (key == "refreshRate") {
+      minutesBetweenDataRefresh = value.toInt();
+      if (minutesBetweenDataRefresh == 0) minutesBetweenDataRefresh = 15;
       Serial.println("minutesBetweenDataRefresh=" + String(minutesBetweenDataRefresh));
-    }
-    if (line.indexOf("minutesBetweenScrolling=") >= 0) {
+    } else if (key == "minutesBetweenScrolling") {
       displayRefreshCount = 1;
-      minutesBetweenScrolling = line.substring(line.lastIndexOf("minutesBetweenScrolling=") + 24).toInt();
+      minutesBetweenScrolling = value.toInt();
       Serial.println("minutesBetweenScrolling=" + String(minutesBetweenScrolling));
-    }
-    if (line.indexOf("ledIntensity=") >= 0) {
-      displayIntensity = line.substring(line.lastIndexOf("ledIntensity=") + 13).toInt();
+    } else if (key == "ledIntensity") {
+      displayIntensity = value.toInt();
       Serial.println("displayIntensity=" + String(displayIntensity));
-    }
-    if (line.indexOf("scrollSpeed=") >= 0) {
-      displayScrollSpeed = line.substring(line.lastIndexOf("scrollSpeed=") + 12).toInt();
+    } else if (key == "scrollSpeed") {
+      displayScrollSpeed = value.toInt();
       Serial.println("displayScrollSpeed=" + String(displayScrollSpeed));
-    }
-    if (line.indexOf("SHOW_CITY=") >= 0) {
-      SHOW_CITY = line.substring(line.lastIndexOf("SHOW_CITY=") + 10).toInt();
+    } else if (key == "SHOW_CITY") {
+      SHOW_CITY = value.toInt();
       Serial.println("SHOW_CITY=" + String(SHOW_CITY));
-    }
-    if (line.indexOf("SHOW_CONDITION=") >= 0) {
-      SHOW_CONDITION = line.substring(line.lastIndexOf("SHOW_CONDITION=") + 15).toInt();
+    } else if (key == "SHOW_CONDITION") {
+      SHOW_CONDITION = value.toInt();
       Serial.println("SHOW_CONDITION=" + String(SHOW_CONDITION));
-    }
-    if (line.indexOf("SHOW_HUMIDITY=") >= 0) {
-      SHOW_HUMIDITY = line.substring(line.lastIndexOf("SHOW_HUMIDITY=") + 14).toInt();
+    } else if (key == "SHOW_HUMIDITY") {
+      SHOW_HUMIDITY = value.toInt();
       Serial.println("SHOW_HUMIDITY=" + String(SHOW_HUMIDITY));
-    }
-    if (line.indexOf("SHOW_WIND=") >= 0) {
-      SHOW_WIND = line.substring(line.lastIndexOf("SHOW_WIND=") + 10).toInt();
+    } else if (key == "SHOW_WIND") {
+      SHOW_WIND = value.toInt();
       Serial.println("SHOW_WIND=" + String(SHOW_WIND));
-    }
-    if (line.indexOf("SHOW_PRESSURE=") >= 0) {
-      SHOW_PRESSURE = line.substring(line.lastIndexOf("SHOW_PRESSURE=") + 14).toInt();
+    } else if (key == "SHOW_PRESSURE") {
+      SHOW_PRESSURE = value.toInt();
       Serial.println("SHOW_PRESSURE=" + String(SHOW_PRESSURE));
-    }
-    if (line.indexOf("SHOW_HIGHLOW=") >= 0) {
-      SHOW_HIGHLOW = line.substring(line.lastIndexOf("SHOW_HIGHLOW=") + 13).toInt();
+    } else if (key == "SHOW_HIGHLOW") {
+      SHOW_HIGHLOW = value.toInt();
       Serial.println("SHOW_HIGHLOW=" + String(SHOW_HIGHLOW));
-    }
-    if (line.indexOf("SHOW_DATE=") >= 0) {
-      SHOW_DATE = line.substring(line.lastIndexOf("SHOW_DATE=") + 10).toInt();
+    } else if (key == "SHOW_DATE") {
+      SHOW_DATE = value.toInt();
       Serial.println("SHOW_DATE=" + String(SHOW_DATE));
+    } else if (key == "OTA_SAFE_URL") {
+      OTA_SAFE_URL = value;
+      Serial.print(F("OTA_SAFE_URL: "));
+      Serial.println(OTA_SAFE_URL != "" ? "[set]" : "[empty]");
     }
   }
   fr.close();
@@ -1010,10 +1085,7 @@ void readPersistentConfig() {
 
 void scrollMessageWait(const String &msg) {
   for ( int i = 0 ; i < width * (int)msg.length() + matrix.width() - 1 - spacer; i++ ) {
-    // Web server is always enabled
     server.handleClient();
-    // OTA Updater is always enabled
-    ArduinoOTA.handle();
     matrix.fillScreen(LOW);
 
     int letter = i / width;
@@ -1044,7 +1116,7 @@ void centerPrint(const String &msg, boolean extraStuff) {
     // only displayed when there is an event happening on a given day.
     if (WAGFAM_EVENT_TODAY) {
       todayDisplayMilliSecond = millis() % (TODAY_DISPLAY_DOT_SPACING * TODAY_DISPLAY_DOT_SPEED_MS);
-      todayDisplayStartingLED = int(todayDisplayMilliSecond / TODAY_DISPLAY_DOT_SPEED_MS);
+      todayDisplayStartingLED = todayDisplayMilliSecond / TODAY_DISPLAY_DOT_SPEED_MS;
       for (int i = 0; i < (matrix.height()*2+matrix.width()-2); i++) {
         if ((i % TODAY_DISPLAY_DOT_SPACING) == todayDisplayStartingLED) {
           if (i < matrix.height()) {

@@ -143,6 +143,97 @@ void test_clean_text_multiple_replacements() {
     TEST_ASSERT_EQUAL_STRING("eleve...wait", result.c_str());
 }
 
+// ── config block parsing ─────────────────────────────────────────────────────
+
+void test_config_event_today_true() {
+    WagFamBdayClient client("", "");
+    feed_json(client, "[{\"config\":{\"eventToday\":\"1\"}}]");
+    auto cfg = client.getLastConfig();
+    TEST_ASSERT_TRUE(cfg.eventTodayValid);
+    TEST_ASSERT_TRUE(cfg.eventToday);
+}
+
+void test_config_event_today_false() {
+    WagFamBdayClient client("", "");
+    feed_json(client, "[{\"config\":{\"eventToday\":\"0\"}}]");
+    auto cfg = client.getLastConfig();
+    TEST_ASSERT_TRUE(cfg.eventTodayValid);
+    TEST_ASSERT_FALSE(cfg.eventToday);
+}
+
+void test_config_data_source_url_parsed() {
+    WagFamBdayClient client("", "");
+    feed_json(client, "[{\"config\":{\"dataSourceUrl\":\"https://example.com/data.json\"}}]");
+    auto cfg = client.getLastConfig();
+    TEST_ASSERT_TRUE(cfg.dataSourceUrlValid);
+    TEST_ASSERT_EQUAL_STRING("https://example.com/data.json", cfg.dataSourceUrl.c_str());
+}
+
+void test_config_api_key_parsed() {
+    WagFamBdayClient client("", "");
+    feed_json(client, "[{\"config\":{\"apiKey\":\"secret-token-123\"}}]");
+    auto cfg = client.getLastConfig();
+    TEST_ASSERT_TRUE(cfg.apiKeyValid);
+    TEST_ASSERT_EQUAL_STRING("secret-token-123", cfg.apiKey.c_str());
+}
+
+void test_config_latest_version_parsed() {
+    WagFamBdayClient client("", "");
+    feed_json(client, "[{\"config\":{\"latestVersion\":\"3.09.0-wagfam\"}}]");
+    auto cfg = client.getLastConfig();
+    TEST_ASSERT_TRUE(cfg.latestVersionValid);
+    TEST_ASSERT_EQUAL_STRING("3.09.0-wagfam", cfg.latestVersion.c_str());
+}
+
+void test_config_firmware_url_parsed() {
+    WagFamBdayClient client("", "");
+    feed_json(client, "[{\"config\":{\"firmwareUrl\":\"http://example.com/fw.bin\"}}]");
+    auto cfg = client.getLastConfig();
+    TEST_ASSERT_TRUE(cfg.firmwareUrlValid);
+    TEST_ASSERT_EQUAL_STRING("http://example.com/fw.bin", cfg.firmwareUrl.c_str());
+}
+
+void test_config_multiple_fields_in_one_block() {
+    WagFamBdayClient client("", "");
+    feed_json(client,
+        "[{\"config\":{"
+        "\"eventToday\":\"1\","
+        "\"latestVersion\":\"3.09.0-wagfam\","
+        "\"firmwareUrl\":\"http://example.com/fw.bin\""
+        "}}]");
+    auto cfg = client.getLastConfig();
+    TEST_ASSERT_TRUE(cfg.eventTodayValid);
+    TEST_ASSERT_TRUE(cfg.eventToday);
+    TEST_ASSERT_TRUE(cfg.latestVersionValid);
+    TEST_ASSERT_EQUAL_STRING("3.09.0-wagfam", cfg.latestVersion.c_str());
+    TEST_ASSERT_TRUE(cfg.firmwareUrlValid);
+    TEST_ASSERT_EQUAL_STRING("http://example.com/fw.bin", cfg.firmwareUrl.c_str());
+}
+
+void test_config_absent_fields_not_valid() {
+    WagFamBdayClient client("", "");
+    feed_json(client, "[{\"config\":{\"eventToday\":\"1\"}}]");
+    auto cfg = client.getLastConfig();
+    TEST_ASSERT_FALSE(cfg.latestVersionValid);
+    TEST_ASSERT_FALSE(cfg.firmwareUrlValid);
+    TEST_ASSERT_FALSE(cfg.dataSourceUrlValid);
+    TEST_ASSERT_FALSE(cfg.apiKeyValid);
+}
+
+void test_config_with_messages_both_parsed() {
+    WagFamBdayClient client("", "");
+    feed_json(client,
+        "[{\"config\":{\"eventToday\":\"1\"}},"
+        "{\"message\":\"Happy Birthday!\"}]");
+    auto cfg = client.getLastConfig();
+    TEST_ASSERT_TRUE(cfg.eventTodayValid);
+    TEST_ASSERT_TRUE(cfg.eventToday);
+    TEST_ASSERT_EQUAL(1, client.getNumMessages());
+    TEST_ASSERT_EQUAL_STRING("Happy Birthday!", client.getMessage(0).c_str());
+}
+
+// ── cleanText ───────────────────────────────────────────────────────────────
+
 void test_clean_text_smart_single_right_quote() {
     // U+2019 RIGHT SINGLE QUOTATION MARK = \xe2\x80\x99
     WagFamBdayClient client("", "");
@@ -160,6 +251,16 @@ int main() {
     RUN_TEST(test_config_only_gives_zero_messages);
     RUN_TEST(test_second_parse_resets_message_counter);
     RUN_TEST(test_whitespace_in_json_handled);
+
+    RUN_TEST(test_config_event_today_true);
+    RUN_TEST(test_config_event_today_false);
+    RUN_TEST(test_config_data_source_url_parsed);
+    RUN_TEST(test_config_api_key_parsed);
+    RUN_TEST(test_config_latest_version_parsed);
+    RUN_TEST(test_config_firmware_url_parsed);
+    RUN_TEST(test_config_multiple_fields_in_one_block);
+    RUN_TEST(test_config_absent_fields_not_valid);
+    RUN_TEST(test_config_with_messages_both_parsed);
 
     RUN_TEST(test_clean_text_ascii_passthrough);
     RUN_TEST(test_clean_text_smart_left_double_quote);

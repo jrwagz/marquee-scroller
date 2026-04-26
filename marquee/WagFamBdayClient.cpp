@@ -42,6 +42,9 @@ WagFamBdayClient::configValues WagFamBdayClient::updateData() {
 
   std::unique_ptr<BearSSL::WiFiClientSecure> client(new BearSSL::WiFiClientSecure);
   client->setInsecure();
+  // Reduce TLS record buffers from the 16KB default to something appropriate
+  // for our small JSON payloads. Saves ~12-19KB of heap on every calendar fetch.
+  client->setBufferSizes(2048, 512);
 
   HTTPClient https;
 
@@ -125,7 +128,9 @@ void WagFamBdayClient::whitespace(char c) {
 //     "config": {
 //       "dataSourceUrl": "",
 //       "apiKey": "",
-//       "eventToday": ""
+//       "eventToday": "",
+//       "latestVersion": "3.08.0-wagfam",
+//       "firmwareUrl": "http://example.com/marquee-v3.08.0.bin"
 //     }
 //   },
 //   {
@@ -157,6 +162,12 @@ void WagFamBdayClient::value(String value) {
     } else if (currentKey == "eventToday") {
       currentConfig.eventTodayValid = true;
       currentConfig.eventToday = value.toInt();
+    } else if (currentKey == "latestVersion") {
+      currentConfig.latestVersionValid = true;
+      currentConfig.latestVersion = value;
+    } else if (currentKey == "firmwareUrl") {
+      currentConfig.firmwareUrlValid = true;
+      currentConfig.firmwareUrl = value;
     }
   } else if (currentKey == "message") {
     if (messageCounter >= 10) {
@@ -166,8 +177,6 @@ void WagFamBdayClient::value(String value) {
     messages[messageCounter] = cleanText(value);
     messageCounter++;
   }
-
-  Serial.println(currentKey + "=" + value);
 }
 
 void WagFamBdayClient::endArray() {
@@ -192,6 +201,7 @@ void WagFamBdayClient::endDocument() {
 }
 
 String WagFamBdayClient::cleanText(String text) {
+  text.reserve(text.length() + 64);
   text.replace("’", "'");
   text.replace("“", "\"");
   text.replace("”", "\"");
