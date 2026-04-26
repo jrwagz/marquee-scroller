@@ -232,6 +232,30 @@ void test_config_with_messages_both_parsed() {
     TEST_ASSERT_EQUAL_STRING("Happy Birthday!", client.getMessage(0).c_str());
 }
 
+// ── getMessage bounds check (SEC-14) ────────────────────────────────────────
+
+void test_get_message_negative_index_returns_empty() {
+    WagFamBdayClient client("", "");
+    feed_json(client, "[{\"message\":\"Hello\"}]");
+    TEST_ASSERT_EQUAL_STRING("", client.getMessage(-1).c_str());
+}
+
+void test_get_message_out_of_bounds_returns_empty() {
+    WagFamBdayClient client("", "");
+    feed_json(client, "[{\"message\":\"Hello\"}]");
+    TEST_ASSERT_EQUAL(1, client.getNumMessages());
+    TEST_ASSERT_EQUAL_STRING("", client.getMessage(1).c_str());
+    TEST_ASSERT_EQUAL_STRING("", client.getMessage(10).c_str());
+    TEST_ASSERT_EQUAL_STRING("", client.getMessage(99).c_str());
+}
+
+void test_get_message_valid_index_still_works() {
+    WagFamBdayClient client("", "");
+    feed_json(client, "[{\"message\":\"Hello\"},{\"message\":\"World\"}]");
+    TEST_ASSERT_EQUAL_STRING("Hello", client.getMessage(0).c_str());
+    TEST_ASSERT_EQUAL_STRING("World", client.getMessage(1).c_str());
+}
+
 // ── cleanText ───────────────────────────────────────────────────────────────
 
 void test_clean_text_smart_single_right_quote() {
@@ -261,6 +285,10 @@ int main() {
     RUN_TEST(test_config_multiple_fields_in_one_block);
     RUN_TEST(test_config_absent_fields_not_valid);
     RUN_TEST(test_config_with_messages_both_parsed);
+
+    RUN_TEST(test_get_message_negative_index_returns_empty);
+    RUN_TEST(test_get_message_out_of_bounds_returns_empty);
+    RUN_TEST(test_get_message_valid_index_still_works);
 
     RUN_TEST(test_clean_text_ascii_passthrough);
     RUN_TEST(test_clean_text_smart_left_double_quote);

@@ -49,7 +49,7 @@ WagFamBdayClient::configValues WagFamBdayClient::updateData() {
   HTTPClient https;
 
   Serial.println("Getting Birthdays Data");
-  Serial.println(myJsonSourceUrl);
+  Serial.println(F("[calendar URL redacted]"));
 
   if (!https.begin(*client, myJsonSourceUrl)) {
     Serial.println("[HTTPS] Unable to connect");
@@ -102,6 +102,7 @@ WagFamBdayClient::configValues WagFamBdayClient::updateData() {
 }
 
 String WagFamBdayClient::getMessage(int index) {
+  if (index < 0 || index >= messageCounter) return String();
   return messages[index];
 }
 
