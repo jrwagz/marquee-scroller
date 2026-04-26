@@ -3,7 +3,7 @@
 > **Date:** 2026-04-26
 > **Device:** Wemos D1 Mini (chip 5fc8ad) at 192.168.168.66
 > **Starting firmware:** 3.08.0-wagfam (feature/security-hardening branch)
-> **Tester:** dallanwagz + Claude Code
+> **Tester:** dallanwagz
 
 ## Background
 
