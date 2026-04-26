@@ -5,7 +5,7 @@ else
 DOCKER_TTY_ARGS=
 endif
 
-MD_FILES:=$(shell find . -name "*.md" -not -path "./.venv/*" -not -path "./.pytest_cache/*" -not -path "./lib/*" -not -path "./.pio/*")
+MD_FILES:=$(shell find . -name "*.md" -not -path "./.venv/*" -not -path "*/.venv/*" -not -path "./.pytest_cache/*" -not -path "*/.pytest_cache/*" -not -path "./lib/*" -not -path "./.pio/*")
 
 MARKDOWNLINT_IMAGE:=davidanson/markdownlint-cli2:v0.22.0
 PIO_IMAGE:=ghcr.io/jrwagz/pio-image:v6.1.19

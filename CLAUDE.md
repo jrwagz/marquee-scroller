@@ -72,8 +72,9 @@ The functions `savePersistentConfig()` and `readPersistentConfig()` in [marquee.
 own all reads and writes to this file. [Settings.h](marquee/Settings.h) contains compile-time defaults only —
 changes there require a filesystem erase to take effect.
 
-`WAGFAM_EVENT_TODAY` is not user-configurable via the web form — it is set exclusively by the server's
-`config.eventToday` field in the calendar JSON response and persisted across reboots via `/conf.txt`.
+`WAGFAM_EVENT_TODAY` and `DEVICE_NAME` are not user-configurable via the web form — they are set
+exclusively by the server's `config.eventToday` and `config.deviceName` fields in the calendar
+JSON response and persisted across reboots via `/conf.txt`.
 
 ### Adding a New Config Key
 
@@ -153,7 +154,8 @@ Expected JSON format:
       "dataSourceUrl": "...",
       "apiKey": "...",
       "latestVersion": "3.08.0-wagfam",
-      "firmwareUrl": "http://example.com/firmware.bin"
+      "firmwareUrl": "http://example.com/firmware.bin",
+      "deviceName": "Kitchen Clock"
     }
   },
   { "message": "Justin birthday - tomorrow" },
@@ -166,6 +168,19 @@ Expected JSON format:
 - `cleanText()` translates Unicode lookalikes to ASCII for the LED font (35+ `replace()` calls)
 - `latestVersion` + `firmwareUrl` trigger an auto-update if version differs from `VERSION` macro;
   see `docs/OTA_STRATEGY.md` for full rollback architecture
+- `deviceName` is a human-friendly label assigned by the server; stored on the device but not
+  user-editable (like `WAGFAM_EVENT_TODAY`)
+
+### Device Heartbeat
+
+Each calendar fetch includes device telemetry as query parameters:
+
+```text
+GET /data_source.json?chip_id=5fc8ad&version=3.08.0-wagfam&uptime=1234567&heap=32496&rssi=-62
+```
+
+This lets a backend identify and monitor all deployed clocks without any additional
+connections. Static JSON hosts (e.g., GitHub raw) ignore the query params gracefully.
 
 ## OTA Update Architecture
 

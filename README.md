@@ -106,7 +106,8 @@ The calendar client fetches a JSON array from the configured URL (HTTPS supporte
 [
   {
     "config": {
-      "eventToday": "1"
+      "eventToday": "1",
+      "deviceName": "Kitchen Clock"
     }
   },
   { "message": "Justin's Birthday - 3 days away" },
@@ -117,7 +118,13 @@ The calendar client fetches a JSON array from the configured URL (HTTPS supporte
 - Up to 10 messages are supported; they cycle through the marquee scroll
 - The `config` block is optional; if present, `eventToday: 1` enables an animated dot border around the clock display
   for the day
-- The `config` block can also remotely update `dataSourceUrl` and `apiKey` on the device
+- The `config` block can also remotely update `dataSourceUrl`, `apiKey`, and `deviceName` on the device
+
+### Device Heartbeat
+
+Each calendar fetch includes device telemetry as URL query parameters (`chip_id`, `version`,
+`uptime`, `heap`, `rssi`). A backend can use these to identify and monitor all deployed clocks.
+Static JSON hosts ignore the query params.
 
 ### Geo Location
 

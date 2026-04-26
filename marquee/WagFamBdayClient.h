@@ -28,6 +28,14 @@ SOFTWARE.
 #include <JsonListener.h>
 #include <JsonStreamingParser.h> // --> https://github.com/squix78/json-streaming-parser
 
+struct DeviceInfo {
+    String chipId;
+    String version;
+    uint32_t uptimeMs;
+    uint32_t freeHeap;
+    int32_t rssi;
+};
+
 class WagFamBdayClient: public JsonListener {
 
   public:
@@ -42,11 +50,13 @@ class WagFamBdayClient: public JsonListener {
       String latestVersion;
       boolean firmwareUrlValid;
       String firmwareUrl;
+      boolean deviceNameValid;
+      String deviceName;
     } configValues;
 
     WagFamBdayClient(String ApiKey, String JsonDataSourceUrl);
     void updateBdayClient(String ApiKey, String JsonDataSourceUrl);
-    WagFamBdayClient::configValues updateData();
+    WagFamBdayClient::configValues updateData(const DeviceInfo& device);
     void updateDataSource(String JsonDataSourceUrl);
 
     String getMessage(int index);
