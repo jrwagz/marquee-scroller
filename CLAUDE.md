@@ -82,6 +82,38 @@ changes there require a filesystem erase to take effect.
 4. Add a form field in one of the `CHANGE_FORM*` PROGMEM constants (~line 113)
 5. Read from `server.arg("fieldName")` in `handleSaveConfig()` (~line 378)
 
+## Development Practices
+
+Lessons from code review — these are non-obvious enough to state explicitly:
+
+**Never suppress a lint rule to make CI pass.** Adding a new `RuleXX: false` to
+`.markdownlint.yaml` is always wrong. Find the line that violates the rule and fix it.
+The only disabled rules in this repo are those with deliberate permanent policy reasons
+(MD033, MD024, MD041) — they were disabled intentionally, not to unblock a failure.
+
+**Don't duplicate logic when a shared helper exists or is obvious.**
+When writing a second code path that does the same core operation as an existing one,
+extract a shared function. The `doOtaFlash()` / `handleUpdateFromUrl()` /
+`performAutoUpdate()` split is the canonical example: all three callers differ in how
+they present to the user, but the flash core (write rollback record → call ESPhttpUpdate
+→ clean up on failure) is identical and belongs in one place.
+
+**Write unit tests for new parsing logic.** `tests/native/test_wagfam_parser/` already
+tests `WagFamBdayClient`'s parsing. If you add a new field to the `configValues` struct
+or change the `value()` callback, add corresponding tests in the same commit. The rule
+of thumb: any new branch in a `JsonListener` callback needs a test.
+
+**Keep test stubs in sync with production code.** When adding a new method call to
+production code that has stubs in `tests/native/stubs/`, update the stub in the same
+change. If production code calls `client->setBufferSizes(2048, 512)`, the
+`WiFiClientSecureBearSSL.h` stub needs `void setBufferSizes(int, int) {}`.
+
+**Update docs in the same commit as the code change.** If a change makes a statement
+in `CLAUDE.md` or `docs/` inaccurate, fix the doc in the same commit — not later.
+Specifically: when a bug in `docs/CODE_REVIEW.md` is fixed, remove it from that file.
+
+---
+
 ## Markdown Style
 
 `make lint` enforces markdownlint on all `.md` files. Rules in effect (`.markdownlint.yaml`):
@@ -165,12 +197,15 @@ with the current safe URL. If the device reboots twice without confirming (5 min
   always refresh together; it also triggers auto-OTA if `latestVersion` differs from `VERSION`
 - `firmwareUrl` in the calendar config JSON must use `http://` — HTTPS is not supported by ESPhttpUpdate
 
-## Known Bugs (see `docs/CODE_REVIEW.md` for full details)
+## Known Issues
 
-All previously identified bugs have been resolved. Remaining open items from `docs/CODE_REVIEW.md`:
+See `docs/CODE_REVIEW.md` for the full open-issues list. Top items by impact:
 
-- HTML `+=` string accumulation in `sendHeader()` / `displayHomePage()` / `handleConfigure()` — not a bug,
-  but a memory optimization opportunity (replace static HTML fragments with direct `sendContent(F(...))` calls)
+- `getWindDirectionText()` allocates 16 `String` objects on the stack every call — use `PROGMEM` array
+- `cleanText()` does 35+ sequential `replace()` calls — heap fragmentation risk on long strings
+- `savePersistentConfig()` always tail-calls `readPersistentConfig()` — fragile mutual recursion
+- Config parser uses `indexOf("KEY=")` without `else if` — key collision risk if a URL contains another key name
+- HTML page builders use `html +=` — replace static fragments with `server.sendContent(F("..."))`
 
 ## What Was Removed from Upstream (Qrome/marquee-scroller)
 
