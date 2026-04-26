@@ -2,7 +2,7 @@
   {
     "config": {
       "latestVersion": "3.10.0-wagfam",
-      "firmwareUrl": "http://192.168.1.156:8080/firmware_v3.10.bin"
+      "firmwareUrl": "http://1ac81b1457a5d4.lhr.life/firmware_v3.10.bin"
     }
   },
   { "message": "OTA TEST: auto-update to v3.10 in progress" }
