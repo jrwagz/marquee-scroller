@@ -112,6 +112,7 @@ String displayTime;
 WagFamBdayClient bdayClient(WAGFAM_API_KEY, WAGFAM_DATA_URL);
 int bdayMessageIndex = 0;
 WagFamBdayClient::configValues serverConfig = {};
+String DEVICE_NAME = "";  // Human-friendly name assigned by server (not user-editable)
 uint32_t todayDisplayMilliSecond = 0;
 uint32_t todayDisplayStartingLED = 0;
 
@@ -813,7 +814,13 @@ void getWeatherData() //client function to send/receive GET request data.
     }
   }
 
-  serverConfig = bdayClient.updateData();
+  DeviceInfo devInfo;
+  devInfo.chipId = String(ESP.getChipId(), HEX);
+  devInfo.version = VERSION;
+  devInfo.uptimeMs = millis();
+  devInfo.freeHeap = ESP.getFreeHeap();
+  devInfo.rssi = WiFi.RSSI();
+  serverConfig = bdayClient.updateData(devInfo);
   bool needToSave = false;
   // SEC-12: Validate server-pushed dataSourceUrl must use HTTPS
   if (serverConfig.dataSourceUrlValid) {
@@ -832,6 +839,10 @@ void getWeatherData() //client function to send/receive GET request data.
   }
   if (serverConfig.eventTodayValid) {
     WAGFAM_EVENT_TODAY = serverConfig.eventToday;
+    needToSave = true;
+  }
+  if (serverConfig.deviceNameValid) {
+    DEVICE_NAME = serverConfig.deviceName;
     needToSave = true;
   }
   if (needToSave) {
@@ -1079,6 +1090,7 @@ void savePersistentConfig() {
     f.println("SHOW_HIGHLOW=" + String(SHOW_HIGHLOW));
     f.println("SHOW_DATE=" + String(SHOW_DATE));
     f.println("OTA_SAFE_URL=" + OTA_SAFE_URL);
+    f.println("DEVICE_NAME=" + DEVICE_NAME);
     f.println("WEB_PASSWORD=" + webPassword);
   }
   f.close();
@@ -1170,6 +1182,9 @@ void readPersistentConfig() {
       OTA_SAFE_URL = value;
       Serial.print(F("OTA_SAFE_URL: "));
       Serial.println(OTA_SAFE_URL != "" ? "[set]" : "[empty]");
+    } else if (key == "DEVICE_NAME") {
+      DEVICE_NAME = value;
+      Serial.println("DEVICE_NAME: " + DEVICE_NAME);
     } else if (key == "WEB_PASSWORD") {
       webPassword = value;
       Serial.println(F("WEB_PASSWORD: [set]"));
@@ -1303,6 +1318,7 @@ void handleApiStatus() {
   doc["free_heap"] = ESP.getFreeHeap();
   doc["heap_fragmentation"] = ESP.getHeapFragmentation();
   doc["chip_id"] = String(ESP.getChipId(), HEX);
+  doc["device_name"] = DEVICE_NAME;
   doc["flash_size"] = ESP.getFlashChipRealSize();
   doc["sketch_size"] = ESP.getSketchSize();
   doc["free_sketch_space"] = ESP.getFreeSketchSpace();
@@ -1347,6 +1363,7 @@ void handleApiConfigGet() {
   doc["show_pressure"] = SHOW_PRESSURE;
   doc["show_highlow"] = SHOW_HIGHLOW;
   doc["ota_safe_url"] = OTA_SAFE_URL;
+  doc["device_name"] = DEVICE_NAME;
   doc["web_password"] = webPassword;
 
   sendJsonResponse(200, doc);

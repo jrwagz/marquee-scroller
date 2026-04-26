@@ -218,6 +218,29 @@ void test_config_absent_fields_not_valid() {
     TEST_ASSERT_FALSE(cfg.firmwareUrlValid);
     TEST_ASSERT_FALSE(cfg.dataSourceUrlValid);
     TEST_ASSERT_FALSE(cfg.apiKeyValid);
+    TEST_ASSERT_FALSE(cfg.deviceNameValid);
+}
+
+void test_config_device_name_parsed() {
+    WagFamBdayClient client("", "");
+    feed_json(client, "[{\"config\":{\"deviceName\":\"Kitchen Clock\"}}]");
+    auto cfg = client.getLastConfig();
+    TEST_ASSERT_TRUE(cfg.deviceNameValid);
+    TEST_ASSERT_EQUAL_STRING("Kitchen Clock", cfg.deviceName.c_str());
+}
+
+void test_config_device_name_with_other_fields() {
+    WagFamBdayClient client("", "");
+    feed_json(client,
+        "[{\"config\":{"
+        "\"eventToday\":\"0\","
+        "\"deviceName\":\"Living Room\""
+        "}}]");
+    auto cfg = client.getLastConfig();
+    TEST_ASSERT_TRUE(cfg.deviceNameValid);
+    TEST_ASSERT_EQUAL_STRING("Living Room", cfg.deviceName.c_str());
+    TEST_ASSERT_TRUE(cfg.eventTodayValid);
+    TEST_ASSERT_FALSE(cfg.eventToday);
 }
 
 void test_config_with_messages_both_parsed() {
@@ -284,6 +307,8 @@ int main() {
     RUN_TEST(test_config_firmware_url_parsed);
     RUN_TEST(test_config_multiple_fields_in_one_block);
     RUN_TEST(test_config_absent_fields_not_valid);
+    RUN_TEST(test_config_device_name_parsed);
+    RUN_TEST(test_config_device_name_with_other_fields);
     RUN_TEST(test_config_with_messages_both_parsed);
 
     RUN_TEST(test_get_message_negative_index_returns_empty);

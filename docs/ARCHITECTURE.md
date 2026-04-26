@@ -201,6 +201,7 @@ All runtime state lives as global variables in `marquee.ino`. The most important
 | `WAGFAM_DATA_URL` | `String` | Calendar JSON endpoint URL |
 | `WAGFAM_API_KEY` | `String` | Bearer token for calendar endpoint |
 | `WAGFAM_EVENT_TODAY` | `boolean` | Drives the animated event-day border |
+| `DEVICE_NAME` | `String` | Human-friendly name assigned by server |
 | `geoLocation` | `String` | Weather location (city ID, lat/lon, or name) |
 | `IS_METRIC` | `boolean` | Unit system toggle |
 | `IS_24HOUR` | `boolean` | 12h vs 24h clock |
@@ -263,9 +264,9 @@ and `bdayClient.updateBdayClient()` to apply the values.
 **Writing:** `savePersistentConfig()` overwrites the file completely (no partial updates),
 then calls `readPersistentConfig()` to re-apply the new values.
 
-**`WAGFAM_EVENT_TODAY`** is special: it is **never set from the web form**. It is only set
-by the `config.eventToday` field returned by the calendar server, then persisted so it
-survives reboots.
+**`WAGFAM_EVENT_TODAY`** and **`DEVICE_NAME`** are special: they are **never set from the
+web form**. They are only set by the calendar server's `config.eventToday` and
+`config.deviceName` fields, then persisted so they survive reboots.
 
 ---
 
@@ -287,12 +288,13 @@ getWeatherData()
 ├── getNtpTime()                           → UDP to 1.pool.ntp.org
 │   └── Returns adjusted Unix time
 ├── setTime(t)                             → Updates TimeLib clock
-├── bdayClient.updateData()                → HTTPS GET to WAGFAM_DATA_URL
+├── bdayClient.updateData(devInfo)          → HTTPS GET to WAGFAM_DATA_URL
+│   └── Appends ?chip_id=&version=&uptime=&heap=&rssi= (heartbeat)
 │   └── Streams JSON through parser
 │   └── Fills messages[0..9]
 │   └── Returns configValues (remote config)
 └── If config received:
-    └── Update WAGFAM_DATA_URL / WAGFAM_API_KEY / WAGFAM_EVENT_TODAY
+    └── Update WAGFAM_DATA_URL / WAGFAM_API_KEY / WAGFAM_EVENT_TODAY / DEVICE_NAME
     └── savePersistentConfig()             → Write /conf.txt
 ```
 
