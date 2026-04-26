@@ -26,6 +26,7 @@
 ***********************************************/
 
 #include "Settings.h"
+#include "SecurityHelpers.h"
 
 #define VERSION "3.08.0-wagfam"
 
@@ -73,9 +74,6 @@ void handleUpdateFromUrl();
 bool requireWebAuth();
 static bool requireApiAuth();
 static bool requireApiCsrf();
-static bool isProtectedPath(const char *path);
-static String extractDomain(const String &url);
-static bool isTrustedFirmwareDomain(const String &url);
 
 // REST API handlers
 void handleApiStatus();
@@ -843,7 +841,7 @@ void getWeatherData() //client function to send/receive GET request data.
       && otaConfirmAt == 0
       && millis() > OTA_CONFIRM_MS) {
     // SEC-03: Validate firmware URL domain against calendar data source domain
-    if (!isTrustedFirmwareDomain(serverConfig.firmwareUrl)) {
+    if (!isTrustedFirmwareDomain(serverConfig.firmwareUrl, WAGFAM_DATA_URL)) {
       Serial.println(F("[SEC] Rejected firmware URL — domain does not match calendar source"));
     } else {
     Serial.println("[OTA] Server version: " + serverConfig.latestVersion + ", current: " + String(VERSION));
@@ -1252,31 +1250,6 @@ bool requireWebAuth() {
   return true;
 }
 
-// SEC-06: Protected filesystem paths that cannot be written/deleted via API
-static bool isProtectedPath(const char *path) {
-  return strcmp(path, CONFIG) == 0
-      || strcmp(path, OTA_PENDING_FILE) == 0;
-}
-
-// SEC-12/SEC-03: Extract domain from a URL for validation
-static String extractDomain(const String &url) {
-  int start = url.indexOf("://");
-  if (start < 0) return "";
-  start += 3;
-  int end = url.indexOf('/', start);
-  if (end < 0) end = url.length();
-  int port = url.indexOf(':', start);
-  if (port > 0 && port < end) end = port;
-  return url.substring(start, end);
-}
-
-// SEC-03: Validate firmware URL domain against the calendar data source domain
-static bool isTrustedFirmwareDomain(const String &firmwareUrl) {
-  String fwDomain = extractDomain(firmwareUrl);
-  String calDomain = extractDomain(WAGFAM_DATA_URL);
-  if (fwDomain == "" || calDomain == "") return false;
-  return fwDomain == calDomain;
-}
 
 // ── REST API ────────────────────────────────────────────────────────────────
 
@@ -1496,7 +1469,7 @@ void handleApiFsWrite() {
   if (!path || !content) { sendJsonError(400, "missing 'path' or 'content'"); return; }
 
   // SEC-06: Block writes to critical system files
-  if (isProtectedPath(path)) {
+  if (isProtectedPath(path, CONFIG, OTA_PENDING_FILE)) {
     sendJsonError(403, "protected path — use /api/config instead");
     return;
   }
@@ -1522,7 +1495,7 @@ void handleApiFsDelete() {
   if (!SPIFFS.exists(path)) { sendJsonError(404, "file not found"); return; }
 
   // SEC-06: Block deletion of critical system files
-  if (isProtectedPath(path.c_str())) {
+  if (isProtectedPath(path.c_str(), CONFIG, OTA_PENDING_FILE)) {
     sendJsonError(403, "protected path");
     return;
   }

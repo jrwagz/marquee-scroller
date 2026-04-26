@@ -20,6 +20,7 @@ help:
 	@echo "  lint-markdown-fix - Auto-fix markdownlint issues"
 	@echo "  lint              - Run lint-markdown"
 	@echo "  test-native       - Run native C++ unit tests (no device required)"
+	@echo "  test-integration  - Run integration tests against a live device (requires HOST=<ip>)"
 	@echo "  ready             - Full pipeline"
 
 .passwd:
@@ -83,6 +84,13 @@ test-native: .passwd
 		-u $(shell id -u):$(shell id -g) \
 		$(PIO_IMAGE) \
 		pio test -e native_test --junit-output-path artifacts/test-native-results.xml
+
+.PHONY: test-integration
+test-integration:
+ifndef HOST
+	$(error HOST is required. Usage: make test-integration HOST=192.168.1.100 [PASSWORD=mypass])
+endif
+	pytest tests/integration/ -v --host $(HOST) $(if $(PASSWORD),--password $(PASSWORD),) $(if $(PORT),--port $(PORT),)
 
 .PHONY: build
 build: .passwd
