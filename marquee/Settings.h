@@ -48,8 +48,8 @@ SOFTWARE.
 #include <Max72xxPanel.h> // --> https://github.com/markruys/arduino-Max72xxPanel
 #include <pgmspace.h>
 #include "OpenWeatherMapClient.h"
-#include "TimeNTP.h"
-#include "TimeStr.h"
+#include "timeNTP.h"
+#include "timeStr.h"
 #include "WagFamBdayClient.h"
 
 //******************************
