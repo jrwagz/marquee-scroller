@@ -140,7 +140,7 @@ String WagFamBdayClient::cleanText(String text) {
 `savePersistentConfig()` always calls `readPersistentConfig()` at the end.
 `readPersistentConfig()` calls `savePersistentConfig()` if the file doesn't exist.
 
-```
+```text
 savePersistentConfig()
 └── at end: readPersistentConfig()   ← always called
 

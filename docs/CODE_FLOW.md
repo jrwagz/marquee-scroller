@@ -26,7 +26,7 @@
 
 **File:** `marquee/marquee.ino:154`
 
-```
+```text
 setup()
 │
 ├── Serial.begin(115200)              // 115200 baud serial debug output
@@ -76,7 +76,7 @@ Time is not yet synced (NTP first sync happens on the first `getWeatherData()` c
 This runs continuously, as fast as the MCU allows (thousands of times per second
 when not scrolling).
 
-```
+```text
 loop()
 │
 ├── if second() changed → processEverySecond()
@@ -112,7 +112,7 @@ Builds the 5-character time string:
 
 **File:** `marquee/marquee.ino:291`
 
-```
+```text
 processEverySecond()
 │
 └── if (minutesSinceLastRefresh >= minutesBetweenDataRefresh) OR (never fetched yet)
@@ -131,7 +131,7 @@ seconds to complete (HTTP requests), so the time gap between refreshes is effect
 
 Decides whether to scroll the message ticker. Runs once per minute.
 
-```
+```text
 processEveryMinute()
 │
 ├── if weatherClient has error → scrollMessageWait(errorMessage) and return
@@ -170,7 +170,7 @@ If `minutesBetweenScrolling = 3`, it scrolls every 3 minutes.
 
 This is the main orchestrator for all external data. It runs synchronously (blocking).
 
-```
+```text
 getWeatherData()
 │
 ├── Flash status LED on
@@ -215,7 +215,7 @@ getWeatherData()
 
 `OpenWeatherMapClient::updateWeather()` makes a raw HTTP/1.1 request:
 
-```
+```text
 updateWeather()
 │
 ├── Validate API key and geo location type
@@ -258,7 +258,7 @@ is set to `false` and the scroll ticker shows the error message instead.
 
 `WagFamBdayClient::updateData()` uses HTTPS with a streaming JSON parser:
 
-```
+```text
 updateData()
 │
 ├── Create BearSSL::WiFiClientSecure with setInsecure()
@@ -279,7 +279,7 @@ updateData()
 
 The `WagFamBdayClient` implements `JsonListener`:
 
-```
+```text
 startDocument() → messageCounter = 0, inConfig = false
 
 key(k)          → currentKey = k
@@ -309,7 +309,7 @@ This is a brute-force series of ~35 `String::replace()` calls.
 
 **File:** `marquee/marquee.ino:1038`
 
-```
+```text
 centerPrint(msg, extraStuff)
 │
 ├── x = (matrix.width() - (msg.length() * width)) / 2
@@ -343,7 +343,7 @@ Text is drawn at `y=0` (top of the 8-pixel-tall display).
 
 **File:** `marquee/marquee.ino:1011`
 
-```
+```text
 scrollMessageWait(msg)
 │
 └── for i = 0 to (width * msg.length() + matrix.width() - 1 - spacer):
@@ -433,7 +433,7 @@ Calls `getWeatherData()` then `displayHomePage()`.
 
 ## Time Sync Flow
 
-```
+```text
 timeNTPsetup()                       // Called once in setup()
 ├── Udp.begin(8888)
 └── setSyncProvider(getNtpTime)      // TimeLib will call getNtpTime every 20s

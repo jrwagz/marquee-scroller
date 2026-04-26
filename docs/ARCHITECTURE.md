@@ -21,7 +21,6 @@
 11. [NTP Time Sync](#ntp-time-sync)
 12. [OTA Updates](#ota-updates)
 13. [Key Design Constraints](#key-design-constraints)
-14. [Dependencies](#dependencies)
 
 ---
 
@@ -101,7 +100,7 @@ This firmware is a fork of [Qrome/marquee-scroller](https://github.com/Qrome/mar
 
 ## Directory Layout
 
-```
+```text
 marquee-scroller/
 ├── marquee/                    # All firmware source
 │   ├── marquee.ino             # Main sketch (setup, loop, web handlers, display)
@@ -235,7 +234,7 @@ Settings are stored in a text file `/conf.txt` on the LittleFS filesystem (alias
 
 Format: one `key=value` pair per line, terminated with `\n`.
 
-```
+```ini
 WAGFAM_DATA_URL=https://example.com/family.json
 WAGFAM_API_KEY=ghp_xxxxx
 WAGFAM_EVENT_TODAY=0
@@ -279,7 +278,7 @@ called when:
 - `lastRefreshDataTimestamp == 0` (first run)
 - The user hits `/pull` in the web UI
 
-```
+```text
 getWeatherData()
 ├── weatherClient.updateWeather()          → HTTP GET to api.openweathermap.org
 │   └── Parses JSON, stores weather struct
@@ -343,7 +342,7 @@ the three visible perimeter edges of the display (left column, bottom row, right
 The animation is driven by `millis()`, not by the frame counter, so the speed is consistent
 regardless of loop speed:
 
-```
+```text
 dotPosition = (millis() % (SPACING * SPEED_MS)) / SPEED_MS
 ```
 

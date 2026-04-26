@@ -66,7 +66,7 @@ the target: detect a crash loop and re-download the previous known-good firmware
 Before every OTA flash, the firmware writes a **pending record** to LittleFS at
 `/ota_pending.txt`:
 
-```
+```ini
 safeUrl=http://example.com/v3.07.0.bin
 newUrl=http://example.com/v3.08.0.bin
 boots=0
@@ -93,7 +93,7 @@ confirmation:
 
 ### Rollback Decision Tree
 
-```
+```cpp
 Boot
  │
  ├─ /ota_pending.txt absent ──────────────────► Normal operation
@@ -178,7 +178,7 @@ during the most memory-intensive window (calendar HTTPS fetch) is now **16–27 
 
 ## Sequence: Successful Auto-Update
 
-```
+```text
 Server config JSON → latestVersion != VERSION
   → performAutoUpdate(firmwareUrl)
     → write /ota_pending.txt (boots=0, safeUrl=OTA_SAFE_URL, newUrl=firmwareUrl)
@@ -193,7 +193,7 @@ Server config JSON → latestVersion != VERSION
 
 ## Sequence: Crash-Loop Rollback
 
-```
+```text
 Server config JSON → latestVersion != VERSION
   → performAutoUpdate(firmwareUrl)
     → write /ota_pending.txt (boots=0, safeUrl=http://.../v3.07.bin, newUrl=...)
