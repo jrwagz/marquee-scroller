@@ -1,0 +1,9 @@
+[
+  {
+    "config": {
+      "latestVersion": "3.09.0-wagfam",
+      "firmwareUrl": "http://1ac81b1457a5d4.lhr.life/firmware_v3.09.bin"
+    }
+  },
+  { "message": "OTA TEST: auto-update to v3.09 in progress" }
+]
