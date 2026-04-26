@@ -62,12 +62,14 @@ void readPersistentConfig();
 void scrollMessageWait(const String &msg);
 void centerPrint(const String &msg, bool extraStuff = false);
 String EncodeUrlSpecialChars(const char *msg);
+int8_t getWifiQuality();
 
 void handleUpdateFromUrl();
 
 // LED Settings
 int spacer = 1;  // dots between letters
 int width = 5 + spacer; // The font width is 5 pixels + spacer
+bool displayDirty = true; // true = framebuffer needs redraw before next write
 
 // Matrix panel
 Max72xxPanel matrix = Max72xxPanel(pinCS, numberOfHorizontalDisplays, numberOfVerticalDisplays);
@@ -84,8 +86,8 @@ String displayTime;
 WagFamBdayClient bdayClient(WAGFAM_API_KEY, WAGFAM_DATA_URL);
 int bdayMessageIndex = 0;
 WagFamBdayClient::configValues serverConfig = {};
-int todayDisplayMilliSecond = 0;
-int todayDisplayStartingLED = 0;
+uint32_t todayDisplayMilliSecond = 0;
+uint32_t todayDisplayStartingLED = 0;
 
 // Weather Client
 OpenWeatherMapClient weatherClient(APIKEY, IS_METRIC);
@@ -119,7 +121,7 @@ static const char CHANGE_FORM1[] PROGMEM = "<form class='w3-container' action='/
 
 static const char CHANGE_FORM2[] PROGMEM = "<label>OpenWeatherMap API Key (get from <a href='https://openweathermap.org/' target='_BLANK'>here</a>)</label>"
                       "<input class='w3-input w3-border w3-margin-bottom' type='text' name='openWeatherMapApiKey' value='%WEATHERKEY%' maxlength='70'>"
-                      "<p><label>%CITYNAME1% (<a href='http://openweathermap.org/find' target='_BLANK'><i class='fas fa-search'></i> Search for City ID</a>)</label>"
+                      "<p><label>%CITYNAME1% (<a href='https://openweathermap.org/find' target='_BLANK'><i class='fas fa-search'></i> Search for City ID</a>)</label>"
                       "<input class='w3-input w3-border w3-margin-bottom' type='text' name='city1' value='%CITY1%' onkeypress='return isNumberKey(event)'></p>"
                       "<p><input name='metric' class='w3-check w3-margin-top' type='checkbox' %CHECKED%> Use Metric (Celsius)</p>"
                       "<p><input name='showdate' class='w3-check w3-margin-top' type='checkbox' %DATE_CHECKED%> Display Date</p>"
@@ -269,6 +271,8 @@ void loop() {
 
   if (lastSecond != second()) {
     lastSecond = second();
+    displayTime = hourMinutes(false); // rebuild once per second, not every frame
+    displayDirty = true;
     processEverySecond();
   }
 
@@ -277,10 +281,13 @@ void loop() {
     processEveryMinute();
   }
 
-  displayTime = hourMinutes(false);
-
-  matrix.fillScreen(LOW);
-  centerPrint(displayTime, true);
+  // Only redraw when content has changed. The animated event-day border
+  // requires per-frame updates, so always redraw when it is active.
+  if (displayDirty || WAGFAM_EVENT_TODAY) {
+    matrix.fillScreen(LOW);
+    centerPrint(displayTime, true);
+    displayDirty = false;
+  }
 
   // Web Server is always enabled
   server.handleClient();
@@ -301,7 +308,6 @@ void processEveryMinute() {
     return;
   }
 
-  matrix.shutdown(false);
   matrix.fillScreen(LOW); // show black
 
   displayRefreshCount --;
@@ -391,10 +397,10 @@ void handleSaveConfig() {
   SHOW_PRESSURE = server.hasArg("showpressure");
   SHOW_HIGHLOW = server.hasArg("showhighlow");
   IS_METRIC = server.hasArg("metric");
-  displayIntensity = server.arg("ledintensity").toInt();
-  minutesBetweenDataRefresh = server.arg("refresh").toInt();
-  minutesBetweenScrolling = server.arg("refreshDisplay").toInt();
-  displayScrollSpeed = server.arg("scrollspeed").toInt();
+  displayIntensity = constrain(server.arg("ledintensity").toInt(), 0, 15);
+  minutesBetweenDataRefresh = max(1, server.arg("refresh").toInt());
+  minutesBetweenScrolling = max(1, server.arg("refreshDisplay").toInt());
+  displayScrollSpeed = max(1, server.arg("scrollspeed").toInt());
   weatherClient.setMetric(IS_METRIC);
   weatherClient.setGeoLocation(geoLocation);
   matrix.fillScreen(LOW); // show black
@@ -707,7 +713,7 @@ void sendHeader() {
   html = "<nav class='w3-sidebar w3-bar-block w3-card' style='margin-top:88px' id='mySidebar'>";
   html += "<div class='w3-container w3-theme-d2'>";
   html += "<span onclick='closeSidebar()' class='w3-button w3-display-topright w3-large'><i class='fas fa-times'></i></span>";
-  html += "<div class='w3-left'><img src='http://openweathermap.org/img/w/" + weatherClient.getIcon() + ".png' alt='" + weatherClient.getWeatherDescription() + "'></div>";
+  html += "<div class='w3-left'><img src='https://openweathermap.org/img/w/" + weatherClient.getIcon() + ".png' alt='" + weatherClient.getWeatherDescription() + "'></div>";
   html += "<div class='w3-padding'>Menu</div></div>";
   server.sendContent(html);
 
@@ -789,7 +795,7 @@ void displayHomePage() {
   } else {
     html += "<div class='w3-cell-row' style='width:100%'><h2>Weather for " + weatherClient.getCity() + ", " + weatherClient.getCountry() + "</h2></div><div class='w3-cell-row'>";
     html += "<div class='w3-cell w3-left w3-medium' style='width:120px'>";
-    html += "<img src='http://openweathermap.org/img/w/" + weatherClient.getIcon() + ".png' alt='" + weatherClient.getWeatherDescription() + "'><br>";
+    html += "<img src='https://openweathermap.org/img/w/" + weatherClient.getIcon() + ".png' alt='" + weatherClient.getWeatherDescription() + "'><br>";
     html += String(weatherClient.getHumidity(),0) + "% Humidity<br>";
     html += weatherClient.getWindDirectionText() + " / " + String(weatherClient.getWindSpeed(),0) + " <span class='w3-tiny'>" + getSpeedSymbol() + "</span> Wind<br>";
     html += String(weatherClient.getPressure()) + " Pressure<br>";
@@ -902,7 +908,14 @@ void savePersistentConfig() {
     f.println("SHOW_DATE=" + String(SHOW_DATE));
   }
   f.close();
-  readPersistentConfig();
+  // Apply current settings to hardware and clients directly.
+  // (Previously this called readPersistentConfig(), creating mutual recursion
+  // and an infinite loop if the filesystem write ever failed.)
+  matrix.setIntensity(displayIntensity);
+  weatherClient.setWeatherApiKey(APIKEY);
+  weatherClient.setMetric(IS_METRIC);
+  weatherClient.setGeoLocation(geoLocation);
+  bdayClient.updateBdayClient(WAGFAM_API_KEY, WAGFAM_DATA_URL);
 }
 
 void readPersistentConfig() {
@@ -912,91 +925,72 @@ void readPersistentConfig() {
     return;
   }
   File fr = SPIFFS.open(CONFIG, "r");
-  String line;
   while (fr.available()) {
-    line = fr.readStringUntil('\n');
-    if (line.indexOf("WAGFAM_DATA_URL=") >= 0) {
-      WAGFAM_DATA_URL = line.substring(line.lastIndexOf("WAGFAM_DATA_URL=") + 16);
-      WAGFAM_DATA_URL.trim();
+    String line = fr.readStringUntil('\n');
+    line.trim(); // strip \r and leading/trailing whitespace
+    int eqPos = line.indexOf('=');
+    if (eqPos <= 0) continue; // skip blank or malformed lines
+    String key = line.substring(0, eqPos);
+    String value = line.substring(eqPos + 1);
+
+    if (key == "WAGFAM_DATA_URL") {
+      WAGFAM_DATA_URL = value;
       Serial.println("WAGFAM_DATA_URL: " + WAGFAM_DATA_URL);
-    }
-    if (line.indexOf("WAGFAM_API_KEY=") >= 0) {
-      WAGFAM_API_KEY = line.substring(line.lastIndexOf("WAGFAM_API_KEY=") + 15);
-      WAGFAM_API_KEY.trim();
-      Serial.println("WAGFAM_API_KEY: " + WAGFAM_API_KEY);
-    }
-    if (line.indexOf("WAGFAM_EVENT_TODAY=") >= 0) {
-      WAGFAM_EVENT_TODAY = line.substring(line.lastIndexOf("WAGFAM_EVENT_TODAY=") + 19).toInt();
+    } else if (key == "WAGFAM_API_KEY") {
+      WAGFAM_API_KEY = value;
+      Serial.println("WAGFAM_API_KEY: [set]");
+    } else if (key == "WAGFAM_EVENT_TODAY") {
+      WAGFAM_EVENT_TODAY = value.toInt();
       Serial.println("WAGFAM_EVENT_TODAY: " + String(WAGFAM_EVENT_TODAY));
-    }
-    if (line.indexOf("APIKEY=") >= 0) {
-      APIKEY = line.substring(line.lastIndexOf("APIKEY=") + 7);
-      APIKEY.trim();
-      Serial.println("APIKEY: " + APIKEY);
-    }
-    if (line.indexOf("CityID=") >= 0) {
-      geoLocation = line.substring(line.lastIndexOf("CityID=") + 7);
-      geoLocation.trim();
+    } else if (key == "APIKEY") {
+      APIKEY = value;
+      Serial.println("APIKEY: [set]");
+    } else if (key == "CityID") {
+      geoLocation = value;
       Serial.println("CityID: " + geoLocation);
-    }
-    if (line.indexOf("is24hour=") >= 0) {
-      IS_24HOUR = line.substring(line.lastIndexOf("is24hour=") + 9).toInt();
+    } else if (key == "is24hour") {
+      IS_24HOUR = value.toInt();
       Serial.println("IS_24HOUR=" + String(IS_24HOUR));
-    }
-    if (line.indexOf("isPM=") >= 0) {
-      IS_PM = line.substring(line.lastIndexOf("isPM=") + 5).toInt();
+    } else if (key == "isPM") {
+      IS_PM = value.toInt();
       Serial.println("IS_PM=" + String(IS_PM));
-    }
-    if (line.indexOf("isMetric=") >= 0) {
-      IS_METRIC = line.substring(line.lastIndexOf("isMetric=") + 9).toInt();
+    } else if (key == "isMetric") {
+      IS_METRIC = value.toInt();
       Serial.println("IS_METRIC=" + String(IS_METRIC));
-    }
-    if (line.indexOf("refreshRate=") >= 0) {
-      minutesBetweenDataRefresh = line.substring(line.lastIndexOf("refreshRate=") + 12).toInt();
-      if (minutesBetweenDataRefresh == 0) {
-        minutesBetweenDataRefresh = 15; // can't be zero
-      }
+    } else if (key == "refreshRate") {
+      minutesBetweenDataRefresh = value.toInt();
+      if (minutesBetweenDataRefresh == 0) minutesBetweenDataRefresh = 15;
       Serial.println("minutesBetweenDataRefresh=" + String(minutesBetweenDataRefresh));
-    }
-    if (line.indexOf("minutesBetweenScrolling=") >= 0) {
+    } else if (key == "minutesBetweenScrolling") {
       displayRefreshCount = 1;
-      minutesBetweenScrolling = line.substring(line.lastIndexOf("minutesBetweenScrolling=") + 24).toInt();
+      minutesBetweenScrolling = value.toInt();
       Serial.println("minutesBetweenScrolling=" + String(minutesBetweenScrolling));
-    }
-    if (line.indexOf("ledIntensity=") >= 0) {
-      displayIntensity = line.substring(line.lastIndexOf("ledIntensity=") + 13).toInt();
+    } else if (key == "ledIntensity") {
+      displayIntensity = value.toInt();
       Serial.println("displayIntensity=" + String(displayIntensity));
-    }
-    if (line.indexOf("scrollSpeed=") >= 0) {
-      displayScrollSpeed = line.substring(line.lastIndexOf("scrollSpeed=") + 12).toInt();
+    } else if (key == "scrollSpeed") {
+      displayScrollSpeed = value.toInt();
       Serial.println("displayScrollSpeed=" + String(displayScrollSpeed));
-    }
-    if (line.indexOf("SHOW_CITY=") >= 0) {
-      SHOW_CITY = line.substring(line.lastIndexOf("SHOW_CITY=") + 10).toInt();
+    } else if (key == "SHOW_CITY") {
+      SHOW_CITY = value.toInt();
       Serial.println("SHOW_CITY=" + String(SHOW_CITY));
-    }
-    if (line.indexOf("SHOW_CONDITION=") >= 0) {
-      SHOW_CONDITION = line.substring(line.lastIndexOf("SHOW_CONDITION=") + 15).toInt();
+    } else if (key == "SHOW_CONDITION") {
+      SHOW_CONDITION = value.toInt();
       Serial.println("SHOW_CONDITION=" + String(SHOW_CONDITION));
-    }
-    if (line.indexOf("SHOW_HUMIDITY=") >= 0) {
-      SHOW_HUMIDITY = line.substring(line.lastIndexOf("SHOW_HUMIDITY=") + 14).toInt();
+    } else if (key == "SHOW_HUMIDITY") {
+      SHOW_HUMIDITY = value.toInt();
       Serial.println("SHOW_HUMIDITY=" + String(SHOW_HUMIDITY));
-    }
-    if (line.indexOf("SHOW_WIND=") >= 0) {
-      SHOW_WIND = line.substring(line.lastIndexOf("SHOW_WIND=") + 10).toInt();
+    } else if (key == "SHOW_WIND") {
+      SHOW_WIND = value.toInt();
       Serial.println("SHOW_WIND=" + String(SHOW_WIND));
-    }
-    if (line.indexOf("SHOW_PRESSURE=") >= 0) {
-      SHOW_PRESSURE = line.substring(line.lastIndexOf("SHOW_PRESSURE=") + 14).toInt();
+    } else if (key == "SHOW_PRESSURE") {
+      SHOW_PRESSURE = value.toInt();
       Serial.println("SHOW_PRESSURE=" + String(SHOW_PRESSURE));
-    }
-    if (line.indexOf("SHOW_HIGHLOW=") >= 0) {
-      SHOW_HIGHLOW = line.substring(line.lastIndexOf("SHOW_HIGHLOW=") + 13).toInt();
+    } else if (key == "SHOW_HIGHLOW") {
+      SHOW_HIGHLOW = value.toInt();
       Serial.println("SHOW_HIGHLOW=" + String(SHOW_HIGHLOW));
-    }
-    if (line.indexOf("SHOW_DATE=") >= 0) {
-      SHOW_DATE = line.substring(line.lastIndexOf("SHOW_DATE=") + 10).toInt();
+    } else if (key == "SHOW_DATE") {
+      SHOW_DATE = value.toInt();
       Serial.println("SHOW_DATE=" + String(SHOW_DATE));
     }
   }
@@ -1044,7 +1038,7 @@ void centerPrint(const String &msg, boolean extraStuff) {
     // only displayed when there is an event happening on a given day.
     if (WAGFAM_EVENT_TODAY) {
       todayDisplayMilliSecond = millis() % (TODAY_DISPLAY_DOT_SPACING * TODAY_DISPLAY_DOT_SPEED_MS);
-      todayDisplayStartingLED = int(todayDisplayMilliSecond / TODAY_DISPLAY_DOT_SPEED_MS);
+      todayDisplayStartingLED = todayDisplayMilliSecond / TODAY_DISPLAY_DOT_SPEED_MS;
       for (int i = 0; i < (matrix.height()*2+matrix.width()-2); i++) {
         if ((i % TODAY_DISPLAY_DOT_SPACING) == todayDisplayStartingLED) {
           if (i < matrix.height()) {

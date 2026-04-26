@@ -196,9 +196,10 @@ void OpenWeatherMapClient::updateWeather() {
 
   weatherClient.stop(); //stop client
 
-  // prudancy check: incomplete message ?
-  if (int len = measureJson(jdoc) <= 150) {
-    Serial.println(F("Error incomplete message, size ") + String(len));
+  // Sanity check: detect truncated or error responses
+  int jsonLen = (int)measureJson(jdoc);
+  if (jsonLen <= 150) {
+    Serial.println(F("Error incomplete message, size ") + String(jsonLen));
     errorMsg = F("Error: ") + jdoc[F("message")].as<String>();
     Serial.println(errorMsg);
     if (++dataGetRetryCount > dataGetRetryCountError) weather.isValid = false;
@@ -264,9 +265,12 @@ void OpenWeatherMapClient::updateWeather() {
 
 
 String OpenWeatherMapClient::getWindDirectionText() {
-  int val = floor((weather.windDirection / 22.5) + 0.5);
-  String arr[] = {"N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"};
-  return arr[(val % 16)];
+  static const char* const dirs[] PROGMEM = {
+    "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+    "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"
+  };
+  int val = (int)floor((weather.windDirection / 22.5) + 0.5);
+  return String(dirs[val % 16]);
 }
 
 

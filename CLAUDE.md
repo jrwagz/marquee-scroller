@@ -6,6 +6,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
+## Quick Start for LLM Agents
+
+Before making changes, read these docs in order:
+
+1. `docs/ARCHITECTURE.md` — what every module does, hardware context, global state map
+2. `docs/CODE_FLOW.md` — how execution flows from boot through normal operation
+3. `docs/CODE_REVIEW.md` — known bugs and issues (check here before touching any file)
+
+---
+
 ## Architecture
 
 All source lives in [marquee/](marquee/):
@@ -26,10 +36,33 @@ Local library copies (not managed by PlatformIO) are in [lib/](lib/):
 
 ## Main Loop Logic
 
-- **Every frame**: Render current time via `centerPrint()`; handle web server and OTA requests
+- **Every frame**: Rebuild `displayTime` string, clear display, call `centerPrint(displayTime, true)`,
+  service `server.handleClient()` and `ArduinoOTA.handle()`
 - **Every second** (`processEverySecond`): Calls `getWeatherData()` — which fetches both weather and calendar data
   together — if `minutesBetweenDataRefresh` has elapsed
-- **Every minute** (`processEveryMinute`): Scroll the marquee message (weather data + next calendar message from `bdayClient`)
+- **Every minute** (`processEveryMinute`): Scroll the marquee message (weather data + next calendar message from
+  `bdayClient`). Controlled by `displayRefreshCount` countdown
+
+### Key Line Numbers in `marquee.ino`
+
+| Function | Line |
+| --- | --- |
+| Global variables (settings) | 60–98 |
+| PROGMEM HTML constants | 104–148 |
+| `setup()` | 154 |
+| `loop()` | 268 |
+| `processEverySecond()` | 291 |
+| `processEveryMinute()` | 298 |
+| `handleSaveConfig()` | 378 |
+| `handleConfigure()` | 423 |
+| `handleUpdateFromUrl()` | 530 |
+| `getWeatherData()` | 603 |
+| `sendHeader()` / `sendFooter()` | 697 / 727 |
+| `displayHomePage()` | 741 |
+| `savePersistentConfig()` | 877 |
+| `readPersistentConfig()` | 908 |
+| `scrollMessageWait()` | 1011 |
+| `centerPrint()` | 1038 |
 
 ## Configuration Storage
 
@@ -40,6 +73,14 @@ changes there require a filesystem erase to take effect.
 
 `WAGFAM_EVENT_TODAY` is not user-configurable via the web form — it is set exclusively by the server's
 `config.eventToday` field in the calendar JSON response and persisted across reboots via `/conf.txt`.
+
+### Adding a New Config Key
+
+1. Declare a global variable in `marquee.ino` (near line 60)
+2. Add `f.println("KEY=" + String(value))` in `savePersistentConfig()` (~line 877)
+3. Add an `if (line.indexOf("KEY=") >= 0)` block in `readPersistentConfig()` (~line 908)
+4. Add a form field in one of the `CHANGE_FORM*` PROGMEM constants (~line 113)
+5. Read from `server.arg("fieldName")` in `handleSaveConfig()` (~line 378)
 
 ## Markdown Style
 
@@ -53,6 +94,36 @@ changes there require a filesystem erase to take effect.
 
 Run `make lint-markdown` locally to check before committing any `.md` changes.
 
+## Display Subsystem
+
+The display is a 32×8 pixel grid (4 panels of 8×8 each). Key facts:
+
+- Font: 5px wide + 1px spacer = 6px per character (`width` variable, line 70)
+- `scrollMessageWait(msg)` scrolls right-to-left, one pixel per step, at `displayScrollSpeed` ms/step
+- `centerPrint(msg, extraStuff)` draws a static centered string + optional extras (event border, PM dot)
+- `matrix.write()` flushes the framebuffer to hardware via SPI — called inside `centerPrint` and each
+  scroll step
+- The animated event-day border is drawn in `centerPrint()` when `WAGFAM_EVENT_TODAY == true`
+
+## WagFamBdayClient — Calendar Integration
+
+`WagFamBdayClient` replaced the `NewsApiClient` from the upstream Qrome fork.
+It fetches a JSON array from `WAGFAM_DATA_URL` over HTTPS and stores up to 10 `messages[]`.
+
+Expected JSON format:
+
+```json
+[
+  { "config": { "eventToday": "1", "dataSourceUrl": "...", "apiKey": "..." } },
+  { "message": "Justin birthday - tomorrow" },
+  { "message": "Family dinner - this Saturday" }
+]
+```
+
+- The `config` object is optional and can contain any subset of the three fields
+- Messages are displayed one per scroll cycle, cycling through `bdayMessageIndex`
+- `cleanText()` translates Unicode lookalikes to ASCII for the LED font (35+ `replace()` calls)
+
 ## Key Constraints
 
 - Flash memory is tight on ESP8266 — avoid large string literals on the stack;
@@ -62,3 +133,32 @@ Run `make lint-markdown` locally to check before committing any `.md` changes.
 - `WagFamBdayClient` uses BearSSL with `setInsecure()` (no cert validation) — intentional for embedded use
 - ArduinoJson v7 is used (`^7.4` in `platformio.ini`) — do not generate v6-style
   `DynamicJsonDocument` / `StaticJsonDocument` code; use `JsonDocument` instead
+- All `String` operations are expensive — prefer `reserve()` before building strings, avoid repeated `+=`
+  in tight loops, and never allocate large `String` arrays on the stack
+- `scrollMessageWait()` is blocking but calls `server.handleClient()` and `ArduinoOTA.handle()` each
+  pixel step — web requests during scrolling are handled mid-scroll
+- `getWeatherData()` is the single orchestration point for both weather AND calendar data refresh — they
+  always refresh together
+- No unit tests exist; the only test is a build test in CI (`make test` is a placeholder)
+
+## Known Bugs (see `docs/CODE_REVIEW.md` for full details)
+
+- **`OpenWeatherMapClient.cpp:199`** — operator precedence bug in JSON size sanity check
+  (`int len = measureJson(jdoc) <= 150` should use a C++17 if-initializer or separate variable)
+- **`OpenWeatherMapClient.cpp:267`** — `getWindDirectionText()` allocates 16 `String` objects on the stack
+- **`WagFamBdayClient.cpp:170`** — debug `Serial.println` always fires, leaking values to serial output
+- **`WagFamBdayClient.cpp:194`** — `cleanText()` runs 35+ `replace()` calls without `reserve()` first
+- **`marquee.ino:877`** — `savePersistentConfig()` unconditionally calls `readPersistentConfig()` at end
+  (mutual recursion on first boot; fixable by removing the terminal call)
+
+## What Was Removed from Upstream (Qrome/marquee-scroller)
+
+These modules existed in the upstream repo and were deleted in this fork:
+
+- `NewsApiClient` — news headline fetching (this is what `WagFamBdayClient` replaced)
+- `OctoPrintClient` — 3D printer status
+- `PiHoleClient` — Pi-hole DNS blocker stats
+- Bitcoin price display (was already removed in upstream v3.0)
+- TimeZoneDB API calls (timezone now derived from OWM response)
+
+`sources.json` in the repo root is a leftover from the upstream news feature and is unused.

@@ -166,8 +166,6 @@ void WagFamBdayClient::value(String value) {
     messages[messageCounter] = cleanText(value);
     messageCounter++;
   }
-
-  Serial.println(currentKey + "=" + value);
 }
 
 void WagFamBdayClient::endArray() {
@@ -192,7 +190,8 @@ void WagFamBdayClient::endDocument() {
 }
 
 String WagFamBdayClient::cleanText(String text) {
-  text.replace("’", "'");
+  text.reserve(text.length() + 64);
+  text.replace("’", "’");
   text.replace("“", "\"");
   text.replace("”", "\"");
   text.replace("`", "'");
