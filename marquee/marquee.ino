@@ -69,6 +69,18 @@ void checkOtaRollback();
 
 void handleUpdateFromUrl();
 
+// REST API handlers
+void handleApiStatus();
+void handleApiConfigGet();
+void handleApiConfigPost();
+void handleApiRestart();
+void handleApiRefresh();
+void handleApiOtaStatus();
+void handleApiFsRead();
+void handleApiFsWrite();
+void handleApiFsDelete();
+void handleApiFsList();
+
 // LED Settings
 int spacer = 1;  // dots between letters
 int width = 5 + spacer; // The font width is 5 pixels + spacer
@@ -234,6 +246,19 @@ void setup() {
   server.on("/configure", handleConfigure);
   server.on("/saveconfig", handleSaveConfig);
   server.on("/updateFromUrl", handleUpdateFromUrl);
+
+  // REST API endpoints
+  server.on("/api/status", HTTP_GET, handleApiStatus);
+  server.on("/api/config", HTTP_GET, handleApiConfigGet);
+  server.on("/api/config", HTTP_POST, handleApiConfigPost);
+  server.on("/api/restart", HTTP_POST, handleApiRestart);
+  server.on("/api/refresh", HTTP_POST, handleApiRefresh);
+  server.on("/api/ota/status", HTTP_GET, handleApiOtaStatus);
+  server.on("/api/fs/read", HTTP_GET, handleApiFsRead);
+  server.on("/api/fs/write", HTTP_POST, handleApiFsWrite);
+  server.on("/api/fs/delete", HTTP_DELETE, handleApiFsDelete);
+  server.on("/api/fs/list", HTTP_GET, handleApiFsList);
+
   server.onNotFound(redirectHome);
   // Setup the update endpoint and don't require a username/password
   serverUpdater.setup(&server, "/update", "", "");
@@ -1143,6 +1168,239 @@ void centerPrint(const String &msg, boolean extraStuff) {
   matrix.print(msg);
   matrix.write();
 }
+
+// ── REST API ────────────────────────────────────────────────────────────────
+
+static void sendJsonResponse(int code, JsonDocument &doc) {
+  String body;
+  serializeJson(doc, body);
+  server.send(code, F("application/json"), body);
+}
+
+static void sendJsonOk(const char *message = "ok") {
+  JsonDocument doc;
+  doc["status"] = message;
+  sendJsonResponse(200, doc);
+}
+
+static void sendJsonError(int code, const char *message) {
+  JsonDocument doc;
+  doc["error"] = message;
+  sendJsonResponse(code, doc);
+}
+
+static bool requireApiAuth() {
+  if (!server.authenticate("admin", "password")) {
+    sendJsonError(401, "unauthorized");
+    return false;
+  }
+  return true;
+}
+
+void handleApiStatus() {
+  if (!requireApiAuth()) return;
+
+  JsonDocument doc;
+  doc["version"] = VERSION;
+  doc["uptime_ms"] = millis();
+  doc["free_heap"] = ESP.getFreeHeap();
+  doc["heap_fragmentation"] = ESP.getHeapFragmentation();
+  doc["chip_id"] = String(ESP.getChipId(), HEX);
+  doc["flash_size"] = ESP.getFlashChipRealSize();
+  doc["sketch_size"] = ESP.getSketchSize();
+  doc["free_sketch_space"] = ESP.getFreeSketchSpace();
+  doc["reset_reason"] = ESP.getResetReason();
+
+  JsonObject wifi = doc["wifi"].to<JsonObject>();
+  wifi["ssid"] = WiFi.SSID();
+  wifi["ip"] = WiFi.localIP().toString();
+  wifi["rssi"] = WiFi.RSSI();
+  wifi["quality_pct"] = getWifiQuality();
+
+  JsonObject ota = doc["ota"].to<JsonObject>();
+  ota["confirm_at"] = otaConfirmAt;
+  ota["pending_url"] = otaPendingNewUrl;
+  ota["safe_url"] = OTA_SAFE_URL;
+  ota["pending_file_exists"] = SPIFFS.exists(OTA_PENDING_FILE);
+
+  sendJsonResponse(200, doc);
+}
+
+void handleApiConfigGet() {
+  if (!requireApiAuth()) return;
+
+  JsonDocument doc;
+  doc["wagfam_data_url"] = WAGFAM_DATA_URL;
+  doc["wagfam_api_key"] = WAGFAM_API_KEY;
+  doc["wagfam_event_today"] = WAGFAM_EVENT_TODAY;
+  doc["owm_api_key"] = APIKEY;
+  doc["geo_location"] = geoLocation;
+  doc["is_24hour"] = IS_24HOUR;
+  doc["is_pm"] = IS_PM;
+  doc["is_metric"] = IS_METRIC;
+  doc["display_intensity"] = displayIntensity;
+  doc["display_scroll_speed"] = displayScrollSpeed;
+  doc["minutes_between_data_refresh"] = minutesBetweenDataRefresh;
+  doc["minutes_between_scrolling"] = minutesBetweenScrolling;
+  doc["show_date"] = SHOW_DATE;
+  doc["show_city"] = SHOW_CITY;
+  doc["show_condition"] = SHOW_CONDITION;
+  doc["show_humidity"] = SHOW_HUMIDITY;
+  doc["show_wind"] = SHOW_WIND;
+  doc["show_pressure"] = SHOW_PRESSURE;
+  doc["show_highlow"] = SHOW_HIGHLOW;
+  doc["ota_safe_url"] = OTA_SAFE_URL;
+
+  sendJsonResponse(200, doc);
+}
+
+void handleApiConfigPost() {
+  if (!requireApiAuth()) return;
+
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, server.arg("plain"));
+  if (err) {
+    sendJsonError(400, "invalid JSON");
+    return;
+  }
+
+  // Partial update: only set fields that are present in the request body
+  if (doc["wagfam_data_url"].is<const char*>()) WAGFAM_DATA_URL = doc["wagfam_data_url"].as<String>();
+  if (doc["wagfam_api_key"].is<const char*>()) WAGFAM_API_KEY = doc["wagfam_api_key"].as<String>();
+  if (doc["wagfam_event_today"].is<bool>()) WAGFAM_EVENT_TODAY = doc["wagfam_event_today"].as<bool>();
+  if (doc["owm_api_key"].is<const char*>()) APIKEY = doc["owm_api_key"].as<String>();
+  if (doc["geo_location"].is<const char*>()) geoLocation = doc["geo_location"].as<String>();
+  if (doc["is_24hour"].is<bool>()) IS_24HOUR = doc["is_24hour"].as<bool>();
+  if (doc["is_pm"].is<bool>()) IS_PM = doc["is_pm"].as<bool>();
+  if (doc["is_metric"].is<bool>()) IS_METRIC = doc["is_metric"].as<bool>();
+  if (doc["display_intensity"].is<int>()) displayIntensity = constrain(doc["display_intensity"].as<int>(), 0, 15);
+  if (doc["display_scroll_speed"].is<int>()) displayScrollSpeed = max(1, doc["display_scroll_speed"].as<int>());
+  if (doc["minutes_between_data_refresh"].is<int>()) minutesBetweenDataRefresh = max(1, doc["minutes_between_data_refresh"].as<int>());
+  if (doc["minutes_between_scrolling"].is<int>()) minutesBetweenScrolling = max(1, doc["minutes_between_scrolling"].as<int>());
+  if (doc["show_date"].is<bool>()) SHOW_DATE = doc["show_date"].as<bool>();
+  if (doc["show_city"].is<bool>()) SHOW_CITY = doc["show_city"].as<bool>();
+  if (doc["show_condition"].is<bool>()) SHOW_CONDITION = doc["show_condition"].as<bool>();
+  if (doc["show_humidity"].is<bool>()) SHOW_HUMIDITY = doc["show_humidity"].as<bool>();
+  if (doc["show_wind"].is<bool>()) SHOW_WIND = doc["show_wind"].as<bool>();
+  if (doc["show_pressure"].is<bool>()) SHOW_PRESSURE = doc["show_pressure"].as<bool>();
+  if (doc["show_highlow"].is<bool>()) SHOW_HIGHLOW = doc["show_highlow"].as<bool>();
+
+  savePersistentConfig();
+  sendJsonOk("config updated");
+}
+
+void handleApiRestart() {
+  if (!requireApiAuth()) return;
+  sendJsonOk("restarting");
+  delay(500);
+  ESP.restart();
+}
+
+void handleApiRefresh() {
+  if (!requireApiAuth()) return;
+  getWeatherData();
+  sendJsonOk("refresh complete");
+}
+
+void handleApiOtaStatus() {
+  if (!requireApiAuth()) return;
+
+  JsonDocument doc;
+  doc["pending_file_exists"] = SPIFFS.exists(OTA_PENDING_FILE);
+  doc["confirm_at"] = otaConfirmAt;
+  doc["pending_url"] = otaPendingNewUrl;
+  doc["safe_url"] = OTA_SAFE_URL;
+
+  if (SPIFFS.exists(OTA_PENDING_FILE)) {
+    File f = SPIFFS.open(OTA_PENDING_FILE, "r");
+    JsonObject file = doc["file_contents"].to<JsonObject>();
+    while (f.available()) {
+      String line = f.readStringUntil('\n');
+      line.trim();
+      int eq = line.indexOf('=');
+      if (eq <= 0) continue;
+      file[line.substring(0, eq)] = line.substring(eq + 1);
+    }
+    f.close();
+  }
+
+  sendJsonResponse(200, doc);
+}
+
+void handleApiFsRead() {
+  if (!requireApiAuth()) return;
+
+  String path = server.arg("path");
+  if (path == "") { sendJsonError(400, "missing 'path' parameter"); return; }
+  if (!SPIFFS.exists(path)) { sendJsonError(404, "file not found"); return; }
+
+  File f = SPIFFS.open(path, "r");
+  if (f.size() > 4096) {
+    f.close();
+    sendJsonError(413, "file too large (max 4KB)");
+    return;
+  }
+  String content = f.readString();
+  f.close();
+
+  JsonDocument doc;
+  doc["path"] = path;
+  doc["size"] = content.length();
+  doc["content"] = content;
+  sendJsonResponse(200, doc);
+}
+
+void handleApiFsWrite() {
+  if (!requireApiAuth()) return;
+
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, server.arg("plain"));
+  if (err) { sendJsonError(400, "invalid JSON"); return; }
+
+  const char *path = doc["path"];
+  const char *content = doc["content"];
+  if (!path || !content) { sendJsonError(400, "missing 'path' or 'content'"); return; }
+
+  File f = SPIFFS.open(path, "w");
+  if (!f) { sendJsonError(500, "failed to open file for writing"); return; }
+  f.print(content);
+  f.close();
+
+  JsonDocument resp;
+  resp["status"] = "written";
+  resp["path"] = path;
+  resp["size"] = (int)strlen(content);
+  sendJsonResponse(200, resp);
+}
+
+void handleApiFsDelete() {
+  if (!requireApiAuth()) return;
+
+  String path = server.arg("path");
+  if (path == "") { sendJsonError(400, "missing 'path' parameter"); return; }
+  if (!SPIFFS.exists(path)) { sendJsonError(404, "file not found"); return; }
+
+  SPIFFS.remove(path);
+  sendJsonOk("deleted");
+}
+
+void handleApiFsList() {
+  if (!requireApiAuth()) return;
+
+  JsonDocument doc;
+  JsonArray files = doc["files"].to<JsonArray>();
+
+  Dir dir = SPIFFS.openDir("/");
+  while (dir.next()) {
+    JsonObject entry = files.add<JsonObject>();
+    entry["name"] = dir.fileName();
+    entry["size"] = dir.fileSize();
+  }
+
+  sendJsonResponse(200, doc);
+}
+
+// ── End REST API ────────────────────────────────────────────────────────────
 
 String EncodeUrlSpecialChars(const char *msg) {
 const static char special[] = {'\x20','\x22','\x23','\x24','\x25','\x26','\x2B','\x3B','\x3C','\x3D','\x3E','\x3F','\x40'};
