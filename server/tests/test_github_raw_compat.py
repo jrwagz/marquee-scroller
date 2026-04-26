@@ -27,8 +27,8 @@ flake on transient outages.
 
 import hashlib
 
+import httpx
 import pytest
-import requests
 
 REFERENCE_URL = "https://raw.githubusercontent.com/jrwagz/marquee-scroller/master/README.md"
 
@@ -49,7 +49,7 @@ KNOWN_INTERPRETED_PARAMS = {"token"}
 
 def _fetch(url: str, params: dict | None = None) -> tuple[int, str]:
     """Return (status_code, sha256_hex) — sha256 over the response body bytes."""
-    r = requests.get(url, params=params or {}, timeout=10)
+    r = httpx.get(url, params=params or {}, timeout=10, follow_redirects=True)
     return r.status_code, hashlib.sha256(r.content).hexdigest()
 
 
@@ -58,7 +58,7 @@ def baseline():
     """Baseline (status, sha256) for the reference URL with no query params."""
     try:
         return _fetch(REFERENCE_URL)
-    except requests.RequestException as e:
+    except httpx.HTTPError as e:
         pytest.skip(f"network unavailable: {e}")
 
 
@@ -104,16 +104,18 @@ def test_token_param_is_interpreted_not_ignored():
         # Use a known-private repo path so a fake token gets us auth-rejected.
         # We don't care about the exact status; we only care it's NOT 200, proving
         # the param was interpreted (rather than ignored, which would 404 the path).
-        r_no = requests.get(
+        r_no = httpx.get(
             "https://raw.githubusercontent.com/jrwagz/wagfam-clocks-data-source/main/README.md",
             timeout=10,
+            follow_redirects=True,
         )
-        r_token = requests.get(
+        r_token = httpx.get(
             "https://raw.githubusercontent.com/jrwagz/wagfam-clocks-data-source/main/README.md",
             params={"token": "definitely-not-a-real-token"},
             timeout=10,
+            follow_redirects=True,
         )
-    except requests.RequestException as e:
+    except httpx.HTTPError as e:
         pytest.skip(f"network unavailable: {e}")
 
     # Both should fail (the repo is private), but the failure modes show ?token
