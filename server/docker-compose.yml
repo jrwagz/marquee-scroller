@@ -1,0 +1,48 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - WAGFAM_DATABASE_URL=sqlite:///./data/wagfam.db
+      - WAGFAM_WAGFAM_API_KEY=${WAGFAM_API_KEY:-changeme}
+      - WAGFAM_CALENDAR_DATA_PATH=data/wagfam_calendar_data.json
+    volumes:
+      - ./data:/app/data
+    profiles:
+      - local
+
+  app-prod:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - WAGFAM_DATABASE_URL=postgresql://wagfam:wagfam@db:5432/wagfam
+      - WAGFAM_WAGFAM_API_KEY=${WAGFAM_API_KEY:-changeme}
+      - WAGFAM_CALENDAR_DATA_PATH=data/wagfam_calendar_data.json
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
+    profiles:
+      - production
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=wagfam
+      - POSTGRES_PASSWORD=wagfam
+      - POSTGRES_DB=wagfam
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wagfam"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    profiles:
+      - production
+
+volumes:
+  pgdata:
