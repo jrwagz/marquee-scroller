@@ -49,20 +49,21 @@ Local library copies (not managed by PlatformIO) are in [lib/](lib/):
 | --- | --- |
 | Global variables (settings) | 60–98 |
 | PROGMEM HTML constants | 104–148 |
-| `setup()` | 154 |
-| `loop()` | 268 |
-| `processEverySecond()` | 291 |
-| `processEveryMinute()` | 298 |
-| `handleSaveConfig()` | 378 |
-| `handleConfigure()` | 423 |
-| `handleUpdateFromUrl()` | 530 |
-| `getWeatherData()` | 603 |
-| `sendHeader()` / `sendFooter()` | 697 / 727 |
-| `displayHomePage()` | 741 |
-| `savePersistentConfig()` | 877 |
-| `readPersistentConfig()` | 908 |
-| `scrollMessageWait()` | 1011 |
-| `centerPrint()` | 1038 |
+| `setup()` | 173 |
+| `loop()` | 282 |
+| `processEverySecond()` | 308 |
+| `processEveryMinute()` | 325 |
+| `handleSaveConfig()` | 404 |
+| `handleConfigure()` | 449 |
+| `handleUpdateFromUrl()` | 575 |
+| `getWeatherData()` | 699 |
+| `sendHeader()` / `sendFooter()` | 804 / 834 |
+| `displayHomePage()` | 848 |
+| `savePersistentConfig()` | 984 |
+| `readPersistentConfig()` | 1023 |
+| `scrollMessageWait()` | 1111 |
+| `centerPrint()` | 1135 |
+| REST API handlers | 1174 |
 
 ## Configuration Storage
 
@@ -179,6 +180,12 @@ ArduinoOTA was removed in v3.08.0-wagfam. Updates are now delivered three ways:
 **Boot-confirmation rollback:** Before every flash, a `/ota_pending.txt` record is written to LittleFS
 with the current safe URL. If the device reboots twice without confirming (5 min stable uptime),
 `checkOtaRollback()` re-flashes the previous firmware. See `docs/OTA_STRATEGY.md` for full details.
+
+## REST API
+
+See the [REST API section in README.md](README.md#rest-api) for the full endpoint table and
+curl examples. All endpoints live under `/api/`, require HTTP Basic Auth, and return JSON.
+Handlers are registered in `setup()` starting at line 1174 of `marquee.ino`.
 
 ## Key Constraints
 

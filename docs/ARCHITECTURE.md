@@ -372,6 +372,15 @@ Routes served by `ESP8266WebServer` on port 80:
 | `/forgetwifi` | `handleForgetWifi` | Clears WiFi credentials and reboots |
 | `*` | `redirectHome` | Catch-all redirect to `/` |
 
+### REST API (`/api/*`)
+
+See [README.md — REST API](../README.md#rest-api) for the full endpoint table and curl examples.
+
+Handler functions follow the naming convention `handleApi<Resource>[Action]`
+(e.g., `handleApiConfigGet`, `handleApiFsWrite`). They are registered in `setup()` alongside
+the web UI routes. The API enables automated testing of config operations, OTA rollback
+workflows, and filesystem state inspection without a browser.
+
 The web UI uses W3.CSS (loaded from CDN) and Font Awesome 5.8 icons (from cdnjs CDN).
 Both require internet access to display correctly.
 

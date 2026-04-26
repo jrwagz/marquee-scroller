@@ -141,3 +141,33 @@ directly from a hosted `.bin` file. The device will restart automatically on suc
 | `/updateFromUrl` | OTA firmware update from URL |
 | `/systemreset` | Resets settings to defaults |
 | `/forgetwifi` | Clears saved WiFi credentials |
+
+## REST API
+
+All `/api/*` endpoints require HTTP Basic Auth (default: `admin` / `password`) and return JSON.
+
+| Endpoint | Method | Description |
+| --- | --- | --- |
+| `/api/status` | GET | Device health (version, uptime, heap, WiFi, OTA state) |
+| `/api/config` | GET | Read all config |
+| `/api/config` | POST | Partial config update (JSON body) |
+| `/api/restart` | POST | Reboot device |
+| `/api/refresh` | POST | Force weather + calendar data refresh |
+| `/api/ota/status` | GET | OTA rollback file state |
+| `/api/fs/read` | GET | Read file (`?path=/conf.txt`) |
+| `/api/fs/write` | POST | Write file (`{"path":"/x","content":"y"}`) |
+| `/api/fs/delete` | DELETE | Delete file (`?path=/x`) |
+| `/api/fs/list` | GET | List all filesystem files |
+
+Example — read config:
+
+```bash
+curl -u admin:password http://<device-ip>/api/config
+```
+
+Example — update brightness to 10:
+
+```bash
+curl -u admin:password -X POST -H 'Content-Type: application/json' \
+  -d '{"display_intensity": 10}' http://<device-ip>/api/config
+```
