@@ -13,6 +13,7 @@
 
 #include "OpenWeatherMapClient.h"
 #include "timeStr.h"
+#include <WiFiClientSecureBearSSL.h>
 
 OpenWeatherMapClient::OpenWeatherMapClient(const String &ApiKey, bool isMetric) {
   myGeoLocation = "";
@@ -90,7 +91,11 @@ int OpenWeatherMapClient::setGeoLocation(const String &location) {
 }
 
 void OpenWeatherMapClient::updateWeather() {
-  WiFiClient weatherClient;
+  // SEC-07: Use HTTPS to protect API key in transit
+  BearSSL::WiFiClientSecure weatherClient;
+  weatherClient.setInsecure();
+  weatherClient.setBufferSizes(2048, 512);
+
   String apiGetData;
   apiGetData.reserve(260);
   apiGetData += F("GET /data/2.5/weather?");
@@ -126,9 +131,9 @@ void OpenWeatherMapClient::updateWeather() {
 
   apiGetData += F("&units=") + String((isMetric) ? F("metric") : F("imperial")) + F("&APPID=") + myApiKey + F(" HTTP/1.1");
   Serial.println(F("Getting Weather Data"));
-  Serial.println(apiGetData);
+  // SEC-11: Don't log the full URL — it contains the API key
   errorMsg = "";
-  if (weatherClient.connect(servername, 80)) {  //starts client connection, checks for connection
+  if (weatherClient.connect(servername, 443)) {  // SEC-07: HTTPS port
     weatherClient.println(apiGetData);
     weatherClient.println(F("Host: ") + String(servername));
     weatherClient.println(F("User-Agent: ArduinoWiFi/1.1"));
