@@ -88,10 +88,13 @@ GET /api/v1/devices (Authorization: token test-key-123)
 ### Test 5: Set Device Name
 
 ```text
-PATCH /api/v1/devices/5fc8ad {"name": "Kitchen Clock"}
+POST /api/v1/devices/5fc8ad/update_name {"name": "Kitchen Clock"}
 ```
 
-**Result:** PASS — Name set to "Kitchen Clock".
+**Result:** PASS — Name set to "Kitchen Clock". (Endpoint was originally
+`PATCH /api/v1/devices/{chip_id}` and was renamed in response to PR #25 review
+feedback to make it explicit that only the name can be modified — telemetry
+fields are owned by the heartbeat path.)
 
 ### Test 6: Calendar Includes deviceName After Naming
 

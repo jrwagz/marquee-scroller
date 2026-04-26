@@ -18,5 +18,6 @@ class DeviceResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class DeviceUpdate(BaseModel):
-    name: str | None = None
+class DeviceNameUpdate(BaseModel):
+    """Body for POST /api/v1/devices/{chip_id}/update_name. Name is required."""
+    name: str

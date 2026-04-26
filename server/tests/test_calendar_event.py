@@ -1,6 +1,11 @@
-"""Tests for CalendarEvent, adapted from jrwagz/wagfam-clocks-data-source.
+"""Tests for CalendarEvent, adapted from jrwagz/wagfam-clocks-data-source@ddd0f050.
 
-All tests use today = 1-Jan-2000 for determinism.
+All tests use today = 1-Jan-2000 for determinism. The source repo achieves this via
+an autouse pytest fixture that monkey-patches a module-level `todays_date()` function;
+this adapted version uses the new `today=` parameter on `CalendarEvent.__init__`
+instead. Test coverage is preserved 1:1 — every test in the source file has a
+corresponding test here. See `docs/CALENDAR_ADAPTATION.md` and
+`docs/adaptations/test_calendar_event.diff` for the full diff.
 """
 
 import datetime

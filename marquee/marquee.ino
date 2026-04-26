@@ -856,9 +856,10 @@ void getWeatherData() //client function to send/receive GET request data.
       && serverConfig.firmwareUrl.startsWith("http://")
       && otaConfirmAt == 0
       && millis() > OTA_CONFIRM_MS) {
-    // SEC-03: Validate firmware URL domain against calendar data source domain
-    if (!isTrustedFirmwareDomain(serverConfig.firmwareUrl, WAGFAM_DATA_URL)) {
-      Serial.println(F("[SEC] Rejected firmware URL — domain does not match calendar source"));
+    // SEC-03: Validate firmware URL domain — accept if it's in the compile-time
+    // allowlist (WAGFAM_TRUSTED_FIRMWARE_DOMAINS) OR matches the calendar source.
+    if (!isTrustedFirmwareDomain(serverConfig.firmwareUrl, WAGFAM_DATA_URL, WAGFAM_TRUSTED_FIRMWARE_DOMAINS)) {
+      Serial.println(F("[SEC] Rejected firmware URL — domain not allowlisted and does not match calendar source"));
     } else {
     Serial.println("[OTA] Server version: " + serverConfig.latestVersion + ", current: " + String(VERSION));
     performAutoUpdate(serverConfig.firmwareUrl);

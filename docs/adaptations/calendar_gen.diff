@@ -1,0 +1,236 @@
+--- /tmp/source-compare/wagfam-clocks-data-source/generate_data_source.py	2026-04-26 16:09:36
++++ server/app/services/calendar_gen.py	2026-04-26 16:22:17
+@@ -1,175 +1,85 @@
+-#!/usr/bin/env python3
+-"""Script to generate upcoming calendar events
++"""Calendar message generation adapted from jrwagz/wagfam-clocks-data-source@ddd0f050.
+ 
+-Provided an input JSON data structure this analyzes the calendar events and generates messages for
+-the next few upcoming events as a data source JSON file.
+-
+-The input data structure should be as follows:
+-
+-JSON Format, an array of objects, and each object with the following keys:
+-
+-- type: (str) "birth", "wedding"
+-- date: (str) "DD-MMM-YYYY"
+-- who: (str) "John Smith"
+-
++The source file is `generate_data_source.py`, a CLI script. This adaptation drops
++the argparse + main() plumbing and exposes `generate_messages()` and
++`load_calendar_data()` as importable functions returning Python values instead of
++writing to disk. See `docs/CALENDAR_ADAPTATION.md` for the full rationale and
++`docs/adaptations/calendar_gen.diff` for the unified diff.
+ """
+ 
+-import argparse
++import datetime
+ import json
+-import logging
+ from pathlib import Path
+-import sys
+ 
+-from calendar_event import CalendarEvent
++from app.services.calendar_event import CalendarEvent
+ 
+-logger = logging.getLogger(__name__)
+ 
++def load_calendar_data(path: Path, today: datetime.date | None = None) -> list[CalendarEvent]:
++    data = json.loads(path.read_text())
++    return [CalendarEvent(item, today=today) for item in data]
+ 
+-def parse_args() -> argparse.Namespace:
+-    """Parse command line arguments
+ 
+-    Args:
+-        argv: arguments to parse
++def generate_messages(
++    events: list[CalendarEvent],
++    max_events: int = 10,
++    max_future_days: int = 14,
++) -> tuple[list[str], bool]:
++    """Generate calendar messages from a list of events.
+ 
+-    Returns:
+-        Parsed command line options
++    Returns (messages, event_today) where messages is a list of strings
++    and event_today indicates if any event is happening today.
+     """
+-    parser = argparse.ArgumentParser(
+-        formatter_class=argparse.RawTextHelpFormatter,
+-        description=__doc__,
+-    )
+-    parser.add_argument(
+-        "--debug",
+-        action="store_const",
+-        dest="log_level",
+-        const=logging.DEBUG,
+-        default=logging.INFO,
+-        help="Enable debug printout",
+-    )
+-    # Now add other options here
+-    parser.add_argument(
+-        "--data-structure",
+-        help="Path to JSON file containing the input data structure",
+-        type=Path,
+-        default=Path("wagfam_calendar_data.json"),
+-    )
+-    parser.add_argument(
+-        "--max-events",
+-        type=int,
+-        default=10,
+-        help="Maximum number of events to generate, Defaults to 10.",
+-    )
+-    parser.add_argument(
+-        "--max-future-days",
+-        type=int,
+-        default=14,
+-        help="Maximum number of days in the future to generate events for, Defaults to 14.",
+-    )
+-    parser.add_argument(
+-        "--out-file",
+-        help="Path to JSON file where we will write the Data Source",
+-        type=Path,
+-        default=Path("data_source.json"),
+-    )
+-    opts = parser.parse_args()
+-    logging.basicConfig(format="%(message)s", level=opts.log_level)
+-    return opts
+-
+-
+-def main() -> int:
+-    """Run main script
+-
+-    Returns:
+-        Unix style return code, 0 for pass.
+-    """
+-    opts = parse_args()
+-
+-    logger.info("Reading input data from %s", str(opts.data_structure))
+-    data_structure = json.loads(opts.data_structure.read_text())
+-    calendar_events = []
+-    for data_object in data_structure:
+-        calendar_events.append(CalendarEvent(data_object))
+-
+-    logger.info(
+-        "Sorting upcoming events, and writing up to %d messages to %s",
+-        opts.max_events,
+-        str(opts.out_file),
+-    )
++    sorted_events = sorted(events)
+     event_today = False
+-    events = []
+-    sorted_events = sorted(calendar_events)
+-    events_today = []
+-    events_future = []
+ 
+-    # Figure out how many events are happening today, as we'll repeat them to be more prominent
+-    # than the events that aren't happening today
+-    for next_event in sorted_events:
+-        if next_event.is_happening_today:
+-            events_today.append({"message": next_event.next_occurrence_description})
++    events_today_msgs: list[str] = []
++    events_future_msgs: list[str] = []
++
++    for ev in sorted_events:
++        if ev.is_happening_today:
++            events_today_msgs.append(ev.next_occurrence_description)
+             event_today = True
+         else:
+             break
+ 
+-    # Now figure out how many other events are in the configurable future we are looking at
+-    for next_event in sorted_events:
+-        if (
+-            not next_event.is_happening_today
+-            and next_event.days_until_next_occurrence <= opts.max_future_days
+-        ):
+-            events_future.append({"message": next_event.next_occurrence_description})
++    for ev in sorted_events:
++        if not ev.is_happening_today and ev.days_until_next_occurrence <= max_future_days:
++            events_future_msgs.append(ev.next_occurrence_description)
+ 
+-    logger.info("-----------------------------------------------------------")
++    messages: list[str] = []
+ 
+-    if events_today and not events_future:
+-        # If we only have today events, and no future events, report just those, no matter how many
+-        # there are.  It is assumed we'll never have more events on a single day than the maximum
+-        # allowed number of events
+-        events.extend(events_today)
+-        for today_event in events_today:
+-            logger.info(today_event["message"])
+-    elif events_today and events_future:
+-        # If we have events today, and in the future mix them up, with today's events more often
+-        # Meaning repeat all of the events today each time we list a future event, and stop when
+-        # we've hit the limit for messages
+-        total_events = 0
+-        for event in events_future:
+-            if total_events >= opts.max_events:
++    if events_today_msgs and not events_future_msgs:
++        messages.extend(events_today_msgs)
++    elif events_today_msgs and events_future_msgs:
++        total = 0
++        for future_msg in events_future_msgs:
++            if total >= max_events:
+                 break
+-            events.extend(events_today)
+-            events.append(event)
+-            total_events += len(events_today)
+-            total_events += 1
+-            for today_event in events_today:
+-                logger.info(today_event["message"])
+-            logger.info(event["message"])
+-    elif events_future:
+-        # We just have future events, so just list them, up to the maximum allowed
+-        events.extend(events_future[: opts.max_events])
+-        for future_event in events_future[: opts.max_events]:
+-            logger.info(future_event["message"])
++            messages.extend(events_today_msgs)
++            messages.append(future_msg)
++            total += len(events_today_msgs) + 1
++    elif events_future_msgs:
++        messages.extend(events_future_msgs[:max_events])
+     else:
+-        logger.info("No events found in the next %d days", opts.max_future_days)
+-        # Go find the very next event, and just output that
+-        for next_event in sorted_events:
+-            if (
+-                not next_event.is_happening_today
+-                and next_event.days_until_next_occurrence >= opts.max_future_days
+-            ):
+-                logger.info(
+-                    "Sending next event that happens in %d days",
+-                    next_event.days_until_next_occurrence,
+-                )
+-                events.append({"message": next_event.next_occurrence_description})
++        for ev in sorted_events:
++            if not ev.is_happening_today and ev.days_until_next_occurrence >= max_future_days:
++                messages.append(ev.next_occurrence_description)
+                 break
+ 
+-    logger.info("-----------------------------------------------------------")
+-    events.insert(0, {"config": {"eventToday": int(event_today)}})
++    return messages, event_today
+ 
+-    opts.out_file.write_text(json.dumps(events, indent=2))
+-    logger.info("DONE!")
+ 
+-    return 0
++def build_calendar_response(
++    messages: list[str],
++    event_today: bool,
++    device_name: str | None = None,
++) -> list[dict]:
++    """Build the JSON response in the format the clocks expect."""
++    config: dict = {"eventToday": int(event_today)}
++    if device_name:
++        config["deviceName"] = device_name
+ 
+-
+-if __name__ == "__main__":
+-    sys.exit(main())
++    result: list[dict] = [{"config": config}]
++    for msg in messages:
++        result.append({"message": msg})
++    return result

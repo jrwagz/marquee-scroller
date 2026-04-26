@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.auth import require_auth
 from app.database import get_db
 from app.models import Device
-from app.schemas import DeviceResponse, DeviceUpdate
+from app.schemas import DeviceNameUpdate, DeviceResponse
 
 router = APIRouter(dependencies=[Depends(require_auth)])
 
@@ -22,13 +22,27 @@ def get_device(chip_id: str, db: Session = Depends(get_db)):
     return device
 
 
-@router.patch("/api/v1/devices/{chip_id}", response_model=DeviceResponse)
-def update_device(chip_id: str, body: DeviceUpdate, db: Session = Depends(get_db)):
+@router.post(
+    "/api/v1/devices/{chip_id}/update_name",
+    response_model=DeviceResponse,
+    summary="Set the human-friendly display name for a device",
+    description=(
+        "Updates ONLY the device's `name` field — no other device fields can be "
+        "modified through this endpoint. The name is what gets pushed back to the "
+        "clock as `deviceName` in the next calendar response. Telemetry fields "
+        "(`version`, `uptime_ms`, `free_heap`, `rssi`, `ip_address`, `last_seen`) "
+        "are owned by the heartbeat ingestion path and are not user-editable."
+    ),
+)
+def update_device_name(
+    chip_id: str,
+    body: DeviceNameUpdate,
+    db: Session = Depends(get_db),
+):
     device = db.query(Device).filter(Device.chip_id == chip_id).first()
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
-    if body.name is not None:
-        device.name = body.name
+    device.name = body.name
     db.commit()
     db.refresh(device)
     return device

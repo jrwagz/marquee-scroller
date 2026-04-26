@@ -38,8 +38,8 @@ def test_calendar_device_name_in_config(client):
     client.get("/api/v1/calendar?chip_id=named123")
 
     # Set device name
-    client.patch(
-        "/api/v1/devices/named123",
+    client.post(
+        "/api/v1/devices/named123/update_name",
         json={"name": "Kitchen Clock"},
         headers={"Authorization": "token test-key"},
     )

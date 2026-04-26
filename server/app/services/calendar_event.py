@@ -1,4 +1,10 @@
-"""Calendar event logic adapted from jrwagz/wagfam-clocks-data-source."""
+"""Calendar event logic adapted from jrwagz/wagfam-clocks-data-source@ddd0f050.
+
+The single behavioral change is the `today=` parameter on `CalendarEvent.__init__`
+(replacing the source's module-level `todays_date()` indirection) so the class is
+testable without monkey-patching. See `docs/CALENDAR_ADAPTATION.md` for the full
+diff and rationale, and `docs/adaptations/calendar_event.diff` for the unified diff.
+"""
 
 import datetime
 import functools

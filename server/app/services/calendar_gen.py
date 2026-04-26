@@ -1,4 +1,11 @@
-"""Calendar message generation adapted from jrwagz/wagfam-clocks-data-source."""
+"""Calendar message generation adapted from jrwagz/wagfam-clocks-data-source@ddd0f050.
+
+The source file is `generate_data_source.py`, a CLI script. This adaptation drops
+the argparse + main() plumbing and exposes `generate_messages()` and
+`load_calendar_data()` as importable functions returning Python values instead of
+writing to disk. See `docs/CALENDAR_ADAPTATION.md` for the full rationale and
+`docs/adaptations/calendar_gen.diff` for the unified diff.
+"""
 
 import datetime
 import json

@@ -1,0 +1,274 @@
+--- /tmp/source-compare/wagfam-clocks-data-source/calendar_event.py	2026-04-26 16:09:36
++++ server/app/services/calendar_event.py	2026-04-26 16:22:02
+@@ -1,126 +1,49 @@
++"""Calendar event logic adapted from jrwagz/wagfam-clocks-data-source@ddd0f050.
++
++The single behavioral change is the `today=` parameter on `CalendarEvent.__init__`
++(replacing the source's module-level `todays_date()` indirection) so the class is
++testable without monkey-patching. See `docs/CALENDAR_ADAPTATION.md` for the full
++diff and rationale, and `docs/adaptations/calendar_event.diff` for the unified diff.
++"""
++
+ import datetime
+-from enum import Enum, unique
+ import functools
++from enum import Enum, unique
+ 
+ MONTHS_IN_YEAR = [
+-    "Jan",
+-    "Feb",
+-    "Mar",
+-    "Apr",
+-    "May",
+-    "Jun",
+-    "Jul",
+-    "Aug",
+-    "Sep",
+-    "Oct",
+-    "Nov",
+-    "Dec",
++    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
++    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+ ]
+ 
+ 
+ @unique
+ class CalendarEventType(str, Enum):
+-    """Enum for calendar event types
+-
+-    By declaring that this is a subclass of str, we get this to serialize to JSON nicely
+-    """
+-
+     BIRTH = "birth"
+     MARRIAGE = "marriage"
+ 
+-    def __str__(self) -> str:
+-        """Method to return the enumerated type as a string value
+ 
+-        Returns:
+-            string representation of enum value
+-        """
+-        return self.value
+-
+-    def __repr__(self) -> str:
+-        """Return string representation of self in this context
+-
+-        Returns:
+-            string representation of enum value
+-        """
+-        return self.value
+-
+-
+-def todays_date() -> datetime.date:
+-    """Returns date object for today
+-
+-    This is mainly in a function to make mocking for tests easier
+-    """
+-    return datetime.date.today()
+-
+-
+ def parse_date(date_string: str) -> datetime.date:
+-    """
+-    Parse a string representation of a date into a datetime.date object.
+-
+-    Args:
+-        date_string: A string representation of a date, in the format "DD-MMM-YYYY".
+-
+-    Returns:
+-        The parsed date.
+-
+-    Raises:
+-        ValueError: If the input date string is not in the expected format.
+-    """
+     try:
+-        date_parts = date_string.split("-")
+-        day = int(date_parts[0])
+-        month = MONTHS_IN_YEAR.index(date_parts[1]) + 1
+-        year = int(date_parts[2])
+-        return datetime.date(year, month, day)
++        day_s, month_s, year_s = date_string.split("-")
++        return datetime.date(int(year_s), MONTHS_IN_YEAR.index(month_s) + 1, int(day_s))
+     except Exception as exc:
+         raise ValueError(f"Invalid date string: {exc}")
+ 
+ 
+-def date_to_str(input_date: datetime.date) -> str:
+-    """Give the string representation of a datetime.date object.
++def date_to_str(d: datetime.date) -> str:
++    return f"{d.day}-{MONTHS_IN_YEAR[d.month - 1]}-{d.year}"
+ 
+-    Args:
+-        date: date object
+ 
+-    Returns:
+-        A string representation of a date, in the format "DD-MMM-YYYY"."""
+-    return f"{input_date.day}-{MONTHS_IN_YEAR[input_date.month-1]}-{input_date.year}"
++def next_occurrence_of_annual_event(
++    event_date: datetime.date, today: datetime.date
++) -> datetime.date:
++    this_year = datetime.date(today.year, event_date.month, event_date.day)
++    if this_year < today:
++        return this_year.replace(year=today.year + 1)
++    return this_year
+ 
+ 
+-def next_occurrence_of_annual_event(input_date: datetime.date) -> datetime.date:
+-    """Given a datetime.date object, which represents an annual event, and specifically the first
+-    occurrence of such an annual event, return a datetime.date object that represents the next
+-    time it will occur, taking into account the current month and day.
+-
+-    Args:
+-        date: date object when annual event first occurred
+-
+-    Returns:
+-        datetime.date object of next annual occurrence, given the current month and day.
+-    """
+-    today = todays_date()
+-    next_occurrence = datetime.date(today.year, input_date.month, input_date.day)
+-    if next_occurrence < today:
+-        next_occurrence = next_occurrence.replace(year=today.year + 1)
+-    return next_occurrence
+-
+-
+ def ordinal(n: int) -> str:
+-    """Given an integer, return it's ordinal representation
+-
+-    For example, here are some given inputs and their outputs:
+-
+-    1 -> 1st
+-    2 -> 2nd
+-    3 -> 3rd
+-    etc...
+-
+-    Args:
+-        n: integer input
+-
+-    Returns:
+-        string ordinal representation
+-    """
+     if 11 <= (n % 100) <= 13:
+         suffix = "th"
+     else:
+@@ -130,49 +53,35 @@
+ 
+ @functools.total_ordering
+ class CalendarEvent:
+-    def __init__(self, data_dict: dict):
++    def __init__(self, data_dict: dict, today: datetime.date | None = None):
++        self.today = today or datetime.date.today()
+         try:
+-            self.type = data_dict["type"]
++            self.type = CalendarEventType(data_dict["type"])
+             self.date = parse_date(data_dict["date"])
+-            self.next_occurrence = next_occurrence_of_annual_event(self.date)
++            self.next_occurrence = next_occurrence_of_annual_event(self.date, self.today)
+             self.who = data_dict["who"]
+         except KeyError as exc:
+             raise ValueError(f"Invalid source dictionary! {exc}")
+ 
+     @property
+     def age_at_next_event(self) -> int:
+-        """Returns the number of whole years that have passed since the initial event
+-
+-        Returns:
+-            whole years since first occurrence
+-        """
+-        today = todays_date()
+-        this_year_birthday = datetime.date(today.year, self.date.month, self.date.day)
+-        if this_year_birthday < today:
+-            years = today.year - self.date.year
++        this_year_date = datetime.date(self.today.year, self.date.month, self.date.day)
++        if this_year_date < self.today:
++            years = self.today.year - self.date.year
+         else:
+-            years = today.year - self.date.year - 1
++            years = self.today.year - self.date.year - 1
+         return years + 1
+ 
+     @property
+     def days_until_next_occurrence(self) -> int:
+-        """Returns the number of days remaining until the next occurrence
++        return (self.next_occurrence - self.today).days
+ 
+-        Returns:
+-            integer of days remaining until next occurrence
+-        """
+-        today = todays_date()
+-        diff = self.next_occurrence - today
+-        return diff.days
++    @property
++    def is_happening_today(self) -> bool:
++        return self.today.month == self.date.month and self.today.day == self.date.day
+ 
+     @property
+     def next_occurrence_description(self) -> str:
+-        """Returns a nice string representation of the next occurrence, which is to be displayed to
+-        the end user
+-
+-        Returns:
+-            Nice description of next event.
+-        """
+         if self.type == CalendarEventType.BIRTH:
+             event_name = "Birthday"
+             if self.age_at_next_event == 0:
+@@ -182,44 +91,15 @@
+             if self.age_at_next_event == 0:
+                 event_name = "Wedding"
+ 
+-        day_plurality = "s"
+-        if self.days_until_next_occurrence == 1:
+-            day_plurality = ""
++        day_plurality = "s" if self.days_until_next_occurrence != 1 else ""
++        number_display = f"{ordinal(self.age_at_next_event)} " if self.age_at_next_event != 0 else ""
+ 
+-        number_display = ""
+-        if self.age_at_next_event != 0:
+-            number_display = f"{ordinal(self.age_at_next_event)} "
+-
+         if self.is_happening_today:
+-            message = f"Happy {number_display}{event_name} {self.who}!!!"
+-        else:
+-            message = (
+-                f"{self.days_until_next_occurrence} day{day_plurality}: {self.who}'s "
+-                f"{number_display}{event_name} "
+-                f"({self.date.day}/{MONTHS_IN_YEAR[self.date.month-1]})"
+-            )
+-
+-        return message
+-
+-    @property
+-    def is_happening_today(self) -> bool:
+-        """Returns whether or not an occurrence of this event is happening today
+-
+-        Returns:
+-            True if happening today, else False
+-        """
+-        today = todays_date()
+-        return today.month == self.date.month and today.day == self.date.day
+-
+-    def __repr__(self) -> str:
+-        """Return string representation of self in this context
+-
+-        Returns:
+-            string representation
+-        """
++            return f"Happy {number_display}{event_name} {self.who}!!!"
+         return (
+-            f"<CalendarEvent {self.type} {date_to_str(self.next_occurrence)} "
+-            f"{self.who} {self.age_at_next_event}>"
++            f"{self.days_until_next_occurrence} day{day_plurality}: {self.who}'s "
++            f"{number_display}{event_name} "
++            f"({self.date.day}/{MONTHS_IN_YEAR[self.date.month - 1]})"
+         )
+ 
+     def __eq__(self, other):
+@@ -227,3 +107,9 @@
+ 
+     def __lt__(self, other):
+         return self.next_occurrence < other.next_occurrence
++
++    def __repr__(self):
++        return (
++            f"<CalendarEvent {self.type} {date_to_str(self.next_occurrence)} "
++            f"{self.who} {self.age_at_next_event}>"
++        )
