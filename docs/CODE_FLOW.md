@@ -464,7 +464,7 @@ transitions are handled automatically after the next weather refresh.
 ## Appendix: Variable Quick Reference
 
 | Where to look | What you'll find |
-|----------------|-----------------|
+| ---------------- | ----------------- |
 | `marquee.ino:60–98` | All global settings variables (APIKEY, geoLocation, IS_*, SHOW_*, etc.) |
 | `marquee.ino:69–90` | Matrix, timing, and client object declarations |
 | `marquee.ino:104–148` | All PROGMEM HTML string constants |

@@ -42,7 +42,7 @@ It does four things:
 ## Hardware
 
 | Component | Part | Notes |
-|-----------|------|-------|
+| ----------- | ------ | ------- |
 | Microcontroller | Wemos D1 Mini (ESP8266) | 80/160 MHz, 4MB flash, 80KB RAM |
 | Display | MAX7219 4-in-1 LED Matrix (32×8) | Daisy-chained via SPI |
 | Display driver chip | Maxim MAX7219 | One per 8×8 panel; 4 panels total |
@@ -50,7 +50,7 @@ It does four things:
 ### Wiring
 
 | Display Pin | Wemos D1 Mini Pin | SPI Function |
-|-------------|-------------------|--------------|
+| ------------- | ------------------- | -------------- |
 | CLK | D5 | SCK |
 | CS | D6 | Chip Select (GPIO12) |
 | DIN | D7 | MOSI |
@@ -62,7 +62,7 @@ The `pinCS` constant (`D6`) is defined in `Settings.h`.
 ### Memory Budget
 
 | Region | Size | Notes |
-|--------|------|-------|
+| -------- | ------ | ------- |
 | Flash | 4MB | Code + LittleFS filesystem |
 | IRAM | ~32KB | Hot-path code |
 | DRAM (heap+stack) | ~80KB | Stack is ~4KB; heap is the rest |
@@ -196,7 +196,7 @@ to parse the calendar JSON without holding the full payload in RAM.
 All runtime state lives as global variables in `marquee.ino`. The most important ones:
 
 | Variable | Type | Purpose |
-|----------|------|---------|
+| ---------- | ------ | --------- |
 | `APIKEY` | `String` | OpenWeatherMap API key |
 | `WAGFAM_DATA_URL` | `String` | Calendar JSON endpoint URL |
 | `WAGFAM_API_KEY` | `String` | Bearer token for calendar endpoint |
@@ -361,7 +361,7 @@ compute how many scroll steps are needed for a given message.
 Routes served by `ESP8266WebServer` on port 80:
 
 | Route | Handler | Description |
-|-------|---------|-------------|
+| ------- | --------- | ------------- |
 | `/` | `displayHomePage` | Shows events, weather, version |
 | `/configure` | `handleConfigure` | Renders config form |
 | `/saveconfig` | `handleSaveConfig` | Saves form data, triggers refresh |
@@ -423,7 +423,7 @@ Two OTA mechanisms coexist:
 ## Key Design Constraints
 
 | Constraint | Impact |
-|------------|--------|
+| ------------ | -------- |
 | ~80KB heap | All `String` allocations are at a premium; avoid heap fragmentation |
 | 4KB stack | Avoid large local arrays, especially of `String` objects |
 | Single-threaded | `delay()` in scroll loop must yield to server/OTA via explicit calls |

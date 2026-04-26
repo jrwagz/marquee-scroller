@@ -10,21 +10,21 @@
 ### `marquee/OpenWeatherMapClient.cpp`
 
 | # | Issue | Status |
-|---|-------|--------|
+| --- | ------- | -------- |
 | 1 | Operator precedence bug: `int len = measureJson(jdoc) <= 150` | Done |
 | 2 | `getWindDirectionText()` allocates 16 `String` objects on the stack | Done |
 
 ### `marquee/WagFamBdayClient.cpp`
 
 | # | Issue | Status |
-|---|-------|--------|
+| --- | ------- | -------- |
 | 3 | `cleanText()` — add `reserve()` to reduce heap reallocs | Done |
 | 6 | Remove unconditional debug `Serial.println` from `value()` | Done |
 
 ### `marquee/marquee.ino`
 
 | # | Issue | Status |
-|---|-------|--------|
+| --- | ------- | -------- |
 | 4 | `savePersistentConfig()` mutual recursion — replace terminal `readPersistentConfig()` call | Done |
 | 5 | Config parser fragility — replace `indexOf("KEY=")` with first-`=` split | Done |
 | 7 | `handleSaveConfig()` — add bounds checking on numeric inputs | Done |
@@ -38,13 +38,13 @@
 ### `.github/workflows/lint-test-build.yaml`
 
 | # | Issue | Status |
-|---|-------|--------|
+| --- | ------- | -------- |
 | 17 | `actions/checkout@v6` → `@v4`, `upload-artifact@v7` → `@v4` | Done |
 
 ### Repository Cleanup
 
 | # | Issue | Status |
-|---|-------|--------|
+| --- | ------- | -------- |
 | 15 | Delete `sources.json` (unused leftover from upstream news feature) | Done |
 | 16 | Delete stale pre-built `.bin` files (v3.03, current is v3.07.0-wagfam) | Done |
 
