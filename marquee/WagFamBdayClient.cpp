@@ -202,7 +202,7 @@ void WagFamBdayClient::endDocument() {
 
 String WagFamBdayClient::cleanText(String text) {
   text.reserve(text.length() + 64);
-  text.replace("’", "’");
+  text.replace("’", "'");
   text.replace("“", "\"");
   text.replace("”", "\"");
   text.replace("`", "'");
