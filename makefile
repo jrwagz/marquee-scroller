@@ -5,7 +5,7 @@ else
 DOCKER_TTY_ARGS=
 endif
 
-MD_FILES:=$(shell find . -name "*.md" -not -path "./.venv/*" -not -path "./.pytest_cache/*" -not -path "./lib/*" -not -path "./.pio/*")
+MD_FILES:=$(shell find . -name "*.md" -not -path "./.venv/*" -not -path "*/.venv/*" -not -path "./.pytest_cache/*" -not -path "*/.pytest_cache/*" -not -path "./lib/*" -not -path "./.pio/*" -not -path "./.platformio/*")
 
 MARKDOWNLINT_IMAGE:=davidanson/markdownlint-cli2:v0.22.0
 PIO_IMAGE:=ghcr.io/jrwagz/pio-image:v6.1.19
@@ -24,7 +24,9 @@ help:
 	@echo "  lint              - Run lint-markdown + lint-python"
 	@echo "  test-native       - Run native C++ unit tests (no device required)"
 	@echo "  test-scripts      - Run Python tests for scripts/ with 100% coverage check"
-	@echo "  test              - Run test-native + test-scripts"
+	@echo "  test-server       - Run server Python tests in Docker"
+	@echo "  test-integration  - Run integration tests against a live device (requires HOST=<ip>)"
+	@echo "  test              - Run test-native + test-scripts + test-server"
 	@echo "  ready             - Full pipeline"
 
 .passwd:
@@ -106,8 +108,19 @@ test-scripts: .passwd .pytest-image
 			--cov=scripts --cov-report=term-missing --cov-fail-under=100 \
 			--junit-xml=artifacts/test-scripts-results.xml
 
+SERVER_IMAGE:=wagfam-server-test
+
+.PHONY: test-server
+test-server:
+	docker build -t $(SERVER_IMAGE) server/
+	docker run \
+		--rm $(DOCKER_TTY_ARGS) \
+		-e WAGFAM_WAGFAM_API_KEY=test-key \
+		$(SERVER_IMAGE) \
+		python -m pytest tests/ -v
+
 .PHONY: test
-test: test-native test-scripts
+test: test-native test-scripts test-server
 
 .PHONY: test-native
 test-native: .passwd
@@ -121,6 +134,13 @@ test-native: .passwd
 		-u $(shell id -u):$(shell id -g) \
 		$(PIO_IMAGE) \
 		pio test -e native_test --junit-output-path artifacts/test-native-results.xml
+
+.PHONY: test-integration
+test-integration:
+ifndef HOST
+	$(error HOST is required. Usage: make test-integration HOST=192.168.1.100 [PASSWORD=mypass])
+endif
+	pytest tests/integration/ -v --host $(HOST) $(if $(PASSWORD),--password $(PASSWORD),) $(if $(PORT),--port $(PORT),)
 
 .PHONY: build
 build: .passwd
