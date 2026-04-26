@@ -52,6 +52,7 @@ class WagFamBdayClient: public JsonListener {
     String getMessage(int index);
     int getNumMessages();
     String cleanText(String text);
+    WagFamBdayClient::configValues getLastConfig() const { return currentConfig; }
 
     virtual void whitespace(char c);
     virtual void startDocument();

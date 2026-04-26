@@ -164,7 +164,6 @@ with the current safe URL. If the device reboots twice without confirming (5 min
 - `getWeatherData()` is the single orchestration point for both weather AND calendar data refresh — they
   always refresh together; it also triggers auto-OTA if `latestVersion` differs from `VERSION`
 - `firmwareUrl` in the calendar config JSON must use `http://` — HTTPS is not supported by ESPhttpUpdate
-- No unit tests exist; the only test is a build test in CI (`make test` is a placeholder)
 
 ## Known Bugs (see `docs/CODE_REVIEW.md` for full details)
 

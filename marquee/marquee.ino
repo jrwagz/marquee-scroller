@@ -528,6 +528,25 @@ void handleConfigure() {
   digitalWrite(externalLight, HIGH);
 }
 
+// Shared OTA flash core used by both handleUpdateFromUrl() and performAutoUpdate().
+// Writes a rollback record to LittleFS, calls ESPhttpUpdate, then cleans up on failure.
+// Never returns on success — the device reboots automatically after a successful flash.
+static void doOtaFlash(const String &firmwareUrl) {
+  File f = SPIFFS.open(OTA_PENDING_FILE, "w");
+  f.println("safeUrl=" + OTA_SAFE_URL);
+  f.println("newUrl=" + firmwareUrl);
+  f.println("boots=0");
+  f.close();
+
+  WiFiClient client;
+  t_httpUpdate_return ret = ESPhttpUpdate.update(client, firmwareUrl);
+
+  // Only reached on failure — remove pending record so next boot is clean
+  SPIFFS.remove(OTA_PENDING_FILE);
+  Serial.printf_P(PSTR("[OTA] Flash failed (code %d): %s\n"),
+    ret, ESPhttpUpdate.getLastErrorString().c_str());
+}
+
 void handleUpdateFromUrl() {
   String firmwareUrl = server.arg("firmwareUrl");
   server.sendHeader("Cache-Control", "no-cache, no-store");
@@ -572,67 +591,27 @@ void handleUpdateFromUrl() {
   scrollMessageWait("   ...Updating...");
   centerPrint("...");
 
-  // Enhanced logging for debugging
-  Serial.printf_P(PSTR("=== FIRMWARE UPDATE PROCESS STARTED ===\n"));
-  Serial.printf_P(PSTR("URL: %s\n"), firmwareUrl.c_str());
+  Serial.printf_P(PSTR("[OTA] Starting update from URL: %s\n"), firmwareUrl.c_str());
+  doOtaFlash(firmwareUrl);
 
-  // Write rollback record before flashing so crash-loop recovery is possible
-  {
-    File pf = SPIFFS.open(OTA_PENDING_FILE, "w");
-    pf.println("safeUrl=" + OTA_SAFE_URL);
-    pf.println("newUrl=" + firmwareUrl);
-    pf.println("boots=0");
-    pf.close();
-  }
-
-  t_httpUpdate_return ret;
-
-  WiFiClient client;
-  ret = ESPhttpUpdate.update(client, firmwareUrl);
-
-  // IF WE GET HERE IT MEANS OUR UPDATE DIDN'T TAKE!!!!
-  SPIFFS.remove(OTA_PENDING_FILE); // update failed; don't trigger rollback on next boot
-  Serial.printf_P(PSTR("ERROR: ESPhttpUpdate.update() failed! Return value: %d \n"), ret);
-
-  switch (ret) {
-    case HTTP_UPDATE_FAILED:
-      Serial.printf_P(PSTR("ERROR: Update failed: %s\n"),ESPhttpUpdate.getLastErrorString());
-      Serial.printf_P(PSTR("Last error code: %d \n"), ESPhttpUpdate.getLastError());
-      break;
-    case HTTP_UPDATE_NO_UPDATES:
-      Serial.printf_P(PSTR("INFO: No updates available\n"));
-      break;
-    default:
-      Serial.printf_P(PSTR("ERROR: Update failed with unknown error code: %d \n"),ret);
-      break;
-  }
-
+  // Only reached on failure
   digitalWrite(externalLight, HIGH);
 }
 
-// Trigger an OTA update from the given HTTP URL.
+// Trigger an OTA update from the given HTTP URL (called from the auto-update path).
 // Writes a rollback record to LittleFS before flashing so crash-loop recovery is possible.
 // On ESPhttpUpdate success the device reboots; this function only returns on failure.
 void performAutoUpdate(const String &firmwareUrl) {
-  Serial.println("[OTA] Auto-update from: " + firmwareUrl);
-
-  // Write rollback record before flashing
-  File f = SPIFFS.open(OTA_PENDING_FILE, "w");
-  f.println("safeUrl=" + OTA_SAFE_URL);
-  f.println("newUrl=" + firmwareUrl);
-  f.println("boots=0");
-  f.close();
+  Serial.printf_P(PSTR("[OTA] Auto-update from: %s\n"), firmwareUrl.c_str());
 
   matrix.fillScreen(LOW);
   scrollMessageWait(F("   ...Auto Updating..."));
   centerPrint(F("..."));
 
-  WiFiClient client;
-  t_httpUpdate_return ret = ESPhttpUpdate.update(client, firmwareUrl);
+  doOtaFlash(firmwareUrl);
 
-  // If we reach here the update failed; clean up so we don't trigger a false rollback
-  SPIFFS.remove(OTA_PENDING_FILE);
-  Serial.printf_P(PSTR("[OTA] Auto-update failed! Code: %d\n"), ret);
+  // Only reached on failure
+  Serial.printf_P(PSTR("[OTA] Auto-update failed.\n"));
 }
 
 // Called once in setup() after WiFi connects.
