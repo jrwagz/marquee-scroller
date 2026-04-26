@@ -128,7 +128,9 @@ void WagFamBdayClient::whitespace(char c) {
 //     "config": {
 //       "dataSourceUrl": "",
 //       "apiKey": "",
-//       "eventToday": ""
+//       "eventToday": "",
+//       "latestVersion": "3.08.0-wagfam",
+//       "firmwareUrl": "http://example.com/marquee-v3.08.0.bin"
 //     }
 //   },
 //   {
@@ -160,6 +162,12 @@ void WagFamBdayClient::value(String value) {
     } else if (currentKey == "eventToday") {
       currentConfig.eventTodayValid = true;
       currentConfig.eventToday = value.toInt();
+    } else if (currentKey == "latestVersion") {
+      currentConfig.latestVersionValid = true;
+      currentConfig.latestVersion = value;
+    } else if (currentKey == "firmwareUrl") {
+      currentConfig.firmwareUrlValid = true;
+      currentConfig.firmwareUrl = value;
     }
   } else if (currentKey == "message") {
     if (messageCounter >= 10) {

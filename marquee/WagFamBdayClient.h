@@ -38,6 +38,10 @@ class WagFamBdayClient: public JsonListener {
       String apiKey;
       boolean eventTodayValid;
       boolean eventToday;
+      boolean latestVersionValid;
+      String latestVersion;
+      boolean firmwareUrlValid;
+      String firmwareUrl;
     } configValues;
 
     WagFamBdayClient(String ApiKey, String JsonDataSourceUrl);

@@ -27,10 +27,12 @@
 
 #include "Settings.h"
 
-#define VERSION "3.07.0-wagfam"
+#define VERSION "3.08.0-wagfam"
 
 #define HOSTNAME "CLOCK-"
 #define CONFIG "/conf.txt"
+#define OTA_PENDING_FILE "/ota_pending.txt"
+#define OTA_CONFIRM_MS (5UL * 60UL * 1000UL)  // 5 minutes of stable uptime to confirm an update
 
 //declaring prototypes
 void setup();
@@ -62,7 +64,8 @@ void readPersistentConfig();
 void scrollMessageWait(const String &msg);
 void centerPrint(const String &msg, bool extraStuff = false);
 String EncodeUrlSpecialChars(const char *msg);
-int8_t getWifiQuality();
+void performAutoUpdate(const String &firmwareUrl);
+void checkOtaRollback();
 
 void handleUpdateFromUrl();
 
@@ -147,8 +150,10 @@ static const char UPDATE_FORM[] PROGMEM = "<form class='w3-container' action='/u
                       "<p><button class='w3-button w3-block w3-blue w3-section w3-padding' type='submit'>Update from URL</button></p>"
                       "<p><small>Note: You can also use the <a href='/update'>Firmware Update</a> page to upload a file directly.</small></p></form>";
 
-const int TIMEOUT = 500; // 500 = 1/2 second
-int timeoutCount = 0;
+// OTA auto-update state
+String OTA_SAFE_URL = "";       // URL of last confirmed firmware; rollback target for next update
+uint32_t otaConfirmAt = 0;      // non-zero: millis() target after which the pending update is confirmed
+String otaPendingNewUrl = "";   // URL of firmware pending confirmation (becomes OTA_SAFE_URL on confirm)
 
 // Change the externalLight to the pin you wish to use if other than the Built-in LED
 int externalLight = LED_BUILTIN; // LED_BUILTIN is is the built in LED on the Wemos
@@ -218,26 +223,8 @@ void setup() {
   Serial.print(getWifiQuality());
   Serial.println("%");
 
-  // OTA Updater is always enabled without password requirement
-  ArduinoOTA.onStart([]() {
-    Serial.println("Start");
-  });
-  ArduinoOTA.onEnd([]() {
-    Serial.println("\nEnd");
-  });
-  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
-  });
-  ArduinoOTA.onError([](ota_error_t error) {
-    Serial.printf("Error[%u]: ", error);
-    if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
-    else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
-    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
-    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
-    else if (error == OTA_END_ERROR) Serial.println("End Failed");
-  });
-  ArduinoOTA.setHostname((const char *)hostname.c_str());
-  ArduinoOTA.begin();
+  // Check for a pending OTA confirmation or crash-loop rollback
+  checkOtaRollback();
 
   // Web Server is always enabled
   server.on("/", displayHomePage);
@@ -291,11 +278,19 @@ void loop() {
 
   // Web Server is always enabled
   server.handleClient();
-  // OTA Updater is always enabled
-  ArduinoOTA.handle();
 }
 
 void processEverySecond() {
+  // Confirm a pending OTA update after stable uptime
+  if (otaConfirmAt != 0 && millis() >= otaConfirmAt) {
+    Serial.println(F("[OTA] Update confirmed stable"));
+    SPIFFS.remove(OTA_PENDING_FILE);
+    OTA_SAFE_URL = otaPendingNewUrl;
+    otaConfirmAt = 0;
+    otaPendingNewUrl = "";
+    savePersistentConfig();
+  }
+
   //Get some Weather Data to serve
   if ((getMinutesFromLastRefresh() >= minutesBetweenDataRefresh) || lastRefreshDataTimestamp == 0) {
     getWeatherData();
@@ -581,12 +576,22 @@ void handleUpdateFromUrl() {
   Serial.printf_P(PSTR("=== FIRMWARE UPDATE PROCESS STARTED ===\n"));
   Serial.printf_P(PSTR("URL: %s\n"), firmwareUrl.c_str());
 
+  // Write rollback record before flashing so crash-loop recovery is possible
+  {
+    File pf = SPIFFS.open(OTA_PENDING_FILE, "w");
+    pf.println("safeUrl=" + OTA_SAFE_URL);
+    pf.println("newUrl=" + firmwareUrl);
+    pf.println("boots=0");
+    pf.close();
+  }
+
   t_httpUpdate_return ret;
 
   WiFiClient client;
   ret = ESPhttpUpdate.update(client, firmwareUrl);
 
   // IF WE GET HERE IT MEANS OUR UPDATE DIDN'T TAKE!!!!
+  SPIFFS.remove(OTA_PENDING_FILE); // update failed; don't trigger rollback on next boot
   Serial.printf_P(PSTR("ERROR: ESPhttpUpdate.update() failed! Return value: %d \n"), ret);
 
   switch (ret) {
@@ -603,6 +608,87 @@ void handleUpdateFromUrl() {
   }
 
   digitalWrite(externalLight, HIGH);
+}
+
+// Trigger an OTA update from the given HTTP URL.
+// Writes a rollback record to LittleFS before flashing so crash-loop recovery is possible.
+// On ESPhttpUpdate success the device reboots; this function only returns on failure.
+void performAutoUpdate(const String &firmwareUrl) {
+  Serial.println("[OTA] Auto-update from: " + firmwareUrl);
+
+  // Write rollback record before flashing
+  File f = SPIFFS.open(OTA_PENDING_FILE, "w");
+  f.println("safeUrl=" + OTA_SAFE_URL);
+  f.println("newUrl=" + firmwareUrl);
+  f.println("boots=0");
+  f.close();
+
+  matrix.fillScreen(LOW);
+  scrollMessageWait(F("   ...Auto Updating..."));
+  centerPrint(F("..."));
+
+  WiFiClient client;
+  t_httpUpdate_return ret = ESPhttpUpdate.update(client, firmwareUrl);
+
+  // If we reach here the update failed; clean up so we don't trigger a false rollback
+  SPIFFS.remove(OTA_PENDING_FILE);
+  Serial.printf_P(PSTR("[OTA] Auto-update failed! Code: %d\n"), ret);
+}
+
+// Called once in setup() after WiFi connects.
+// If a previous OTA update did not complete its 5-minute confirmation window,
+// this function detects the crash loop and re-flashes the last known-good firmware.
+void checkOtaRollback() {
+  if (!SPIFFS.exists(OTA_PENDING_FILE)) return;
+
+  String safeUrl = "";
+  String newUrl = "";
+  int boots = 0;
+
+  File f = SPIFFS.open(OTA_PENDING_FILE, "r");
+  while (f.available()) {
+    String line = f.readStringUntil('\n');
+    line.trim();
+    int eq = line.indexOf('=');
+    if (eq <= 0) continue;
+    String k = line.substring(0, eq);
+    String v = line.substring(eq + 1);
+    if (k == "safeUrl") safeUrl = v;
+    else if (k == "newUrl") newUrl = v;
+    else if (k == "boots") boots = v.toInt();
+  }
+  f.close();
+
+  boots++;
+
+  if (boots >= 2) {
+    // Two unconfirmed boots — assume crash loop; roll back to safe firmware
+    SPIFFS.remove(OTA_PENDING_FILE);
+    if (safeUrl != "" && safeUrl.startsWith("http://")) {
+      Serial.println("[OTA] Crash-loop detected — rolling back to: " + safeUrl);
+      matrix.fillScreen(LOW);
+      scrollMessageWait(F("   ...Rolling Back..."));
+      centerPrint(F("..."));
+      WiFiClient client;
+      ESPhttpUpdate.update(client, safeUrl);
+      // If we get here the rollback itself failed; continue with current firmware
+      Serial.println(F("[OTA] Rollback failed; continuing with current firmware"));
+    } else {
+      Serial.println(F("[OTA] Crash-loop detected but no safe URL; cannot roll back"));
+    }
+    return;
+  }
+
+  // First boot after an update — record it and start the confirmation timer
+  File fw = SPIFFS.open(OTA_PENDING_FILE, "w");
+  fw.println("safeUrl=" + safeUrl);
+  fw.println("newUrl=" + newUrl);
+  fw.println("boots=" + String(boots));
+  fw.close();
+
+  otaConfirmAt = millis() + OTA_CONFIRM_MS;
+  otaPendingNewUrl = newUrl;
+  Serial.println(F("[OTA] Update pending confirmation (5 min of stable uptime required)"));
 }
 
 //***********************************************************************
@@ -682,6 +768,17 @@ void getWeatherData() //client function to send/receive GET request data.
   if (needToSave) {
     Serial.println("Saving new config received from server");
     savePersistentConfig();
+  }
+
+  // Check for a remote firmware update pushed via the calendar config
+  if (serverConfig.latestVersionValid && serverConfig.firmwareUrlValid
+      && serverConfig.latestVersion != String(VERSION)
+      && serverConfig.firmwareUrl.startsWith("http://")
+      && otaConfirmAt == 0
+      && millis() > OTA_CONFIRM_MS) {
+    Serial.println("[OTA] Server version: " + serverConfig.latestVersion + ", current: " + String(VERSION));
+    performAutoUpdate(serverConfig.firmwareUrl);
+    // If we return here the update failed; continue normal operation
   }
 
   Serial.println("Version: " + String(VERSION));
@@ -906,6 +1003,7 @@ void savePersistentConfig() {
     f.println("SHOW_PRESSURE=" + String(SHOW_PRESSURE));
     f.println("SHOW_HIGHLOW=" + String(SHOW_HIGHLOW));
     f.println("SHOW_DATE=" + String(SHOW_DATE));
+    f.println("OTA_SAFE_URL=" + OTA_SAFE_URL);
   }
   f.close();
   // Apply current settings to hardware and clients directly.
@@ -992,6 +1090,9 @@ void readPersistentConfig() {
     } else if (key == "SHOW_DATE") {
       SHOW_DATE = value.toInt();
       Serial.println("SHOW_DATE=" + String(SHOW_DATE));
+    } else if (key == "OTA_SAFE_URL") {
+      OTA_SAFE_URL = value;
+      Serial.println("OTA_SAFE_URL: " + (OTA_SAFE_URL != "" ? "[set]" : "[empty]"));
     }
   }
   fr.close();
@@ -1004,10 +1105,7 @@ void readPersistentConfig() {
 
 void scrollMessageWait(const String &msg) {
   for ( int i = 0 ; i < width * (int)msg.length() + matrix.width() - 1 - spacer; i++ ) {
-    // Web server is always enabled
     server.handleClient();
-    // OTA Updater is always enabled
-    ArduinoOTA.handle();
     matrix.fillScreen(LOW);
 
     int letter = i / width;

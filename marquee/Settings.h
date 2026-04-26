@@ -40,8 +40,6 @@ SOFTWARE.
 #include <ESP8266HTTPUpdateServer.h>
 #include <ESP8266httpUpdate.h>
 #include <WiFiManager.h> // --> https://github.com/tzapu/WiFiManager
-#include <ESP8266mDNS.h>
-#include <ArduinoOTA.h>
 #include "FS.h"
 #include <SPI.h>
 #include <Adafruit_GFX.h> // --> https://github.com/adafruit/Adafruit-GFX-Library

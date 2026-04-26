@@ -36,10 +36,10 @@ Local library copies (not managed by PlatformIO) are in [lib/](lib/):
 
 ## Main Loop Logic
 
-- **Every frame**: Rebuild `displayTime` string, clear display, call `centerPrint(displayTime, true)`,
-  service `server.handleClient()` and `ArduinoOTA.handle()`
-- **Every second** (`processEverySecond`): Calls `getWeatherData()` — which fetches both weather and calendar data
-  together — if `minutesBetweenDataRefresh` has elapsed
+- **Every frame**: When dirty or event-day border is active, clear display and call `centerPrint(displayTime, true)`;
+  service `server.handleClient()`
+- **Every second** (`processEverySecond`): Fires OTA confirmation check; calls `getWeatherData()` if
+  `minutesBetweenDataRefresh` has elapsed
 - **Every minute** (`processEveryMinute`): Scroll the marquee message (weather data + next calendar message from
   `bdayClient`). Controlled by `displayRefreshCount` countdown
 
@@ -114,15 +114,39 @@ Expected JSON format:
 
 ```json
 [
-  { "config": { "eventToday": "1", "dataSourceUrl": "...", "apiKey": "..." } },
+  {
+    "config": {
+      "eventToday": "1",
+      "dataSourceUrl": "...",
+      "apiKey": "...",
+      "latestVersion": "3.08.0-wagfam",
+      "firmwareUrl": "http://example.com/firmware.bin"
+    }
+  },
   { "message": "Justin birthday - tomorrow" },
   { "message": "Family dinner - this Saturday" }
 ]
 ```
 
-- The `config` object is optional and can contain any subset of the three fields
+- The `config` object is optional and can contain any subset of the fields
 - Messages are displayed one per scroll cycle, cycling through `bdayMessageIndex`
 - `cleanText()` translates Unicode lookalikes to ASCII for the LED font (35+ `replace()` calls)
+- `latestVersion` + `firmwareUrl` trigger an auto-update if version differs from `VERSION` macro;
+  see `docs/OTA_STRATEGY.md` for full rollback architecture
+
+## OTA Update Architecture
+
+ArduinoOTA was removed in v3.08.0-wagfam. Updates are now delivered three ways:
+
+| Method | Trigger | Rollback |
+| --- | --- | --- |
+| Web upload (`/update`) | Manual via browser | No (use `/updateFromUrl` to revert) |
+| URL update (`/updateFromUrl`) | Manual via web form | Boot-confirmation rollback |
+| Auto-update (calendar JSON) | `latestVersion` != `VERSION` | Boot-confirmation rollback |
+
+**Boot-confirmation rollback:** Before every flash, a `/ota_pending.txt` record is written to LittleFS
+with the current safe URL. If the device reboots twice without confirming (5 min stable uptime),
+`checkOtaRollback()` re-flashes the previous firmware. See `docs/OTA_STRATEGY.md` for full details.
 
 ## Key Constraints
 
@@ -135,21 +159,19 @@ Expected JSON format:
   `DynamicJsonDocument` / `StaticJsonDocument` code; use `JsonDocument` instead
 - All `String` operations are expensive — prefer `reserve()` before building strings, avoid repeated `+=`
   in tight loops, and never allocate large `String` arrays on the stack
-- `scrollMessageWait()` is blocking but calls `server.handleClient()` and `ArduinoOTA.handle()` each
-  pixel step — web requests during scrolling are handled mid-scroll
+- `scrollMessageWait()` is blocking but calls `server.handleClient()` each pixel step — web requests
+  during scrolling are handled mid-scroll
 - `getWeatherData()` is the single orchestration point for both weather AND calendar data refresh — they
-  always refresh together
+  always refresh together; it also triggers auto-OTA if `latestVersion` differs from `VERSION`
+- `firmwareUrl` in the calendar config JSON must use `http://` — HTTPS is not supported by ESPhttpUpdate
 - No unit tests exist; the only test is a build test in CI (`make test` is a placeholder)
 
 ## Known Bugs (see `docs/CODE_REVIEW.md` for full details)
 
-- **`OpenWeatherMapClient.cpp:199`** — operator precedence bug in JSON size sanity check
-  (`int len = measureJson(jdoc) <= 150` should use a C++17 if-initializer or separate variable)
-- **`OpenWeatherMapClient.cpp:267`** — `getWindDirectionText()` allocates 16 `String` objects on the stack
-- **`WagFamBdayClient.cpp:170`** — debug `Serial.println` always fires, leaking values to serial output
-- **`WagFamBdayClient.cpp:194`** — `cleanText()` runs 35+ `replace()` calls without `reserve()` first
-- **`marquee.ino:877`** — `savePersistentConfig()` unconditionally calls `readPersistentConfig()` at end
-  (mutual recursion on first boot; fixable by removing the terminal call)
+All previously identified bugs have been resolved. Remaining open items from `docs/CODE_REVIEW.md`:
+
+- HTML `+=` string accumulation in `sendHeader()` / `displayHomePage()` / `handleConfigure()` — not a bug,
+  but a memory optimization opportunity (replace static HTML fragments with direct `sendContent(F(...))` calls)
 
 ## What Was Removed from Upstream (Qrome/marquee-scroller)
 
@@ -161,4 +183,4 @@ These modules existed in the upstream repo and were deleted in this fork:
 - Bitcoin price display (was already removed in upstream v3.0)
 - TimeZoneDB API calls (timezone now derived from OWM response)
 
-`sources.json` in the repo root is a leftover from the upstream news feature and is unused.
+`sources.json` was a leftover from the upstream news feature and has been deleted.

@@ -78,30 +78,26 @@ the firmware binary.
 
 ### #2 — ArduinoOTA (Persistent Heap Reservation)
 
-**Location:** `setup()` via `ArduinoOTA.begin()`, polled by `ArduinoOTA.handle()` in `loop()`.
+> **Status: Removed in v3.08.0-wagfam.** See `docs/OTA_STRATEGY.md` for the replacement
+> architecture.
 
-ArduinoOTA permanently holds open a UDP socket (port 8266 for discovery) and a TCP server
-socket (for transfers), plus mDNS registration hooks. These sockets and their buffers are
-allocated at boot and never freed.
+ArduinoOTA permanently held open a UDP socket (port 8266 for discovery) and a TCP server
+socket (for transfers), plus mDNS registration hooks. These were allocated at boot and
+never freed. Additionally, ArduinoOTA is LAN-only and provides no value for clocks deployed
+in remote family homes.
 
 | Cost | Amount |
 | --- | --- |
-| Persistent heap | ~4–8 KB |
-| Per-loop overhead | One syscall per iteration of `loop()` |
+| Persistent heap recovered | ~4–8 KB |
+| Per-loop overhead eliminated | One syscall per iteration of `loop()` |
 
-**Two web-based OTA mechanisms already exist and remain after removal:**
+The three OTA paths that replaced it:
 
 | Route | Method | Notes |
 | --- | --- | --- |
-| `/update` | Browser file upload | Reliable; no size concern |
-| `/updateFromUrl` | HTTP URL download | HTTP only; no HTTPS |
-
-If web UI updates are sufficient for your workflow, ArduinoOTA can be fully removed. Savings
-are permanent — the heap is reclaimed for the entire uptime of the device.
-
-**To remove:** Delete the `ArduinoOTA.onStart/onEnd/onProgress/onError/setHostname/begin()`
-block from `setup()`, delete `ArduinoOTA.handle()` from `loop()`, and remove
-`#include <ArduinoOTA.h>` from `Settings.h`.
+| `/update` | Browser file upload | Manual; works from any network via VPN/SSH |
+| `/updateFromUrl` | HTTP URL from web form | Writes rollback record before flashing |
+| Auto (calendar config) | `latestVersion` + `firmwareUrl` in JSON | Version-checked; writes rollback record |
 
 ---
 
@@ -212,26 +208,29 @@ binary without any functional change.
 
 ## Priority Summary
 
-| Priority | Consumer | RAM Recovered | Effort |
-| --- | --- | --- | --- |
-| 🔴 **Do immediately** | BearSSL buffer reduction (`setBufferSizes`) | 12–19 KB per fetch | 1 line |
-| 🟠 **High value** | Remove ArduinoOTA (if web OTA is sufficient) | 4–8 KB persistent | ~10 line removal |
-| 🟡 **Opportunistic** | HTML `+=` → direct `sendContent(F(...))` | 1–2 KB per page request | Medium refactor |
-| 🟡 **Easy win** | Reduce `BUFFER_MAX_LENGTH` from 512 → 256 | 256 bytes stack | 1 number change |
-| 🟢 **Trivial cleanup** | Remove `#include <ESP8266mDNS.h>` | ~2–4 KB flash | 1 line removal |
-| 🟢 **Trivial cleanup** | Remove `TIMEOUT` and `timeoutCount` | 8 bytes BSS | 2 line removal |
-| 🟢 **Trivial cleanup** | Remove duplicate `getWifiQuality()` prototype | 0 bytes (warning fix) | 1 line removal |
-| ⚪ **Deferred** | Replace WiFiManager with hard-coded WiFi | Boot-time only | Major workflow change |
+| Priority | Consumer | RAM Recovered | Effort | Status |
+| --- | --- | --- | --- | --- |
+| 🔴 **Do immediately** | BearSSL buffer reduction (`setBufferSizes`) | 12–19 KB per fetch | 1 line | **Done** |
+| 🟠 **High value** | Remove ArduinoOTA | 4–8 KB persistent | ~10 line removal | **Done** |
+| 🟡 **Opportunistic** | HTML `+=` → direct `sendContent(F(...))` | 1–2 KB per page request | Medium refactor | Open |
+| 🟡 **Easy win** | Reduce `BUFFER_MAX_LENGTH` from 512 → 256 | 256 bytes stack | 1 number change | Open |
+| 🟢 **Trivial cleanup** | Remove `#include <ESP8266mDNS.h>` | ~2–4 KB flash | 1 line removal | **Done** |
+| 🟢 **Trivial cleanup** | Remove `TIMEOUT` and `timeoutCount` | 8 bytes BSS | 2 line removal | **Done** |
+| 🟢 **Trivial cleanup** | Remove duplicate `getWifiQuality()` prototype | 0 bytes (warning fix) | 1 line removal | **Done** |
+| ⚪ **Deferred** | Replace WiFiManager with hard-coded WiFi | Boot-time only | Major workflow change | Deferred |
 
 ---
 
 ## Bottom Line
 
-**The `setBufferSizes(2048, 512)` fix alone recovers 12–19 KB of heap on every calendar
-refresh cycle.** Without it, the device is operating at near-zero free heap for several
-seconds every 15 minutes, which explains any intermittent instability.
+**Both top fixes are now implemented (v3.08.0-wagfam):**
 
-**Removing ArduinoOTA** adds back another 4–8 KB of permanent headroom.
+- `setBufferSizes(2048, 512)` recovers 12–19 KB of heap on every calendar refresh cycle
+- Removing ArduinoOTA adds back another 4–8 KB of permanent headroom
 
 Combined, those two changes recover **~16–27 KB of usable heap** — enough breathing room for
 additional data sources, more complex calendar logic, or richer display features.
+
+ArduinoOTA was replaced with a full remote auto-update system driven by the calendar config
+JSON channel, including boot-confirmation rollback to protect against crash loops. See
+`docs/OTA_STRATEGY.md` for details.
