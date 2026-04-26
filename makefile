@@ -85,14 +85,22 @@ test-native: .passwd
 		pio test -e native_test --junit-output-path artifacts/test-native-results.xml
 
 .PHONY: build
-build:
-	@echo "No build implemented yet!"
+build: .passwd
+	mkdir -p $(LOCAL_PIO_CACHE)
+	docker run \
+		--rm $(DOCKER_TTY_ARGS) \
+		-v ${PWD}:${PWD} \
+		-w ${PWD} \
+		-v ${PWD}/.passwd:/etc/passwd:ro \
+		-v $(LOCAL_PIO_CACHE):$(PIO_CACHE) \
+		-u $(shell id -u):$(shell id -g) \
+		$(PIO_IMAGE) \
+		pio run -e default
 
 .PHONY: artifacts
 artifacts:
-	@echo "No artifacts implemented yet!"
 	mkdir -p artifacts/
-	touch artifacts/empty.txt
+	cp .pio/build/default/firmware.bin artifacts/firmware.bin
 
 .PHONY: ready
 ready: clean lint test build artifacts
