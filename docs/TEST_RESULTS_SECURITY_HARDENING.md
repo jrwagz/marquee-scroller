@@ -9,7 +9,7 @@
 
 ## 1. Build Verification
 
-```
+```text
 $ pio run
 Environment    Status    Duration
 default        SUCCESS   00:00:02.699
@@ -24,18 +24,19 @@ RAM:   47.2% used (38660 / 81920 bytes)
 
 ## 2. Native Unit Tests
 
-```
+```text
 $ pio test -e native_test
 59 test cases: 59 succeeded in 00:00:01.696
 ```
 
-| Suite | Tests | Status |
-|-------|-------|--------|
-| test_wagfam_parser | 28 | PASSED |
-| test_owm_geolocation | 13 | PASSED |
-| test_timestr | 18 | PASSED |
+| Suite                | Tests | Status |
+| -------------------- | ----- | ------ |
+| test_wagfam_parser   | 28    | PASSED |
+| test_owm_geolocation | 13    | PASSED |
+| test_timestr         | 18    | PASSED |
 
 Includes SEC-14 bounds-check tests:
+
 - `test_get_message_negative_index_returns_empty` — PASSED
 - `test_get_message_out_of_bounds_returns_empty` — PASSED
 - `test_get_message_valid_index_still_works` — PASSED
@@ -46,36 +47,36 @@ Includes SEC-14 bounds-check tests:
 
 ## 3. Security Integration Tests
 
-```
+```text
 $ python3 tests/integration/test_security.py --host 192.168.168.66
 Results: 22 passed, 0 failed, 1 skipped
 ```
 
-| Test ID | Description | Result |
-|---------|-------------|--------|
-| SEC-01 | /update requires auth | PASS |
-| SEC-04 | / requires auth | PASS |
-| SEC-04 | /configure requires auth | PASS |
-| SEC-04 | /pull requires auth | PASS |
-| SEC-04 | /systemreset requires auth | PASS |
-| SEC-04 | /forgetwifi requires auth | PASS |
-| SEC-05 | Default credentials rejected | PASS |
-| SEC-05b | web_password field exists in config | PASS |
-| SEC-06 | Write to /conf.txt blocked | PASS |
-| SEC-06 | Delete /conf.txt blocked | PASS |
-| SEC-06 | Write to /ota_pending.txt blocked | PASS |
-| SEC-06 | Delete /ota_pending.txt blocked | PASS |
-| SEC-07 | OWM connects on port 443 | PASS |
-| SEC-07 | OWM uses WiFiClientSecure | PASS |
-| SEC-09 | Config form uses POST | PASS |
-| SEC-10 | API POST without X-Requested-With rejected | PASS |
-| SEC-10 | API POST with X-Requested-With accepted | PASS |
-| SEC-11 | OWM API key not logged | PASS |
-| SEC-11 | Calendar URL not logged | PASS |
-| SEC-12 | dataSourceUrl validated for HTTPS | PASS |
-| SEC-12b | firmwareUrl domain validated | PASS |
-| SEC-14 | Bounds check tests exist and pass | PASS |
-| SEC-16 | Restart rate limit | SKIP (avoids rebooting device) |
+| Test ID | Description                                | Result                         |
+| ------- | ------------------------------------------ | ------------------------------ |
+| SEC-01  | /update requires auth                      | PASS                           |
+| SEC-04  | / requires auth                            | PASS                           |
+| SEC-04  | /configure requires auth                   | PASS                           |
+| SEC-04  | /pull requires auth                        | PASS                           |
+| SEC-04  | /systemreset requires auth                 | PASS                           |
+| SEC-04  | /forgetwifi requires auth                  | PASS                           |
+| SEC-05  | Default credentials rejected               | PASS                           |
+| SEC-05b | web_password field exists in config        | PASS                           |
+| SEC-06  | Write to /conf.txt blocked                 | PASS                           |
+| SEC-06  | Delete /conf.txt blocked                   | PASS                           |
+| SEC-06  | Write to /ota_pending.txt blocked          | PASS                           |
+| SEC-06  | Delete /ota_pending.txt blocked            | PASS                           |
+| SEC-07  | OWM connects on port 443                   | PASS                           |
+| SEC-07  | OWM uses WiFiClientSecure                  | PASS                           |
+| SEC-09  | Config form uses POST                      | PASS                           |
+| SEC-10  | API POST without X-Requested-With rejected | PASS                           |
+| SEC-10  | API POST with X-Requested-With accepted    | PASS                           |
+| SEC-11  | OWM API key not logged                     | PASS                           |
+| SEC-11  | Calendar URL not logged                    | PASS                           |
+| SEC-12  | dataSourceUrl validated for HTTPS          | PASS                           |
+| SEC-12b | firmwareUrl domain validated               | PASS                           |
+| SEC-14  | Bounds check tests exist and pass          | PASS                           |
+| SEC-16  | Restart rate limit                         | SKIP (avoids rebooting device) |
 
 **Result: PASS** — 22/22 pass, 1 intentionally skipped.
 
@@ -88,6 +89,7 @@ Results: 22 passed, 0 failed, 1 skipped
 **Input:** `curl --user 'admin:[DEVICE-PASSWORD]' http://192.168.168.66/api/status`
 
 **Output:**
+
 ```json
 {
     "version": "3.08.0-wagfam",
@@ -129,6 +131,7 @@ Results: 22 passed, 0 failed, 1 skipped
 **Input:** `curl --user 'admin:[DEVICE-PASSWORD]' http://192.168.168.66/api/config`
 
 **Output:**
+
 ```json
 {
     "wagfam_data_url": "https://raw.githubusercontent.com/jrwagz/wagfam-clocks-data-source/main/data_source.json",
@@ -182,6 +185,7 @@ Results: 22 passed, 0 failed, 1 skipped
 **Input:** `curl --user 'admin:[DEVICE-PASSWORD]' http://192.168.168.66/api/ota/status`
 
 **Output:**
+
 ```json
 {
     "pending_file_exists": false,
@@ -207,6 +211,7 @@ Results: 22 passed, 0 failed, 1 skipped
 **Input:** `curl --user 'admin:[DEVICE-PASSWORD]' http://192.168.168.66/api/fs/list`
 
 **Output:**
+
 ```json
 {
     "files": [
@@ -222,6 +227,7 @@ Results: 22 passed, 0 failed, 1 skipped
 **Input:** `curl --user 'admin:[DEVICE-PASSWORD]' http://192.168.168.66/api/fs/read?path=/conf.txt`
 
 **Output:**
+
 ```json
 {
     "path": "/conf.txt",
@@ -262,23 +268,23 @@ Results: 22 passed, 0 failed, 1 skipped
 
 ### 5.1 Authenticated access
 
-| Route | HTTP Status | Returns |
-|-------|-------------|---------|
-| `/` | 200 | Home page with events and weather |
-| `/configure` | 200 | Settings form with CSRF token |
-| `/pull` | 200 | Triggers refresh, returns home page |
-| `/update` | 200 | Firmware upload form |
+| Route        | HTTP Status | Returns                             |
+| ------------ | ----------- | ----------------------------------- |
+| `/`          | 200         | Home page with events and weather   |
+| `/configure` | 200         | Settings form with CSRF token       |
+| `/pull`      | 200         | Triggers refresh, returns home page |
+| `/update`    | 200         | Firmware upload form                |
 
 ### 5.2 Unauthenticated access (all should be 401)
 
-| Route | HTTP Status |
-|-------|-------------|
-| `/` | 401 |
-| `/configure` | 401 |
-| `/pull` | 401 |
-| `/systemreset` | 401 |
-| `/forgetwifi` | 401 |
-| `/update` | 401 |
+| Route          | HTTP Status |
+| -------------- | ----------- |
+| `/`            | 401         |
+| `/configure`   | 401         |
+| `/pull`        | 401         |
+| `/systemreset` | 401         |
+| `/forgetwifi`  | 401         |
+| `/update`      | 401         |
 
 **Result: PASS** — all web routes require authentication.
 
@@ -288,13 +294,14 @@ Results: 22 passed, 0 failed, 1 skipped
 - CSRF hidden field `name='csrf'` present — **Verified**
 - Web password field in form — **Verified** (value: `[DEVICE-PASSWORD]`)
 
-**Result: PASS**
+Result: PASS
 
 ---
 
 ## 6. Live Calendar Data Verification
 
-Events displayed on home page (from `https://raw.githubusercontent.com/jrwagz/wagfam-clocks-data-source/...`):
+Events displayed on home page
+(from `https://raw.githubusercontent.com/jrwagz/wagfam-clocks-data-source/...`):
 
 - 7 days: Kvitka's 14th Birthday (2/May)
 - 8 days: Dallan's 34th Birthday (3/May)
@@ -320,7 +327,7 @@ Events displayed on home page (from `https://raw.githubusercontent.com/jrwagz/wa
 
 Captured serial output after boot:
 
-```
+```text
 *wm:AutoConnect
 *wm:Connecting to SAVED AP: All The Things
 *wm:connectTimeout not set, ESP waitForConnectResult...
@@ -352,41 +359,42 @@ Start parsing...
 
 ## 9. Resource Usage
 
-| Metric | Value |
-|--------|-------|
-| Flash usage | 55.1% (580,160 / 1,044,464 bytes) |
-| RAM usage | 47.2% (38,660 / 81,920 bytes) |
-| Free heap at runtime | 31,512 bytes |
-| Heap fragmentation | 28% |
-| WiFi signal quality | 80-88% |
+| Metric               | Value                             |
+| -------------------- | --------------------------------- |
+| Flash usage          | 55.1% (580160 / 1044464 bytes)    |
+| RAM usage            | 47.2% (38660 / 81920 bytes)       |
+| Free heap at runtime | 31,512 bytes                      |
+| Heap fragmentation   | 28%                               |
+| WiFi signal quality  | 80-88%                            |
 
 ---
 
 ## Summary
 
-| Category | Tests | Passed | Failed | Skipped |
-|----------|-------|--------|--------|---------|
-| Native unit tests | 59 | 59 | 0 | 0 |
-| Security integration | 23 | 22 | 0 | 1 |
-| API functional | 15 | 15 | 0 | 0 |
-| Web UI routes | 10 | 10 | 0 | 0 |
-| Source code checks | 6 | 6 | 0 | 0 |
-| **Total** | **113** | **112** | **0** | **1** |
+| Category             | Tests   | Passed  | Failed | Skipped |
+| -------------------- | ------- | ------- | ------ | ------- |
+| Native unit tests    | 59      | 59      | 0      | 0       |
+| Security integration | 23      | 22      | 0      | 1       |
+| API functional       | 15      | 15      | 0      | 0       |
+| Web UI routes        | 10      | 10      | 0      | 0       |
+| Source code checks   | 6       | 6       | 0      | 0       |
+| **Total**            | **113** | **112** | **0**  | **1**   |
 
 **Overall: ALL TESTS PASS.** The 1 skip (SEC-16 restart rate limit) is intentional to avoid
 rebooting the device during the test run.
 
 ### Key observations for human reviewer
 
-1. **Password generation works** — device generated `[DEVICE-PASSWORD]` on first boot, printed to serial once,
-   persisted to `/conf.txt`. Default `password` is rejected.
+1. **Password generation works** — device generated `[DEVICE-PASSWORD]` on first boot,
+   printed to serial once, persisted to `/conf.txt`. Default `password` is rejected.
 2. **All API secrets visible in /api/config** — the OWM key and GitHub PAT
    are returned in the config endpoint. This is intentional (needed for the configure form) but worth
    noting: anyone with the web password can see all API keys.
-3. **OTA safe_url points to external host** — `http://1ac81b1457a5d4.lhr.life/firmware_v3.09.bin` is the
-   rollback URL from a previous OTA test. This is expected state from prior testing.
-4. **Weather and calendar both use HTTPS now** — confirmed via both source code checks and live data
-   fetching success.
+3. **OTA safe_url points to external host** —
+   `http://1ac81b1457a5d4.lhr.life/firmware_v3.09.bin` is the rollback URL from a previous OTA
+   test. This is expected state from prior testing.
+4. **Weather and calendar both use HTTPS now** — confirmed via both source code checks and live
+   data fetching success.
 5. **Form uses POST + CSRF token** — verified in the HTML source of `/configure`.
 6. **No functional regressions** — weather, calendar, display, configuration all work identically
    to pre-hardening behavior.
