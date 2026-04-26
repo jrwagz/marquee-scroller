@@ -393,9 +393,9 @@ void handleSaveConfig() {
   SHOW_HIGHLOW = server.hasArg("showhighlow");
   IS_METRIC = server.hasArg("metric");
   displayIntensity = constrain(server.arg("ledintensity").toInt(), 0, 15);
-  minutesBetweenDataRefresh = max(1, server.arg("refresh").toInt());
-  minutesBetweenScrolling = max(1, server.arg("refreshDisplay").toInt());
-  displayScrollSpeed = max(1, server.arg("scrollspeed").toInt());
+  minutesBetweenDataRefresh = max(1, (int)server.arg("refresh").toInt());
+  minutesBetweenScrolling = max(1, (int)server.arg("refreshDisplay").toInt());
+  displayScrollSpeed = max(1, (int)server.arg("scrollspeed").toInt());
   weatherClient.setMetric(IS_METRIC);
   weatherClient.setGeoLocation(geoLocation);
   matrix.fillScreen(LOW); // show black
@@ -1092,7 +1092,8 @@ void readPersistentConfig() {
       Serial.println("SHOW_DATE=" + String(SHOW_DATE));
     } else if (key == "OTA_SAFE_URL") {
       OTA_SAFE_URL = value;
-      Serial.println("OTA_SAFE_URL: " + (OTA_SAFE_URL != "" ? "[set]" : "[empty]"));
+      Serial.print(F("OTA_SAFE_URL: "));
+      Serial.println(OTA_SAFE_URL != "" ? "[set]" : "[empty]");
     }
   }
   fr.close();
