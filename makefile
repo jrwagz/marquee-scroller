@@ -112,12 +112,14 @@ SERVER_IMAGE:=wagfam-server-test
 
 .PHONY: test-server
 test-server:
+	mkdir -p artifacts
 	docker build -t $(SERVER_IMAGE) server/
 	docker run \
 		--rm $(DOCKER_TTY_ARGS) \
 		-e WAGFAM_WAGFAM_API_KEY=test-key \
+		-v ${PWD}/artifacts:/results \
 		$(SERVER_IMAGE) \
-		python -m pytest tests/ -v
+		python -m pytest tests/ -v --junit-xml=/results/test-server-results.xml
 
 .PHONY: test
 test: test-native test-scripts test-server
