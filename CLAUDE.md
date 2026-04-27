@@ -124,13 +124,19 @@ Specifically: when a bug in `docs/CODE_REVIEW.md` is fixed, remove it from that 
 **Back assertions about external services with evidence.** Any claim about how a
 third-party service behaves (e.g. "GitHub raw ignores query params", "ESPhttpUpdate
 follows redirects", "BearSSL accepts self-signed certs with `setInsecure()`") must
-be backed by either an automated test that exercises the real service (preferred —
-it catches regressions) or a citation to that service's official documentation.
-Internal-knowledge claims rot silently when the upstream changes; written-down
-evidence does not. The pattern to follow is `server/tests/test_github_raw_compat.py`,
-which makes a real HTTPS request and asserts both the positive case (heartbeat
-params don't break the response) and the negative case (`?token=` *does* trigger
-auth handling, so we must never name a parameter `token`).
+be backed by either a one-time empirical capture (logged in the PR/commit that
+adds the claim) or a citation to that service's official documentation. Internal-
+knowledge claims rot silently when the upstream changes; written-down evidence
+does not. **Don't keep network-dependent regression tests in CI for these claims —
+they flake.** For example, the heartbeat params claim ("GitHub raw ignores
+`chip_id`, `version`, `uptime`, `heap`, `rssi` and DOES interpret `?token=`") was
+verified empirically during PR #25 review (see commit `bca26e6` and the
+[review thread](https://github.com/jrwagz/marquee-scroller/pull/25#discussion_r3144204226)
+for the captured sha256s and HTTP codes); the matching `test_github_raw_compat.py`
+was removed in a follow-up because raw.githubusercontent.com's CDN-cache shards
+returned racy results when the target file was being updated. Re-verify
+out-of-band if you change the heartbeat parameter set or move to a different
+static-JSON host — don't add it back to the suite.
 
 ---
 
@@ -198,15 +204,18 @@ GET /data_source.json?chip_id=5fc8ad&version=3.08.0-wagfam&uptime=1234567&heap=3
 ```
 
 This lets a backend identify and monitor all deployed clocks without any additional
-connections. Static JSON hosts ignore the current set of params gracefully — this is
-asserted by `server/tests/test_github_raw_compat.py` (see that file for the empirical
-evidence: identical sha256 + HTTP 200 across the 5 current param names against
-`raw.githubusercontent.com`).
+connections. Static JSON hosts ignore the current set of params gracefully — this
+was empirically verified during PR #25 review with identical sha256 + HTTP 200 across
+all 5 current param names against `raw.githubusercontent.com` (see commit `bca26e6`
+and the [review thread](https://github.com/jrwagz/marquee-scroller/pull/25#discussion_r3144204226)).
 
-**Caveat that test pins:** `raw.githubusercontent.com` *does* interpret `?token=…`
-as an auth attempt, returning HTTP 404 on a private repo when a bad token is sent.
-**Never name a future heartbeat parameter `token`.** The test enumerates the current
-safe param names and will fail loudly if `token` is ever added.
+**Caveat from that verification:** `raw.githubusercontent.com` *does* interpret
+`?token=…` as an auth attempt, returning HTTP 404 on a private repo when a bad
+token is sent. **Never name a future heartbeat parameter `token`.** Re-verify
+out-of-band if the parameter set changes or the calendar URL moves to a different
+static-JSON host. The corresponding regression test was removed because the CDN
+returned race-flaky results when the target file was being updated; see the
+"Back assertions about external services" rule above for the policy.
 
 ## OTA Update Architecture
 
