@@ -47,23 +47,23 @@ Local library copies (not managed by PlatformIO) are in [lib/](lib/):
 
 | Function | Line |
 | --- | --- |
-| Global variables (settings) | 60–98 |
-| PROGMEM HTML constants | 104–148 |
-| `setup()` | 173 |
-| `loop()` | 282 |
-| `processEverySecond()` | 308 |
-| `processEveryMinute()` | 325 |
-| `handleSaveConfig()` | 404 |
-| `handleConfigure()` | 449 |
-| `handleUpdateFromUrl()` | 575 |
-| `getWeatherData()` | 699 |
-| `sendHeader()` / `sendFooter()` | 804 / 834 |
-| `displayHomePage()` | 848 |
-| `savePersistentConfig()` | 984 |
-| `readPersistentConfig()` | 1023 |
-| `scrollMessageWait()` | 1111 |
-| `centerPrint()` | 1135 |
-| REST API handlers | 1174 |
+| Global variables (settings) | 65–103 |
+| PROGMEM HTML constants | 109–153 |
+| `setup()` | 178 |
+| `loop()` | 287 |
+| `processEverySecond()` | 313 |
+| `processEveryMinute()` | 330 |
+| `handleSaveConfig()` | 409 |
+| `handleConfigure()` | 454 |
+| `handleUpdateFromUrl()` | 580 |
+| `getWeatherData()` | 704 |
+| `sendHeader()` / `sendFooter()` | 809 / 839 |
+| `displayHomePage()` | 853 |
+| `savePersistentConfig()` | 989 |
+| `readPersistentConfig()` | 1028 |
+| `scrollMessageWait()` | 1116 |
+| `centerPrint()` | 1140 |
+| REST API handlers | 1177 |
 
 ## Configuration Storage
 
@@ -77,11 +77,11 @@ changes there require a filesystem erase to take effect.
 
 ### Adding a New Config Key
 
-1. Declare a global variable in `marquee.ino` (near line 60)
-2. Add `f.println("KEY=" + String(value))` in `savePersistentConfig()` (~line 877)
-3. Add an `if (line.indexOf("KEY=") >= 0)` block in `readPersistentConfig()` (~line 908)
-4. Add a form field in one of the `CHANGE_FORM*` PROGMEM constants (~line 113)
-5. Read from `server.arg("fieldName")` in `handleSaveConfig()` (~line 378)
+1. Declare a global variable in `marquee.ino` (near line 65)
+2. Add `f.println("KEY=" + String(value))` in `savePersistentConfig()` (~line 882)
+3. Add an `if (line.indexOf("KEY=") >= 0)` block in `readPersistentConfig()` (~line 913)
+4. Add a form field in one of the `CHANGE_FORM*` PROGMEM constants (~line 118)
+5. Read from `server.arg("fieldName")` in `handleSaveConfig()` (~line 383)
 
 ## Development Practices
 

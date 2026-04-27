@@ -27,7 +27,12 @@
 
 #include "Settings.h"
 
-#define VERSION "3.08.0-wagfam"
+#define BASE_VERSION "3.08.0-wagfam"
+#ifdef BUILD_SUFFIX
+#define VERSION BASE_VERSION BUILD_SUFFIX
+#else
+#define VERSION BASE_VERSION
+#endif
 
 #define HOSTNAME "CLOCK-"
 #define CONFIG "/conf.txt"
