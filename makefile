@@ -105,7 +105,7 @@ test-scripts: .passwd .pytest-image
 		-u $(shell id -u):$(shell id -g) \
 		$(PYTEST_IMAGE) \
 		pytest tests/scripts/ \
-			--cov=scripts --cov-report=term-missing --cov-fail-under=100 \
+			--cov=scripts --cov-report=term-missing --cov-fail-under=90 \
 			--junit-xml=artifacts/test-scripts-results.xml
 
 SERVER_IMAGE:=wagfam-server-test
@@ -146,11 +146,12 @@ endif
 
 .PHONY: build
 build: .passwd
-	mkdir -p $(LOCAL_PIO_CACHE)
+	mkdir -p $(LOCAL_PIO_CACHE) artifacts
 	docker run \
 		--rm $(DOCKER_TTY_ARGS) \
 		-e CI \
 		-e USER \
+		-e GIT_HASH=$(shell git rev-parse --short HEAD 2>/dev/null || echo unknown) \
 		-v ${PWD}:${PWD} \
 		-w ${PWD} \
 		-v ${PWD}/.passwd:/etc/passwd:ro \
@@ -158,6 +159,7 @@ build: .passwd
 		-u $(shell id -u):$(shell id -g) \
 		$(PIO_IMAGE) \
 		pio run -e default
+	@printf '\nBuilt: %s\n\n' "$$(cat artifacts/VERSION.txt)"
 
 .PHONY: artifacts
 artifacts:

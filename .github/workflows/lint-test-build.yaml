@@ -69,6 +69,13 @@ jobs:
       - name: Gather Artifacts
         run: make artifacts
 
+      - name: Build Summary
+        if: success()
+        run: |
+          VERSION=$(cat artifacts/VERSION.txt)
+          echo "## Build" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Version:** \`${VERSION}\`" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Keep Artifacts
         uses: actions/upload-artifact@v7
         with:

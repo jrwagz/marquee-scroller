@@ -22,6 +22,10 @@ Environment variables read at build time:
   CI              Set to any non-empty value for a CI-style suffix (hash only).
                   GitHub Actions sets this automatically; the Makefile passes it
                   into the Docker build container via '-e CI'.
+  GIT_HASH        Short commit hash to use directly (skips the git subprocess).
+                  The Makefile resolves this on the host before launching Docker,
+                  so the container gets a reliable value even when git's
+                  safe.directory check would otherwise reject the repo.
   USER / USERNAME Developer username for local-build suffixes.  Passed into the
                   Docker build container via '-e USER' in the Makefile.
 
@@ -36,18 +40,47 @@ PlatformIO invocation (automatic — do not call directly):
 """
 
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
-__all__ = ["get_git_hash", "compute_suffix"]
+__all__ = ["get_git_hash", "compute_suffix", "get_base_version"]
+
+try:
+    _REPO_ROOT: Path | None = Path(__file__).parent.parent
+except NameError:
+    _REPO_ROOT = None  # resolved in _pio_main via env.subst("$PROJECT_DIR")
 
 _HELP: str = __doc__ or ""
 
 
+def get_base_version(sketch_path: Path | None = None) -> str:
+    """Return the BASE_VERSION string from marquee/marquee.ino.
+
+    Args:
+        sketch_path: Path to marquee.ino.  Defaults to the canonical location
+                     relative to this script.
+
+    Raises:
+        ValueError: If the BASE_VERSION define is not found in the sketch.
+    """
+    if sketch_path is None:
+        sketch_path = _REPO_ROOT / "marquee" / "marquee.ino"
+    for line in sketch_path.read_text().splitlines():
+        m = re.match(r'#define BASE_VERSION\s+"([^"]+)"', line)
+        if m:
+            return m.group(1)
+    raise ValueError(f"BASE_VERSION not found in {sketch_path}")
+
+
 def get_git_hash() -> str:
     """Return the 7-char short git commit hash, or 'unknown' if git is unavailable."""
+    env_hash = os.environ.get("GIT_HASH")
+    if env_hash:
+        return env_hash
     try:
         return (
             subprocess.check_output(
@@ -90,16 +123,28 @@ def compute_suffix(
     return f"-{user}-{date}-{git_hash}"
 
 
-def _pio_main(env: Any) -> None:
+def _pio_main(env: Any, output_file: Path | None = None) -> None:
     """Inject BUILD_SUFFIX into the PlatformIO / SCons build environment.
+
+    Also writes the full version string to output_file (default:
+    artifacts/VERSION.txt in the repo root) so downstream tools (Makefile,
+    CI summary) can read it without re-running this script.
 
     Called by the module-level bootstrap when running inside PlatformIO.
     Not intended for direct use.
     """
+    global _REPO_ROOT
+    if _REPO_ROOT is None:
+        _REPO_ROOT = Path(env.subst("$PROJECT_DIR"))
+    if output_file is None:
+        output_file = _REPO_ROOT / "artifacts" / "VERSION.txt"
     is_ci = bool(os.environ.get("CI"))
     suffix = compute_suffix(is_ci=is_ci)
-    print(f"build_version: VERSION suffix = {suffix}")
+    full_version = get_base_version() + suffix
+    print(f"build_version: VERSION = {full_version}")
     env.Append(CPPDEFINES=[("BUILD_SUFFIX", f'\\"{suffix}\\"')])
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    output_file.write_text(full_version)
 
 
 def _cli_main() -> None:

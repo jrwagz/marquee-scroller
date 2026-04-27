@@ -2,8 +2,8 @@
 Tests for scripts/build_version.py — 100% line and branch coverage.
 
 Strategy:
-  - Functions (get_git_hash, compute_suffix, _pio_main, _cli_main) are imported
-    and tested directly via the `build_version` module.
+  - Functions (get_git_hash, compute_suffix, get_base_version, _pio_main,
+    _cli_main) are imported and tested directly via the `build_version` module.
   - Two exec-based tests cover the two module-level lines that are only reachable
     in special runtime contexts:
       * `_pio_main(env)` inside the try block — only reachable when Import() is
@@ -19,6 +19,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import build_version
+import pytest
 
 ROOT = Path(__file__).parent.parent.parent
 SCRIPT_PATH = ROOT / "scripts" / "build_version.py"
@@ -28,16 +29,41 @@ SCRIPT_PATH = ROOT / "scripts" / "build_version.py"
 
 
 class TestGetGitHash:
-    def test_returns_hash_on_success(self):
+    def test_returns_hash_from_GIT_HASH_env(self, monkeypatch):
+        monkeypatch.setenv("GIT_HASH", "env1234")
+        assert build_version.get_git_hash() == "env1234"
+
+    def test_returns_hash_on_success(self, monkeypatch):
+        monkeypatch.delenv("GIT_HASH", raising=False)
         with patch("subprocess.check_output", return_value=b"abc1234\n"):
             assert build_version.get_git_hash() == "abc1234"
 
-    def test_returns_unknown_on_subprocess_failure(self):
+    def test_returns_unknown_on_subprocess_failure(self, monkeypatch):
+        monkeypatch.delenv("GIT_HASH", raising=False)
         with patch(
             "subprocess.check_output",
             side_effect=subprocess.CalledProcessError(1, "git"),
         ):
             assert build_version.get_git_hash() == "unknown"
+
+
+# ── get_base_version ──────────────────────────────────────────────────────────
+
+
+class TestGetBaseVersion:
+    def test_parses_version_from_sketch(self, tmp_path):
+        sketch = tmp_path / "marquee.ino"
+        sketch.write_text('#define BASE_VERSION "1.2.3-test"\n')
+        assert build_version.get_base_version(sketch_path=sketch) == "1.2.3-test"
+
+    def test_raises_if_define_missing(self, tmp_path):
+        sketch = tmp_path / "marquee.ino"
+        sketch.write_text("// no version define here\n")
+        with pytest.raises(ValueError, match="BASE_VERSION not found"):
+            build_version.get_base_version(sketch_path=sketch)
+
+    def test_real_sketch_returns_expected(self):
+        assert build_version.get_base_version() == "3.08.0-wagfam"
 
 
 # ── compute_suffix ────────────────────────────────────────────────────────────
@@ -96,28 +122,32 @@ class TestPioMain:
         mock_env.Append.assert_called_once()
         return mock_env.Append.call_args.kwargs["CPPDEFINES"]
 
-    def test_ci_mode_injects_hash_only_suffix(self, monkeypatch):
+    def test_ci_mode_injects_hash_only_suffix(self, monkeypatch, tmp_path):
         monkeypatch.setenv("CI", "true")
         mock_env = MagicMock()
+        output_file = tmp_path / "VERSION.txt"
         with patch.object(build_version, "get_git_hash", return_value="abc1234"):
-            build_version._pio_main(mock_env)
+            build_version._pio_main(mock_env, output_file=output_file)
         [(key, val)] = self._get_cppdefines(mock_env)
         assert key == "BUILD_SUFFIX"
         assert val == '\\"-abc1234\\"'
+        assert output_file.read_text() == "3.08.0-wagfam-abc1234"
 
-    def test_local_mode_injects_user_date_hash_suffix(self, monkeypatch):
+    def test_local_mode_injects_user_date_hash_suffix(self, monkeypatch, tmp_path):
         monkeypatch.delenv("CI", raising=False)
         monkeypatch.setenv("USER", "tester")
         mock_env = MagicMock()
+        output_file = tmp_path / "VERSION.txt"
         with patch.object(build_version, "get_git_hash", return_value="abc1234"):
             with patch("build_version.datetime") as mock_dt:
                 mock_dt.now.return_value.strftime.return_value = "20260101"
-                build_version._pio_main(mock_env)
+                build_version._pio_main(mock_env, output_file=output_file)
         [(key, val)] = self._get_cppdefines(mock_env)
         assert key == "BUILD_SUFFIX"
         assert "tester" in val
         assert "20260101" in val
         assert "abc1234" in val
+        assert output_file.read_text() == "3.08.0-wagfam-tester-20260101-abc1234"
 
 
 # ── _cli_main ─────────────────────────────────────────────────────────────────
@@ -168,14 +198,17 @@ class TestModuleBootstrap:
         monkeypatch.setenv("CI", "true")
         mock_env = MagicMock()
         # Inject Import() as a no-op; env is pre-populated in the namespace.
-        self._exec_script(
-            {
-                "__builtins__": __builtins__,
-                "__name__": "pio_script",  # prevent __main__ block from running
-                "env": mock_env,
-                "Import": lambda _: None,
-            }
-        )
+        # Patch out filesystem writes so the test has no side effects.
+        with patch("pathlib.Path.mkdir"), patch("pathlib.Path.write_text"):
+            self._exec_script(
+                {
+                    "__builtins__": __builtins__,
+                    "__file__": str(SCRIPT_PATH),
+                    "__name__": "pio_script",  # prevent __main__ block from running
+                    "env": mock_env,
+                    "Import": lambda _: None,
+                }
+            )
         mock_env.Append.assert_called_once()
         [(key, val)] = mock_env.Append.call_args.kwargs["CPPDEFINES"]
         assert key == "BUILD_SUFFIX"
@@ -189,6 +222,7 @@ class TestModuleBootstrap:
         self._exec_script(
             {
                 "__builtins__": __builtins__,
+                "__file__": str(SCRIPT_PATH),
                 "__name__": "__main__",
             }
         )
