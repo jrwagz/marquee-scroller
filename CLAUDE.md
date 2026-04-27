@@ -72,8 +72,9 @@ The functions `savePersistentConfig()` and `readPersistentConfig()` in [marquee.
 own all reads and writes to this file. [Settings.h](marquee/Settings.h) contains compile-time defaults only —
 changes there require a filesystem erase to take effect.
 
-`WAGFAM_EVENT_TODAY` is not user-configurable via the web form — it is set exclusively by the server's
-`config.eventToday` field in the calendar JSON response and persisted across reboots via `/conf.txt`.
+`WAGFAM_EVENT_TODAY` and `DEVICE_NAME` are not user-configurable via the web form — they are set
+exclusively by the server's `config.eventToday` and `config.deviceName` fields in the calendar
+JSON response and persisted across reboots via `/conf.txt`.
 
 ### Adding a New Config Key
 
@@ -112,6 +113,17 @@ change. If production code calls `client->setBufferSizes(2048, 512)`, the
 **Update docs in the same commit as the code change.** If a change makes a statement
 in `CLAUDE.md` or `docs/` inaccurate, fix the doc in the same commit — not later.
 Specifically: when a bug in `docs/CODE_REVIEW.md` is fixed, remove it from that file.
+
+**Back assertions about external services with evidence.** Any claim about how a
+third-party service behaves (e.g. "GitHub raw ignores query params", "ESPhttpUpdate
+follows redirects", "BearSSL accepts self-signed certs with `setInsecure()`") must
+be backed by either an automated test that exercises the real service (preferred —
+it catches regressions) or a citation to that service's official documentation.
+Internal-knowledge claims rot silently when the upstream changes; written-down
+evidence does not. The pattern to follow is `server/tests/test_github_raw_compat.py`,
+which makes a real HTTPS request and asserts both the positive case (heartbeat
+params don't break the response) and the negative case (`?token=` *does* trigger
+auth handling, so we must never name a parameter `token`).
 
 ---
 
@@ -153,7 +165,8 @@ Expected JSON format:
       "dataSourceUrl": "...",
       "apiKey": "...",
       "latestVersion": "3.08.0-wagfam",
-      "firmwareUrl": "http://example.com/firmware.bin"
+      "firmwareUrl": "http://example.com/firmware.bin",
+      "deviceName": "Kitchen Clock"
     }
   },
   { "message": "Justin birthday - tomorrow" },
@@ -166,6 +179,27 @@ Expected JSON format:
 - `cleanText()` translates Unicode lookalikes to ASCII for the LED font (35+ `replace()` calls)
 - `latestVersion` + `firmwareUrl` trigger an auto-update if version differs from `VERSION` macro;
   see `docs/OTA_STRATEGY.md` for full rollback architecture
+- `deviceName` is a human-friendly label assigned by the server; stored on the device but not
+  user-editable (like `WAGFAM_EVENT_TODAY`)
+
+### Device Heartbeat
+
+Each calendar fetch includes device telemetry as query parameters:
+
+```text
+GET /data_source.json?chip_id=5fc8ad&version=3.08.0-wagfam&uptime=1234567&heap=32496&rssi=-62
+```
+
+This lets a backend identify and monitor all deployed clocks without any additional
+connections. Static JSON hosts ignore the current set of params gracefully — this is
+asserted by `server/tests/test_github_raw_compat.py` (see that file for the empirical
+evidence: identical sha256 + HTTP 200 across the 5 current param names against
+`raw.githubusercontent.com`).
+
+**Caveat that test pins:** `raw.githubusercontent.com` *does* interpret `?token=…`
+as an auth attempt, returning HTTP 404 on a private repo when a bad token is sent.
+**Never name a future heartbeat parameter `token`.** The test enumerates the current
+safe param names and will fail loudly if `token` is ever added.
 
 ## OTA Update Architecture
 

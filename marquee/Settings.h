@@ -58,6 +58,17 @@ SOFTWARE.
 String WAGFAM_DATA_URL = ""; // URL to Pull WagFam Calendar Data from
 String WAGFAM_API_KEY = ""; // Authorization token to use to authenticate to access the DATA_URL, only used if provided
 boolean WAGFAM_EVENT_TODAY = false; // Whether or not an event is happening today
+
+// SEC-03: Compile-time allowlist of domains that are *always* trusted as firmware
+// sources, regardless of the calendar URL's domain. Comma-separated list of bare
+// hostnames (no scheme, no port, no path). The runtime check (isTrustedFirmwareDomain)
+// also still accepts a same-domain match against the active WAGFAM_DATA_URL — this
+// macro just adds an OR-clause so production deploys can host firmware on a fixed
+// CDN even if the calendar comes from a different host. Override at build time:
+//   pio run -e default --build-flag '-DWAGFAM_TRUSTED_FIRMWARE_DOMAINS="\"cdn.example.com,releases.example.com\""'
+#ifndef WAGFAM_TRUSTED_FIRMWARE_DOMAINS
+#define WAGFAM_TRUSTED_FIRMWARE_DOMAINS ""
+#endif
 int TODAY_DISPLAY_DOT_SPACING = 5;  // How far apart the dots for the Today display are spaced
 int TODAY_DISPLAY_DOT_SPEED_MS = 333; // How many milliseconds between dot moves for the today display
 

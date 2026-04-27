@@ -35,7 +35,7 @@ void WagFamBdayClient::updateBdayClient(String ApiKey, String JsonDataSourceUrl)
   myApiKey = ApiKey;
 }
 
-WagFamBdayClient::configValues WagFamBdayClient::updateData() {
+WagFamBdayClient::configValues WagFamBdayClient::updateData(const DeviceInfo& device) {
   currentConfig = {};
   JsonStreamingParser parser;
   parser.setListener(this);
@@ -48,10 +48,26 @@ WagFamBdayClient::configValues WagFamBdayClient::updateData() {
 
   HTTPClient https;
 
-  Serial.println("Getting Birthdays Data");
-  Serial.println(myJsonSourceUrl);
+  // Build URL with device telemetry query params for heartbeat/identification
+  String url;
+  url.reserve(myJsonSourceUrl.length() + 120);
+  url = myJsonSourceUrl;
+  url += (url.indexOf('?') >= 0) ? '&' : '?';
+  url += "chip_id=";
+  url += device.chipId;
+  url += "&version=";
+  url += device.version;
+  url += "&uptime=";
+  url += String(device.uptimeMs);
+  url += "&heap=";
+  url += String(device.freeHeap);
+  url += "&rssi=";
+  url += String(device.rssi);
 
-  if (!https.begin(*client, myJsonSourceUrl)) {
+  Serial.println("Getting Birthdays Data");
+  Serial.println(F("[calendar URL redacted]"));
+
+  if (!https.begin(*client, url)) {
     Serial.println("[HTTPS] Unable to connect");
     return currentConfig;
   }
@@ -102,6 +118,7 @@ WagFamBdayClient::configValues WagFamBdayClient::updateData() {
 }
 
 String WagFamBdayClient::getMessage(int index) {
+  if (index < 0 || index >= messageCounter) return String();
   return messages[index];
 }
 
@@ -130,7 +147,8 @@ void WagFamBdayClient::whitespace(char c) {
 //       "apiKey": "",
 //       "eventToday": "",
 //       "latestVersion": "3.08.0-wagfam",
-//       "firmwareUrl": "http://example.com/marquee-v3.08.0.bin"
+//       "firmwareUrl": "http://example.com/marquee-v3.08.0.bin",
+//       "deviceName": "Kitchen Clock"
 //     }
 //   },
 //   {
@@ -168,6 +186,9 @@ void WagFamBdayClient::value(String value) {
     } else if (currentKey == "firmwareUrl") {
       currentConfig.firmwareUrlValid = true;
       currentConfig.firmwareUrl = value;
+    } else if (currentKey == "deviceName") {
+      currentConfig.deviceNameValid = true;
+      currentConfig.deviceName = value;
     }
   } else if (currentKey == "message") {
     if (messageCounter >= 10) {

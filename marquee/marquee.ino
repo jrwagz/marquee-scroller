@@ -26,6 +26,7 @@
 ***********************************************/
 
 #include "Settings.h"
+#include "SecurityHelpers.h"
 
 #define BASE_VERSION "3.08.0-wagfam"
 #ifdef BUILD_SUFFIX
@@ -74,6 +75,11 @@ void checkOtaRollback();
 
 void handleUpdateFromUrl();
 
+// Security helpers
+bool requireWebAuth();
+static bool requireApiAuth();
+static bool requireApiCsrf();
+
 // REST API handlers
 void handleApiStatus();
 void handleApiConfigGet();
@@ -106,6 +112,7 @@ String displayTime;
 WagFamBdayClient bdayClient(WAGFAM_API_KEY, WAGFAM_DATA_URL);
 int bdayMessageIndex = 0;
 WagFamBdayClient::configValues serverConfig = {};
+String DEVICE_NAME = "";  // Human-friendly name assigned by server (not user-editable)
 uint32_t todayDisplayMilliSecond = 0;
 uint32_t todayDisplayStartingLED = 0;
 
@@ -132,7 +139,11 @@ static const char WEB_ACTION3[] PROGMEM = "</a><a class='w3-bar-item w3-button' 
                        "<a class='w3-bar-item w3-button' href='/forgetwifi' onclick='return confirm(\"Do you want to forget to WiFi connection?\")'><i class='fas fa-wifi'></i> Forget WiFi</a>"
                        "<a class='w3-bar-item w3-button' href='/update'><i class='fas fa-wrench'></i> Firmware Update</a>";
 
-static const char CHANGE_FORM1[] PROGMEM = "<form class='w3-container' action='/saveconfig' method='get'><h2>Configure:</h2>"
+static const char CHANGE_FORM1[] PROGMEM = "<form class='w3-container' action='/saveconfig' method='post'><h2>Configure:</h2>"
+                      "<input type='hidden' name='csrf' value='%CSRF%'>"
+                      "<label>Web Password</label>"
+                      "<input class='w3-input w3-border w3-margin-bottom' type='text' name='webPassword' value='%WEBPASSWORD%' maxlength='64'>"
+                      "<hr>"
                       "<label>WagFam Calendar Data Source</label>"
                       "<input class='w3-input w3-border w3-margin-bottom' type='text' name='wagFamDataSource' value='%WAGFAMDATASOURCE%' maxlength='256'>"
                       "<label>WagFam Calendar API Key</label>"
@@ -171,6 +182,11 @@ static const char UPDATE_FORM[] PROGMEM = "<form class='w3-container' action='/u
 String OTA_SAFE_URL = "";       // URL of last confirmed firmware; rollback target for next update
 uint32_t otaConfirmAt = 0;      // non-zero: millis() target after which the pending update is confirmed
 String otaPendingNewUrl = "";   // URL of firmware pending confirmation (becomes OTA_SAFE_URL on confirm)
+
+// Security: configurable web password (SEC-05) and CSRF token (SEC-10)
+String webPassword = "";        // Persisted to /conf.txt; generated on first boot if empty
+String csrfToken = "";          // Random token generated on boot, validated on all form submissions
+uint32_t lastRestartMs = 0;     // Rate-limit restart requests (SEC-16)
 
 // Change the externalLight to the pin you wish to use if other than the Built-in LED
 int externalLight = LED_BUILTIN; // LED_BUILTIN is is the built in LED on the Wemos
@@ -243,13 +259,37 @@ void setup() {
   // Check for a pending OTA confirmation or crash-loop rollback
   checkOtaRollback();
 
+  // Generate random CSRF token for this boot session (SEC-10)
+  {
+    const char cs[] = "abcdefghjkmnpqrstuvwxyz23456789";
+    char buf[17];
+    for (int i = 0; i < 16; i++) buf[i] = cs[ESP.random() % 30];
+    buf[16] = '\0';
+    csrfToken = String(buf);
+  }
+
+  // Generate random web password on first boot if none exists (SEC-05)
+  if (webPassword == "") {
+    const char cs[] = "abcdefghjkmnpqrstuvwxyz23456789";
+    char buf[9];
+    for (int i = 0; i < 8; i++) buf[i] = cs[ESP.random() % 30];
+    buf[8] = '\0';
+    webPassword = String(buf);
+    Serial.println("=== Generated web password: " + webPassword + " ===");
+    savePersistentConfig();
+  }
+  Serial.println("Web password: " + webPassword);
+
+  // SEC-10: Track custom headers for CSRF protection on API routes
+  server.collectHeaders("X-Requested-With");
+
   // Web Server is always enabled
   server.on("/", displayHomePage);
   server.on("/pull", handlePull);
   server.on("/systemreset", handleSystemReset);
   server.on("/forgetwifi", handleForgetWifi);
   server.on("/configure", handleConfigure);
-  server.on("/saveconfig", handleSaveConfig);
+  server.on("/saveconfig", HTTP_POST, handleSaveConfig);
   server.on("/updateFromUrl", handleUpdateFromUrl);
 
   // REST API endpoints
@@ -265,8 +305,8 @@ void setup() {
   server.on("/api/fs/list", HTTP_GET, handleApiFsList);
 
   server.onNotFound(redirectHome);
-  // Setup the update endpoint and don't require a username/password
-  serverUpdater.setup(&server, "/update", "", "");
+  // SEC-01: Protect firmware upload with authentication
+  serverUpdater.setup(&server, "/update", "admin", webPassword.c_str());
   // Start the server
   server.begin();
   Serial.println(F("Server started"));
@@ -402,11 +442,21 @@ char secondsIndicator(bool isRefresh) {
 }
 
 void handlePull() {
+  if (!requireWebAuth()) return;
   getWeatherData(); // this will force a data pull for new weather
   displayHomePage();
 }
 
 void handleSaveConfig() {
+  if (!requireWebAuth()) return;
+  // CSRF validation (SEC-10)
+  if (server.arg("csrf") != csrfToken) {
+    server.send(403, F("text/plain"), F("CSRF token invalid"));
+    return;
+  }
+  // Allow password change (SEC-05)
+  String newPw = server.arg("webPassword");
+  if (newPw.length() > 0) webPassword = newPw;
   WAGFAM_DATA_URL = server.arg("wagFamDataSource");
   WAGFAM_API_KEY = server.arg("wagFamApiKey");
   bdayClient.updateBdayClient(WAGFAM_API_KEY,WAGFAM_DATA_URL);
@@ -435,6 +485,7 @@ void handleSaveConfig() {
 }
 
 void handleSystemReset() {
+  if (!requireWebAuth()) return;
   Serial.println("Reset System Configuration");
   if (SPIFFS.remove(CONFIG)) {
     redirectHome();
@@ -443,6 +494,7 @@ void handleSystemReset() {
 }
 
 void handleForgetWifi() {
+  if (!requireWebAuth()) return;
   //WiFiManager
   //Local intialization. Once its business is done, there is no need to keep it around
   redirectHome();
@@ -452,6 +504,7 @@ void handleForgetWifi() {
 }
 
 void handleConfigure() {
+  if (!requireWebAuth()) return;
   digitalWrite(externalLight, LOW);
   String html = "";
   server.sendHeader("Cache-Control", "no-cache, no-store");
@@ -463,6 +516,8 @@ void handleConfigure() {
   sendHeader();
 
   String form = FPSTR(CHANGE_FORM1);
+  form.replace("%CSRF%", csrfToken);
+  form.replace("%WEBPASSWORD%", webPassword);
   form.replace("%WAGFAMDATASOURCE%", WAGFAM_DATA_URL);
   form.replace("%WAGFAMAPIKEY%", WAGFAM_API_KEY);
   server.sendContent(form); // Send another chunk of the form
@@ -578,6 +633,7 @@ static void doOtaFlash(const String &firmwareUrl) {
 }
 
 void handleUpdateFromUrl() {
+  if (!requireWebAuth()) return;
   String firmwareUrl = server.arg("firmwareUrl");
   server.sendHeader("Cache-Control", "no-cache, no-store");
   server.sendHeader("Pragma", "no-cache");
@@ -758,12 +814,23 @@ void getWeatherData() //client function to send/receive GET request data.
     }
   }
 
-  serverConfig = bdayClient.updateData();
+  DeviceInfo devInfo;
+  devInfo.chipId = String(ESP.getChipId(), HEX);
+  devInfo.version = VERSION;
+  devInfo.uptimeMs = millis();
+  devInfo.freeHeap = ESP.getFreeHeap();
+  devInfo.rssi = WiFi.RSSI();
+  serverConfig = bdayClient.updateData(devInfo);
   bool needToSave = false;
+  // SEC-12: Validate server-pushed dataSourceUrl must use HTTPS
   if (serverConfig.dataSourceUrlValid) {
-    WAGFAM_DATA_URL = serverConfig.dataSourceUrl;
-    lastRefreshDataTimestamp = 0; // this should force a data pull, since with a new URL that's required
-    needToSave = true;
+    if (serverConfig.dataSourceUrl.startsWith("https://")) {
+      WAGFAM_DATA_URL = serverConfig.dataSourceUrl;
+      lastRefreshDataTimestamp = 0;
+      needToSave = true;
+    } else {
+      Serial.println(F("[SEC] Rejected non-HTTPS dataSourceUrl from server"));
+    }
   }
   if (serverConfig.apiKeyValid) {
     WAGFAM_API_KEY = serverConfig.apiKey;
@@ -772,6 +839,10 @@ void getWeatherData() //client function to send/receive GET request data.
   }
   if (serverConfig.eventTodayValid) {
     WAGFAM_EVENT_TODAY = serverConfig.eventToday;
+    needToSave = true;
+  }
+  if (serverConfig.deviceNameValid) {
+    DEVICE_NAME = serverConfig.deviceName;
     needToSave = true;
   }
   if (needToSave) {
@@ -785,9 +856,15 @@ void getWeatherData() //client function to send/receive GET request data.
       && serverConfig.firmwareUrl.startsWith("http://")
       && otaConfirmAt == 0
       && millis() > OTA_CONFIRM_MS) {
+    // SEC-03: Validate firmware URL domain — accept if it's in the compile-time
+    // allowlist (WAGFAM_TRUSTED_FIRMWARE_DOMAINS) OR matches the calendar source.
+    if (!isTrustedFirmwareDomain(serverConfig.firmwareUrl, WAGFAM_DATA_URL, WAGFAM_TRUSTED_FIRMWARE_DOMAINS)) {
+      Serial.println(F("[SEC] Rejected firmware URL — domain not allowlisted and does not match calendar source"));
+    } else {
     Serial.println("[OTA] Server version: " + serverConfig.latestVersion + ", current: " + String(VERSION));
     performAutoUpdate(serverConfig.firmwareUrl);
     // If we return here the update failed; continue normal operation
+    }
   }
 
   Serial.println("Version: " + String(VERSION));
@@ -851,6 +928,7 @@ void sendFooter() {
 }
 
 void displayHomePage() {
+  if (!requireWebAuth()) return;
   digitalWrite(externalLight, LOW);
   String html = "";
 
@@ -1013,6 +1091,8 @@ void savePersistentConfig() {
     f.println("SHOW_HIGHLOW=" + String(SHOW_HIGHLOW));
     f.println("SHOW_DATE=" + String(SHOW_DATE));
     f.println("OTA_SAFE_URL=" + OTA_SAFE_URL);
+    f.println("DEVICE_NAME=" + DEVICE_NAME);
+    f.println("WEB_PASSWORD=" + webPassword);
   }
   f.close();
   // Apply current settings to hardware and clients directly.
@@ -1042,7 +1122,7 @@ void readPersistentConfig() {
 
     if (key == "WAGFAM_DATA_URL") {
       WAGFAM_DATA_URL = value;
-      Serial.println("WAGFAM_DATA_URL: " + WAGFAM_DATA_URL);
+      Serial.println(F("WAGFAM_DATA_URL: [set]"));
     } else if (key == "WAGFAM_API_KEY") {
       WAGFAM_API_KEY = value;
       Serial.println("WAGFAM_API_KEY: [set]");
@@ -1103,6 +1183,12 @@ void readPersistentConfig() {
       OTA_SAFE_URL = value;
       Serial.print(F("OTA_SAFE_URL: "));
       Serial.println(OTA_SAFE_URL != "" ? "[set]" : "[empty]");
+    } else if (key == "DEVICE_NAME") {
+      DEVICE_NAME = value;
+      Serial.println("DEVICE_NAME: " + DEVICE_NAME);
+    } else if (key == "WEB_PASSWORD") {
+      webPassword = value;
+      Serial.println(F("WEB_PASSWORD: [set]"));
     }
   }
   fr.close();
@@ -1174,6 +1260,18 @@ void centerPrint(const String &msg, boolean extraStuff) {
   matrix.write();
 }
 
+// ── Security Helpers ────────────────────────────────────────────────────────
+
+// SEC-04: Require HTTP Basic Auth for all web UI routes
+bool requireWebAuth() {
+  if (!server.authenticate("admin", webPassword.c_str())) {
+    server.requestAuthentication();
+    return false;
+  }
+  return true;
+}
+
+
 // ── REST API ────────────────────────────────────────────────────────────────
 
 static void sendJsonResponse(int code, JsonDocument &doc) {
@@ -1194,9 +1292,19 @@ static void sendJsonError(int code, const char *message) {
   sendJsonResponse(code, doc);
 }
 
+// SEC-05: Use configurable password for API auth
 static bool requireApiAuth() {
-  if (!server.authenticate("admin", "password")) {
+  if (!server.authenticate("admin", webPassword.c_str())) {
     sendJsonError(401, "unauthorized");
+    return false;
+  }
+  return true;
+}
+
+// SEC-10: Require X-Requested-With header on API mutations to prevent CSRF
+static bool requireApiCsrf() {
+  if (server.header("X-Requested-With") == "") {
+    sendJsonError(403, "missing X-Requested-With header");
     return false;
   }
   return true;
@@ -1211,6 +1319,7 @@ void handleApiStatus() {
   doc["free_heap"] = ESP.getFreeHeap();
   doc["heap_fragmentation"] = ESP.getHeapFragmentation();
   doc["chip_id"] = String(ESP.getChipId(), HEX);
+  doc["device_name"] = DEVICE_NAME;
   doc["flash_size"] = ESP.getFlashChipRealSize();
   doc["sketch_size"] = ESP.getSketchSize();
   doc["free_sketch_space"] = ESP.getFreeSketchSpace();
@@ -1255,12 +1364,15 @@ void handleApiConfigGet() {
   doc["show_pressure"] = SHOW_PRESSURE;
   doc["show_highlow"] = SHOW_HIGHLOW;
   doc["ota_safe_url"] = OTA_SAFE_URL;
+  doc["device_name"] = DEVICE_NAME;
+  doc["web_password"] = webPassword;
 
   sendJsonResponse(200, doc);
 }
 
 void handleApiConfigPost() {
   if (!requireApiAuth()) return;
+  if (!requireApiCsrf()) return;
 
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, server.arg("plain"));
@@ -1289,6 +1401,10 @@ void handleApiConfigPost() {
   if (doc["show_wind"].is<bool>()) SHOW_WIND = doc["show_wind"].as<bool>();
   if (doc["show_pressure"].is<bool>()) SHOW_PRESSURE = doc["show_pressure"].as<bool>();
   if (doc["show_highlow"].is<bool>()) SHOW_HIGHLOW = doc["show_highlow"].as<bool>();
+  if (doc["web_password"].is<const char*>()) {
+    String newPw = doc["web_password"].as<String>();
+    if (newPw.length() > 0) webPassword = newPw;
+  }
 
   savePersistentConfig();
   sendJsonOk("config updated");
@@ -1296,6 +1412,13 @@ void handleApiConfigPost() {
 
 void handleApiRestart() {
   if (!requireApiAuth()) return;
+  if (!requireApiCsrf()) return;
+  // SEC-16: Rate-limit restarts to prevent reboot-loop DoS
+  if (lastRestartMs != 0 && (millis() - lastRestartMs) < 60000) {
+    sendJsonError(429, "restart rate limited (60s cooldown)");
+    return;
+  }
+  lastRestartMs = millis();
   sendJsonOk("restarting");
   delay(500);
   ESP.restart();
@@ -1303,6 +1426,7 @@ void handleApiRestart() {
 
 void handleApiRefresh() {
   if (!requireApiAuth()) return;
+  if (!requireApiCsrf()) return;
   getWeatherData();
   sendJsonOk("refresh complete");
 }
@@ -1357,6 +1481,7 @@ void handleApiFsRead() {
 
 void handleApiFsWrite() {
   if (!requireApiAuth()) return;
+  if (!requireApiCsrf()) return;
 
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, server.arg("plain"));
@@ -1365,6 +1490,12 @@ void handleApiFsWrite() {
   const char *path = doc["path"];
   const char *content = doc["content"];
   if (!path || !content) { sendJsonError(400, "missing 'path' or 'content'"); return; }
+
+  // SEC-06: Block writes to critical system files
+  if (isProtectedPath(path, CONFIG, OTA_PENDING_FILE)) {
+    sendJsonError(403, "protected path — use /api/config instead");
+    return;
+  }
 
   File f = SPIFFS.open(path, "w");
   if (!f) { sendJsonError(500, "failed to open file for writing"); return; }
@@ -1380,10 +1511,17 @@ void handleApiFsWrite() {
 
 void handleApiFsDelete() {
   if (!requireApiAuth()) return;
+  if (!requireApiCsrf()) return;
 
   String path = server.arg("path");
   if (path == "") { sendJsonError(400, "missing 'path' parameter"); return; }
   if (!SPIFFS.exists(path)) { sendJsonError(404, "file not found"); return; }
+
+  // SEC-06: Block deletion of critical system files
+  if (isProtectedPath(path.c_str(), CONFIG, OTA_PENDING_FILE)) {
+    sendJsonError(403, "protected path");
+    return;
+  }
 
   SPIFFS.remove(path);
   sendJsonOk("deleted");

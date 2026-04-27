@@ -218,6 +218,29 @@ void test_config_absent_fields_not_valid() {
     TEST_ASSERT_FALSE(cfg.firmwareUrlValid);
     TEST_ASSERT_FALSE(cfg.dataSourceUrlValid);
     TEST_ASSERT_FALSE(cfg.apiKeyValid);
+    TEST_ASSERT_FALSE(cfg.deviceNameValid);
+}
+
+void test_config_device_name_parsed() {
+    WagFamBdayClient client("", "");
+    feed_json(client, "[{\"config\":{\"deviceName\":\"Kitchen Clock\"}}]");
+    auto cfg = client.getLastConfig();
+    TEST_ASSERT_TRUE(cfg.deviceNameValid);
+    TEST_ASSERT_EQUAL_STRING("Kitchen Clock", cfg.deviceName.c_str());
+}
+
+void test_config_device_name_with_other_fields() {
+    WagFamBdayClient client("", "");
+    feed_json(client,
+        "[{\"config\":{"
+        "\"eventToday\":\"0\","
+        "\"deviceName\":\"Living Room\""
+        "}}]");
+    auto cfg = client.getLastConfig();
+    TEST_ASSERT_TRUE(cfg.deviceNameValid);
+    TEST_ASSERT_EQUAL_STRING("Living Room", cfg.deviceName.c_str());
+    TEST_ASSERT_TRUE(cfg.eventTodayValid);
+    TEST_ASSERT_FALSE(cfg.eventToday);
 }
 
 void test_config_with_messages_both_parsed() {
@@ -230,6 +253,30 @@ void test_config_with_messages_both_parsed() {
     TEST_ASSERT_TRUE(cfg.eventToday);
     TEST_ASSERT_EQUAL(1, client.getNumMessages());
     TEST_ASSERT_EQUAL_STRING("Happy Birthday!", client.getMessage(0).c_str());
+}
+
+// ── getMessage bounds check (SEC-14) ────────────────────────────────────────
+
+void test_get_message_negative_index_returns_empty() {
+    WagFamBdayClient client("", "");
+    feed_json(client, "[{\"message\":\"Hello\"}]");
+    TEST_ASSERT_EQUAL_STRING("", client.getMessage(-1).c_str());
+}
+
+void test_get_message_out_of_bounds_returns_empty() {
+    WagFamBdayClient client("", "");
+    feed_json(client, "[{\"message\":\"Hello\"}]");
+    TEST_ASSERT_EQUAL(1, client.getNumMessages());
+    TEST_ASSERT_EQUAL_STRING("", client.getMessage(1).c_str());
+    TEST_ASSERT_EQUAL_STRING("", client.getMessage(10).c_str());
+    TEST_ASSERT_EQUAL_STRING("", client.getMessage(99).c_str());
+}
+
+void test_get_message_valid_index_still_works() {
+    WagFamBdayClient client("", "");
+    feed_json(client, "[{\"message\":\"Hello\"},{\"message\":\"World\"}]");
+    TEST_ASSERT_EQUAL_STRING("Hello", client.getMessage(0).c_str());
+    TEST_ASSERT_EQUAL_STRING("World", client.getMessage(1).c_str());
 }
 
 // ── cleanText ───────────────────────────────────────────────────────────────
@@ -260,7 +307,13 @@ int main() {
     RUN_TEST(test_config_firmware_url_parsed);
     RUN_TEST(test_config_multiple_fields_in_one_block);
     RUN_TEST(test_config_absent_fields_not_valid);
+    RUN_TEST(test_config_device_name_parsed);
+    RUN_TEST(test_config_device_name_with_other_fields);
     RUN_TEST(test_config_with_messages_both_parsed);
+
+    RUN_TEST(test_get_message_negative_index_returns_empty);
+    RUN_TEST(test_get_message_out_of_bounds_returns_empty);
+    RUN_TEST(test_get_message_valid_index_still_works);
 
     RUN_TEST(test_clean_text_ascii_passthrough);
     RUN_TEST(test_clean_text_smart_left_double_quote);
