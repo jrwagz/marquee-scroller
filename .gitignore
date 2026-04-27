@@ -8,3 +8,4 @@ artifacts/
 .coverage
 .ruff_cache/
 .pytest-image
+server/scripts/.env
