@@ -5,3 +5,6 @@ build/
 .platformio/
 artifacts/
 **/__pycache__/
+.coverage
+.ruff_cache/
+.pytest-image

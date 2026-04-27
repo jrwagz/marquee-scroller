@@ -1,0 +1,13 @@
+[tool.pytest.ini_options]
+minversion = "8.3"
+# -v makes it easier to see what's happening on jenkins, strict-markers prevents typos
+addopts = "-vv --strict-markers"
+# Require an xfail test to actually fail.
+xfail_strict = 1
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

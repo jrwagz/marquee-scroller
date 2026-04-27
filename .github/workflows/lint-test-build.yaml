@@ -45,6 +45,15 @@ jobs:
           path: 'artifacts/test-native-results.xml'
           reporter: java-junit
 
+      - name: Scripts Test Report
+        uses: dorny/test-reporter@v3
+        if: ${{ !cancelled() }} # run this step even if previous step failed
+        with:
+          name: Scripts Test Results
+          badge-title: Scripts Tests
+          path: 'artifacts/test-scripts-results.xml'
+          reporter: java-junit
+
       - name: Build
         run: make build
 
