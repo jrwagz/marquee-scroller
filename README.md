@@ -67,12 +67,9 @@ The following libraries are cached locally in `/lib` (no separate install needed
 
 ## Pre-built Binaries
 
-For OTA flashing without recompiling (built from v3.03 — current source is v3.07.0-wagfam):
-
-- `marquee.ino.d1_mini_3.03.bin` — standard 4×1 LED display
-- `marquee.ino.d1_mini_wide_3.03.bin` — double-wide 8×1 LED display
-
-Upload via the web interface at `http://<device-ip>/update`.
+CI builds generate firmware artifacts on every tagged release. Download `firmware.bin` from the
+[Releases page](https://github.com/jrwagz/marquee-scroller/releases) and upload via the web
+interface at `http://<device-ip>/update`.
 
 ## Initial Setup
 
@@ -81,7 +78,8 @@ Connect to it with a phone or laptop to enter your WiFi credentials.
 
 Once connected to WiFi, the device displays its IP address. Open `http://<ip>/` in a browser to access the web interface.
 
-Default web UI credentials: **admin / password**
+On first boot, a random web password is generated and printed to the serial console. It can be
+changed from the Configure page. The username for HTTP Basic Auth is **admin**.
 
 ## Configuration
 
@@ -142,7 +140,7 @@ directly from a hosted `.bin` file. The device will restart automatically on suc
 | ----- | ----------- |
 | `/` | Home — shows upcoming events and current weather |
 | `/configure` | Settings form |
-| `/saveconfig` | Saves configuration (GET with form params) |
+| `/saveconfig` | Saves configuration (POST) |
 | `/pull` | Forces immediate data refresh |
 | `/update` | OTA firmware upload (file) |
 | `/updateFromUrl` | OTA firmware update from URL |
@@ -151,7 +149,7 @@ directly from a hosted `.bin` file. The device will restart automatically on suc
 
 ## REST API
 
-All `/api/*` endpoints require HTTP Basic Auth (default: `admin` / `password`) and return JSON.
+All `/api/*` endpoints require HTTP Basic Auth (`admin` / your web password) and return JSON.
 
 | Endpoint | Method | Description |
 | --- | --- | --- |

@@ -18,7 +18,7 @@ Before making changes, read these docs in order:
 
 ## Architecture
 
-All source lives in [marquee/](marquee/):
+All firmware source lives in [marquee/](marquee/):
 
 | File | Role |
 | --- | --- |
@@ -26,8 +26,11 @@ All source lives in [marquee/](marquee/):
 | [Settings.h](marquee/Settings.h) | Hardware pin config + all `#include` directives; default values for first-run only |
 | [OpenWeatherMapClient.h/.cpp](marquee/OpenWeatherMapClient.h) | Fetches weather from OpenWeatherMap API using ArduinoJson |
 | [WagFamBdayClient.h/.cpp](marquee/WagFamBdayClient.h) | Fetches family calendar JSON over HTTPS; parses messages and remote config |
+| [SecurityHelpers.h/.cpp](marquee/SecurityHelpers.h) | Firmware URL validation, path protection, domain extraction |
 | [timeNTP.h/.cpp](marquee/timeNTP.h) | NTP time sync; exposes `timeNTPsetup()`, `getNtpTime()`, and `set_timeZoneSec()` |
 | [timeStr.h/.cpp](marquee/timeStr.h) | Time formatting helpers (zero-pad, day/month names, etc.) |
+
+The backend server lives in [server/](server/) — see [Backend Server](#backend-server) below.
 
 Local library copies (not managed by PlatformIO) are in [lib/](lib/):
 
@@ -47,23 +50,27 @@ Local library copies (not managed by PlatformIO) are in [lib/](lib/):
 
 | Function | Line |
 | --- | --- |
-| Global variables (settings) | 65–103 |
-| PROGMEM HTML constants | 109–153 |
-| `setup()` | 178 |
-| `loop()` | 287 |
-| `processEverySecond()` | 313 |
-| `processEveryMinute()` | 330 |
-| `handleSaveConfig()` | 409 |
-| `handleConfigure()` | 454 |
-| `handleUpdateFromUrl()` | 580 |
-| `getWeatherData()` | 704 |
-| `sendHeader()` / `sendFooter()` | 809 / 839 |
-| `displayHomePage()` | 853 |
-| `savePersistentConfig()` | 989 |
-| `readPersistentConfig()` | 1028 |
-| `scrollMessageWait()` | 1116 |
-| `centerPrint()` | 1140 |
-| REST API handlers | 1177 |
+| Global variables (settings) | 95–189 |
+| PROGMEM HTML constants | 133–179 |
+| `setup()` | 194 |
+| `loop()` | 327 |
+| `processEverySecond()` | 353 |
+| `processEveryMinute()` | 370 |
+| `handleSaveConfig()` | 450 |
+| `handleConfigure()` | 506 |
+| `doOtaFlash()` | 619 |
+| `handleUpdateFromUrl()` | 635 |
+| `performAutoUpdate()` | 690 |
+| `checkOtaRollback()` | 706 |
+| `getWeatherData()` | 760 |
+| `sendHeader()` / `sendFooter()` | 886 / 916 |
+| `displayHomePage()` | 930 |
+| `savePersistentConfig()` | 1067 |
+| `readPersistentConfig()` | 1108 |
+| `scrollMessageWait()` | 1202 |
+| `centerPrint()` | 1226 |
+| Security helpers (`requireWebAuth`, etc.) | 1266 |
+| REST API handlers | 1275–1546 |
 
 ## Configuration Storage
 
@@ -78,11 +85,11 @@ JSON response and persisted across reboots via `/conf.txt`.
 
 ### Adding a New Config Key
 
-1. Declare a global variable in `marquee.ino` (near line 65)
-2. Add `f.println("KEY=" + String(value))` in `savePersistentConfig()` (~line 882)
-3. Add an `if (line.indexOf("KEY=") >= 0)` block in `readPersistentConfig()` (~line 913)
-4. Add a form field in one of the `CHANGE_FORM*` PROGMEM constants (~line 118)
-5. Read from `server.arg("fieldName")` in `handleSaveConfig()` (~line 383)
+1. Declare a global variable in `marquee.ino` (near line 95)
+2. Add `f.println("KEY=" + String(value))` in `savePersistentConfig()` (~line 1067)
+3. Add an `if (line.indexOf("KEY=") >= 0)` block in `readPersistentConfig()` (~line 1108)
+4. Add a form field in one of the `CHANGE_FORM*` PROGMEM constants (~line 142)
+5. Read from `server.arg("fieldName")` in `handleSaveConfig()` (~line 450)
 
 ## Development Practices
 
@@ -143,7 +150,7 @@ Run `make lint-markdown` locally to check before committing any `.md` changes.
 
 The display is a 32×8 pixel grid (4 panels of 8×8 each). Key facts:
 
-- Font: 5px wide + 1px spacer = 6px per character (`width` variable, line 70)
+- Font: 5px wide + 1px spacer = 6px per character (`width` variable, line 97)
 - `scrollMessageWait(msg)` scrolls right-to-left, one pixel per step, at `displayScrollSpeed` ms/step
 - `centerPrint(msg, extraStuff)` draws a static centered string + optional extras (event border, PM dot)
 - `matrix.write()` flushes the framebuffer to hardware via SPI — called inside `centerPrint` and each
@@ -219,7 +226,8 @@ with the current safe URL. If the device reboots twice without confirming (5 min
 
 See the [REST API section in README.md](README.md#rest-api) for the full endpoint table and
 curl examples. All endpoints live under `/api/`, require HTTP Basic Auth, and return JSON.
-Handlers are registered in `setup()` starting at line 1174 of `marquee.ino`.
+Handlers are registered in `setup()` starting at line 296 of `marquee.ino`, with
+implementations at lines 1275–1546.
 
 ## Key Constraints
 
@@ -245,8 +253,53 @@ See `docs/CODE_REVIEW.md` for the full open-issues list. Top items by impact:
 - `getWindDirectionText()` allocates 16 `String` objects on the stack every call — use `PROGMEM` array
 - `cleanText()` does 35+ sequential `replace()` calls — heap fragmentation risk on long strings
 - `savePersistentConfig()` always tail-calls `readPersistentConfig()` — fragile mutual recursion
-- Config parser uses `indexOf("KEY=")` without `else if` — key collision risk if a URL contains another key name
+- Config parser uses `indexOf("KEY=")` without `else if` — key collision risk if a URL contains
+  another key name
 - HTML page builders use `html +=` — replace static fragments with `server.sendContent(F("..."))`
+
+## SecurityHelpers Module
+
+`SecurityHelpers.h/.cpp` provides security functions extracted from `marquee.ino`:
+
+- `isProtectedPath(path)` — prevents API writes/deletes to `/conf.txt` and `/ota_pending.txt`
+- `extractDomain(url)` — parses domain from URLs (handles scheme-less, userinfo, port, query)
+- `isTrustedFirmwareDomain(firmwareUrl, calendarUrl)` — validates OTA firmware URLs against
+  a compile-time domain allowlist (`WAGFAM_TRUSTED_FIRMWARE_DOMAINS` in `Settings.h`) plus the
+  calendar source domain
+- `isInTrustedDomainList(domain, list)` — checks domain membership in comma-separated allowlist
+
+These are tested in `tests/native/test_security_helpers/`.
+
+## Build Provenance
+
+`scripts/build_version.py` is a PlatformIO pre-build script (declared in `platformio.ini` as
+`extra_scripts = pre:scripts/build_version.py`) that injects a `BUILD_SUFFIX` into the
+firmware `VERSION` macro at compile time:
+
+- Local builds: `3.08.0-wagfam-<username>-<YYYYMMDD>-<hash>`
+- CI builds: `3.08.0-wagfam-<hash>`
+- Arduino IDE (no script): falls back to `BASE_VERSION` alone
+
+Tested in `tests/scripts/test_build_version.py` with 100% coverage enforced by CI.
+
+## Backend Server
+
+The `server/` directory contains a FastAPI backend that replaces the static GitHub-hosted
+JSON file. It provides:
+
+- **Calendar API** (`GET /api/v1/calendar`) — generates calendar messages from
+  `data/wagfam_calendar_data.json` and returns the same JSON format the clocks expect
+- **Device heartbeat** — records `chip_id`, `version`, `uptime`, `heap`, `rssi` from
+  query params on each calendar fetch; auto-registers new devices on first contact
+- **Device management** (`GET /api/v1/devices`, `POST /api/v1/devices/{chip_id}/update_name`)
+  — admin endpoints for listing devices and setting human-friendly names
+- **Per-device config** — includes `deviceName` and `eventToday` in the calendar response
+  config block
+
+Auth uses a shared secret via `Authorization: token <key>` or `Bearer <key>`.
+See `server/README.md` (if present) or `server/pyproject.toml` for setup.
+Calendar event logic is adapted from `jrwagz/wagfam-clocks-data-source` — see
+`docs/CALENDAR_ADAPTATION.md` for provenance details.
 
 ## What Was Removed from Upstream (Qrome/marquee-scroller)
 
