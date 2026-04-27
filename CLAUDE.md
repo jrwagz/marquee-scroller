@@ -138,6 +138,97 @@ returned racy results when the target file was being updated. Re-verify
 out-of-band if you change the heartbeat parameter set or move to a different
 static-JSON host — don't add it back to the suite.
 
+**`gh` CLI: this repo is a fork — always pass `--repo` and `--head` explicitly.**
+This repo is `dallanwagz/marquee-scroller` (a fork of `jrwagz/marquee-scroller`).
+Bare `gh pr create` and `gh repo view` resolve to the upstream parent (`jrwagz/...`)
+because that's the fork's parent — they do **not** target the fork. The error
+when this misfires is a confusing `"Head sha can't be blank, Base sha can't be
+blank, No commits between <base> and <head>, Head ref must be a branch, Base
+ref must be a branch (createPullRequest)"` that doesn't mention forks at all.
+Templates that always work:
+
+- For an upstream PR (the common case):
+  `gh pr create --repo jrwagz/marquee-scroller --head dallanwagz:<branch> -B master ...`
+- For a fork-internal PR (rare, but used when iterating before going upstream):
+  `gh pr create --repo dallanwagz/marquee-scroller -B <branch> -H <branch> ...`
+
+The same `--repo` rule applies to `gh pr view`, `gh pr comment`, `gh issue`, and
+`gh api repos/...` — use the explicit owner/name form, not the inferred default.
+
+**GitHub Actions: PRs from forks get a read-only `GITHUB_TOKEN` regardless of
+`permissions:` declarations.** A `permissions: packages: write` block in a
+workflow is a *request*, not a grant — for PRs from forks (every PR on this
+repo, since the fork model is dallanwagz → jrwagz), the token stays read-only
+and the requested write permission has no effect. Steps that try to push to
+ghcr.io, write registry cache, or publish artifact attestations will get HTTP
+403 silently mid-run. Gate every write step on `if: github.event_name !=
+'pull_request'` so PR validation runs cleanly: the build itself still runs
+(validating that the Dockerfile compiles, etc.) but the registry-side writes
+skip. The deploy step gets a stricter gate
+(`startsWith(github.ref, 'refs/tags/server-v')`) so master pushes also don't
+bounce production. See `.github/workflows/publish-server.yaml` (introduced in
+PR #30) for the canonical pattern.
+
+**Dockerized CLI tools must run as the host user, not as container root.**
+When wrapping a CLI tool in a container (`mcr.microsoft.com/azure-cli`,
+`davidanson/markdownlint-cli2`, etc.) and mounting host-writable directories
+(credentials cache, output files), default `docker run` uses the container's
+default UID — typically root. Files written end up owned by root on the host,
+which breaks the next non-root invocation. The repo's pattern (canonical
+example: `make lint-markdown` at `makefile:32-33` and `:57-66`):
+
+1. Generate a tempfile `/etc/passwd` entry for the host UID (`echo
+   "$USER:x:$(id -u):$(id -g)::$HOME:/bin/bash" > "$PASSWD_TMP"`).
+2. Mount it into the container at `/etc/passwd:ro`.
+3. Pass `-u $(id -u):$(id -g)` to `docker run`.
+4. Pass `-e HOME=$HOME` and mount the credential dir at the **same path**
+   inside the container as on the host (not at `/root/whatever`), so the tool
+   reads/writes credentials at a location matching the host path.
+
+`server/scripts/azure-deploy.sh` and `azure-teardown.sh` (PR #30) use this
+exact pattern. If you copy a `docker run` snippet from external docs that
+mounts to `/root/...`, rewrite it to use the host-user pattern before
+shipping.
+
+**Multi-PR coordination: supersede when a strict superset exists; keep
+independent otherwise.** Two patterns surfaced this session:
+
+- **Supersede**: PR #23 (security hardening) was a strict superset of PR #22
+  (REST API), so #22 was closed as superseded once #23 was ready. PR #25
+  later did the same with #23 + #24 — one combined upstream PR that
+  superseded both unmerged downstream PRs (since both were stuck on auth
+  scope). Use this when one PR cleanly contains all of another's commits and
+  there's no advantage to merging them separately.
+- **Keep independent**: PRs #30 (Azure deploy plan) and #33 (backup endpoints
+  closing issue #32) share zero files, target the same `master`, and merge
+  cleanly in either order. Each gets its own focused review thread. Use this
+  by default — only consolidate when there's a real superset relationship or a
+  blocking dependency.
+
+The cost of consolidating that doesn't need to consolidate is huge PR diffs
+that are hard to review. The cost of failing to consolidate when you should is
+PRs that get stuck behind each other. The supersede call typically gets made
+when the dependency PR has been blocked for a while.
+
+**Out-of-scope review feedback: flag, don't silently scope-creep.** When a PR
+review comment introduces new feature work that's materially different from
+the PR's stated scope, do not fold it in. Reply on the thread acknowledging
+the ask, propose tackling it as a separate PR with a one-paragraph plan, and
+flag it explicitly to the human user so they can decide whether to greenlight
+parallel work. Example: PR #30's review round 3 introduced issue #32 (server
+backup/restore) — pulled into PR #33 after explicit user approval rather than
+folded into #30. Bigger PRs are exponentially harder to review than focused
+ones; reviewers will not thank you for "while you're at it" creep.
+
+**Live-device testing has its own playbook.** The clock firmware has several
+non-obvious testing constraints (BearSSL HTTPS-only client, protected
+`/conf.txt` path, OTA_SAFE_URL rewrite-on-flash) and several useful
+shortcuts (heartbeat interval is REST-API-configurable down to 1 minute
+without flashing, source-binding via `curl --interface` works around
+multi-homed routing weirdness). Before doing end-to-end firmware testing,
+read [`docs/LIVE_DEVICE_TESTING.md`](docs/LIVE_DEVICE_TESTING.md) — saves
+significant trial-and-error.
+
 ---
 
 ## Markdown Style
