@@ -63,7 +63,8 @@ class TestGetBaseVersion:
             build_version.get_base_version(sketch_path=sketch)
 
     def test_real_sketch_returns_expected(self):
-        assert build_version.get_base_version() == "3.08.0-wagfam"
+        import re
+        assert re.match(r"^\d+\.\d+\.\d+-wagfam$", build_version.get_base_version())
 
 
 # ── compute_suffix ────────────────────────────────────────────────────────────
@@ -131,7 +132,8 @@ class TestPioMain:
         [(key, val)] = self._get_cppdefines(mock_env)
         assert key == "BUILD_SUFFIX"
         assert val == '\\"-abc1234\\"'
-        assert output_file.read_text() == "3.08.0-wagfam-abc1234"
+        base = build_version.get_base_version()
+        assert output_file.read_text() == f"{base}-abc1234"
 
     def test_local_mode_injects_user_date_hash_suffix(self, monkeypatch, tmp_path):
         monkeypatch.delenv("CI", raising=False)
@@ -147,7 +149,8 @@ class TestPioMain:
         assert "tester" in val
         assert "20260101" in val
         assert "abc1234" in val
-        assert output_file.read_text() == "3.08.0-wagfam-tester-20260101-abc1234"
+        base = build_version.get_base_version()
+        assert output_file.read_text() == f"{base}-tester-20260101-abc1234"
 
 
 # ── _cli_main ─────────────────────────────────────────────────────────────────
