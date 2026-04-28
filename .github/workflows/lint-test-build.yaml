@@ -142,9 +142,11 @@ jobs:
           docker buildx build \
             --platform linux/amd64,linux/arm64 \
             --tag jrwagz/simple-web-server:latest \
+            --tag jrwagz/simple-web-server:${VERSION} \
             --file Dockerfile.firmware \
             --push \
             .
+          echo "FIRMWARE_VERSION=${VERSION}" >> "$GITHUB_ENV"
 
       - name: Reload Azure firmware web app
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
@@ -152,7 +154,7 @@ jobs:
         with:
           app-name: files-jrwagz
           publish-profile: ${{ secrets.AZURE_FIRMWARE_PUBLISH_PROFILE }}
-          images: docker.io/jrwagz/simple-web-server:latest
+          images: docker.io/jrwagz/simple-web-server:${{ env.FIRMWARE_VERSION }}
 
       - name: Write release summary
         if: github.event_name == 'push' && startsWith( github.ref, 'refs/tags/' )
