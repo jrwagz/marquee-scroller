@@ -89,6 +89,23 @@ jobs:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           subject-digest: ${{ steps.push.outputs.digest }}
 
+      - name: Dump database backup before upgrade
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/server-v')
+        id: backup
+        env:
+          WAGFAM_API_KEY: ${{ secrets.WAGFAM_API_KEY }}
+        run: |
+          if curl -sf \
+               -H "Authorization: token ${WAGFAM_API_KEY}" \
+               "https://wagfam-server.azurewebsites.net/api/v1/backup" \
+               -o /tmp/backup.json; then
+            echo "has_backup=true" >> "$GITHUB_OUTPUT"
+            echo "Backup saved ($(wc -c < /tmp/backup.json) bytes)"
+          else
+            echo "has_backup=false" >> "$GITHUB_OUTPUT"
+            echo "No live server reachable — skipping backup (first deploy or server down)"
+          fi
+
       - name: Deploy to Azure App Service
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/server-v')
         uses: azure/webapps-deploy@v3
@@ -96,3 +113,37 @@ jobs:
           app-name: wagfam-server
           publish-profile: ${{ secrets.AZURE_PUBLISH_PROFILE }}
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+
+      - name: Wait for upgraded server and restore backup
+        if: >-
+          github.event_name == 'push' &&
+          startsWith(github.ref, 'refs/tags/server-v') &&
+          steps.backup.outputs.has_backup == 'true'
+        env:
+          WAGFAM_API_KEY: ${{ secrets.WAGFAM_API_KEY }}
+        run: |
+          TARGET="${{ github.ref_name }}"
+          TARGET="${TARGET#server-v}"         # strip "server-v" → bare semver e.g. "1.0.2"
+          echo "Polling for version ${TARGET} (up to 5 min)..."
+          for i in $(seq 1 30); do
+            VERSION=$(curl -sf \
+                "https://wagfam-server.azurewebsites.net/api/v1/version" \
+                | jq -r '.version' 2>/dev/null) || VERSION=""
+            if [ "$VERSION" = "$TARGET" ]; then
+              echo "Server is running ${VERSION}"
+              break
+            fi
+            echo "Attempt ${i}/30: got '${VERSION}', retrying in 10s..."
+            sleep 10
+            if [ "$i" -eq 30 ]; then
+              echo "ERROR: Server did not reach version ${TARGET} within 300s" >&2
+              exit 1
+            fi
+          done
+          echo "Restoring backup..."
+          curl -sf -X POST \
+            -H "Authorization: token ${WAGFAM_API_KEY}" \
+            -H "Content-Type: application/json" \
+            --data-binary @/tmp/backup.json \
+            "https://wagfam-server.azurewebsites.net/api/v1/backup"
+          echo "Restore complete."
