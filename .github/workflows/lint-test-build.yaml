@@ -54,15 +54,6 @@ jobs:
           path: 'artifacts/test-scripts-results.xml'
           reporter: java-junit
 
-      - name: Server Test Report
-        uses: dorny/test-reporter@v3
-        if: ${{ !cancelled() }} # run this step even if previous step failed
-        with:
-          name: Server Test Results
-          badge-title: Server Tests
-          path: 'artifacts/test-server-results.xml'
-          reporter: java-junit
-
       - name: Build
         run: make build
 
