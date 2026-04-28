@@ -30,8 +30,6 @@ All firmware source lives in [marquee/](marquee/):
 | [timeNTP.h/.cpp](marquee/timeNTP.h) | NTP time sync; exposes `timeNTPsetup()`, `getNtpTime()`, and `set_timeZoneSec()` |
 | [timeStr.h/.cpp](marquee/timeStr.h) | Time formatting helpers (zero-pad, day/month names, etc.) |
 
-The backend server lives in [server/](server/) — see [Backend Server](#backend-server) below.
-
 Local library copies (not managed by PlatformIO) are in [lib/](lib/):
 
 - `arduino-Max72xxPanel` — MAX7219 LED matrix driver
@@ -164,10 +162,7 @@ ghcr.io, write registry cache, or publish artifact attestations will get HTTP
 403 silently mid-run. Gate every write step on `if: github.event_name !=
 'pull_request'` so PR validation runs cleanly: the build itself still runs
 (validating that the Dockerfile compiles, etc.) but the registry-side writes
-skip. The deploy step gets a stricter gate
-(`startsWith(github.ref, 'refs/tags/server-v')`) so master pushes also don't
-bounce production. See `.github/workflows/publish-server.yaml` (introduced in
-PR #30) for the canonical pattern.
+skip.
 
 **Dockerized CLI tools must run as the host user, not as container root.**
 When wrapping a CLI tool in a container (`mcr.microsoft.com/azure-cli`,
@@ -185,8 +180,8 @@ example: `make lint-markdown` at `makefile:32-33` and `:57-66`):
    inside the container as on the host (not at `/root/whatever`), so the tool
    reads/writes credentials at a location matching the host path.
 
-`server/scripts/azure-deploy.sh` and `azure-teardown.sh` (PR #30) use this
-exact pattern. If you copy a `docker run` snippet from external docs that
+The `make lint-markdown` target at `makefile:57-66` is the canonical example of
+this pattern. If you copy a `docker run` snippet from external docs that
 mounts to `/root/...`, rewrite it to use the host-user pattern before
 shipping.
 
@@ -381,25 +376,6 @@ firmware `VERSION` macro at compile time:
 - Arduino IDE (no script): falls back to `BASE_VERSION` alone
 
 Tested in `tests/scripts/test_build_version.py` with 100% coverage enforced by CI.
-
-## Backend Server
-
-The `server/` directory contains a FastAPI backend that replaces the static GitHub-hosted
-JSON file. It provides:
-
-- **Calendar API** (`GET /api/v1/calendar`) — generates calendar messages from
-  `data/wagfam_calendar_data.json` and returns the same JSON format the clocks expect
-- **Device heartbeat** — records `chip_id`, `version`, `uptime`, `heap`, `rssi` from
-  query params on each calendar fetch; auto-registers new devices on first contact
-- **Device management** (`GET /api/v1/devices`, `POST /api/v1/devices/{chip_id}/update_name`)
-  — admin endpoints for listing devices and setting human-friendly names
-- **Per-device config** — includes `deviceName` and `eventToday` in the calendar response
-  config block
-
-Auth uses a shared secret via `Authorization: token <key>` or `Bearer <key>`.
-See `server/README.md` (if present) or `server/pyproject.toml` for setup.
-Calendar event logic is adapted from `jrwagz/wagfam-clocks-data-source` — see
-`docs/CALENDAR_ADAPTATION.md` for provenance details.
 
 ## What Was Removed from Upstream (Qrome/marquee-scroller)
 

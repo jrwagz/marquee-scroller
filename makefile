@@ -24,9 +24,8 @@ help:
 	@echo "  lint              - Run lint-markdown + lint-python"
 	@echo "  test-native       - Run native C++ unit tests (no device required)"
 	@echo "  test-scripts      - Run Python tests for scripts/ with 100% coverage check"
-	@echo "  test-server       - Run server Python tests in Docker"
 	@echo "  test-integration  - Run integration tests against a live device (requires HOST=<ip>)"
-	@echo "  test              - Run test-native + test-scripts + test-server"
+	@echo "  test              - Run test-native + test-scripts"
 	@echo "  ready             - Full pipeline"
 
 .passwd:
@@ -108,21 +107,8 @@ test-scripts: .passwd .pytest-image
 			--cov=scripts --cov-report=term-missing --cov-fail-under=90 \
 			--junit-xml=artifacts/test-scripts-results.xml
 
-SERVER_IMAGE:=wagfam-server-test
-
-.PHONY: test-server
-test-server:
-	mkdir -p artifacts
-	docker build -t $(SERVER_IMAGE) server/
-	docker run \
-		--rm $(DOCKER_TTY_ARGS) \
-		-e WAGFAM_WAGFAM_API_KEY=test-key \
-		-v ${PWD}/artifacts:/results \
-		$(SERVER_IMAGE) \
-		python -m pytest tests/ -v --junit-xml=/results/test-server-results.xml
-
 .PHONY: test
-test: test-native test-scripts test-server
+test: test-native test-scripts
 
 .PHONY: test-native
 test-native: .passwd
