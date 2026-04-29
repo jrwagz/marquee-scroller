@@ -35,7 +35,6 @@ help:
 .PHONY: clean-pio
 clean-pio:
 	rm -rf .pio/
-	rm -rf .platformio/
 
 .PHONY: clean-passwd
 clean-passwd:
