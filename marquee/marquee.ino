@@ -72,6 +72,7 @@ void centerPrint(const String &msg, bool extraStuff = false);
 String EncodeUrlSpecialChars(const char *msg);
 void performAutoUpdate(const String &firmwareUrl);
 void checkOtaRollback();
+static void doOtaFlash(const String &firmwareUrl);
 
 void handleUpdateFromUrl(AsyncWebServerRequest *request);
 
@@ -191,6 +192,13 @@ String otaPendingNewUrl = "";   // URL of firmware pending confirmation (becomes
 // flag and return immediately; processEverySecond() picks it up and runs
 // the actual fetch in the main loop.
 volatile bool weatherRefreshRequested = false;
+
+// Deferred OTA-from-URL request. /updateFromUrl validates the URL and sends
+// the response, then sets these. processEverySecond() picks it up and runs
+// the (blocking) flash from the main loop. Same async-handler-cant-block
+// rationale as weatherRefreshRequested.
+volatile bool otaFromUrlRequested = false;
+String pendingOtaUrl = "";
 
 // Security: configurable web password (SEC-05) and CSRF token (SEC-10)
 String webPassword = "";        // Persisted to /conf.txt; generated on first boot if empty
@@ -432,6 +440,22 @@ void processEverySecond() {
       || lastRefreshDataTimestamp == 0) {
     weatherRefreshRequested = false;
     getWeatherData();
+  }
+
+  // Honor a deferred OTA request from /updateFromUrl. Done from the main loop
+  // because doOtaFlash() blocks for 20–30s and would crash the async event loop.
+  if (otaFromUrlRequested && pendingOtaUrl.length() > 0) {
+    String url = pendingOtaUrl;
+    otaFromUrlRequested = false;
+    pendingOtaUrl = "";
+    digitalWrite(externalLight, LOW);
+    matrix.fillScreen(LOW);
+    scrollMessageWait(F("   ...Updating..."));
+    centerPrint(F("..."));
+    Serial.printf_P(PSTR("[OTA] Starting deferred update from URL: %s\n"), url.c_str());
+    doOtaFlash(url);
+    // Only reached on failure — doOtaFlash reboots the device on success.
+    digitalWrite(externalLight, HIGH);
   }
 }
 
@@ -733,20 +757,14 @@ void handleUpdateFromUrl(AsyncWebServerRequest *request) {
     return;
   }
 
-  response->print("<p>STARTING UPDATE from "+firmwareUrl+"</p>");
+  response->print("<p>STARTING UPDATE from "+firmwareUrl+"</p><p>The device will reboot when the update completes.</p>");
   sendFooter(response);
   request->send(response);
 
-  digitalWrite(externalLight, LOW);
-  matrix.fillScreen(LOW);
-  scrollMessageWait("   ...Updating...");
-  centerPrint("...");
-
-  Serial.printf_P(PSTR("[OTA] Starting update from URL: %s\n"), firmwareUrl.c_str());
-  doOtaFlash(firmwareUrl);
-
-  // Only reached on failure
-  digitalWrite(externalLight, HIGH);
+  // Defer the actual flash to the main loop — async handlers can't block on
+  // the 20–30s ESPhttpUpdate.update() call without crashing the event loop.
+  pendingOtaUrl = firmwareUrl;
+  otaFromUrlRequested = true;
 }
 
 // Trigger an OTA update from the given HTTP URL (called from the auto-update path).
