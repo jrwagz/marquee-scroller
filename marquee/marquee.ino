@@ -184,6 +184,14 @@ String OTA_SAFE_URL = "";       // URL of last confirmed firmware; rollback targ
 uint32_t otaConfirmAt = 0;      // non-zero: millis() target after which the pending update is confirmed
 String otaPendingNewUrl = "";   // URL of firmware pending confirmation (becomes OTA_SAFE_URL on confirm)
 
+// Async-handler deferred-work flag. AsyncWebServer handlers run in the TCP
+// event loop and must NOT block — getWeatherData() makes HTTPS calls that
+// can take 10–20s, long enough to trip the soft watchdog and crash the
+// device with an Exception reset. Handlers that want a refresh set this
+// flag and return immediately; processEverySecond() picks it up and runs
+// the actual fetch in the main loop.
+volatile bool weatherRefreshRequested = false;
+
 // Security: configurable web password (SEC-05) and CSRF token (SEC-10)
 String webPassword = "";        // Persisted to /conf.txt; generated on first boot if empty
 String csrfToken = "";          // Random token generated on boot, validated on all form submissions
@@ -417,8 +425,12 @@ void processEverySecond() {
     savePersistentConfig();
   }
 
-  //Get some Weather Data to serve
-  if ((getMinutesFromLastRefresh() >= minutesBetweenDataRefresh) || lastRefreshDataTimestamp == 0) {
+  //Get some Weather Data to serve, or honor a deferred refresh request from
+  //an async HTTP handler (/pull, /api/refresh) that couldn't block the event loop.
+  if (weatherRefreshRequested
+      || (getMinutesFromLastRefresh() >= minutesBetweenDataRefresh)
+      || lastRefreshDataTimestamp == 0) {
+    weatherRefreshRequested = false;
     getWeatherData();
   }
 }
@@ -499,7 +511,10 @@ char secondsIndicator(bool isRefresh) {
 
 void handlePull(AsyncWebServerRequest *request) {
   if (!requireWebAuth(request)) return;
-  getWeatherData(); // this will force a data pull for new weather
+  // Queue refresh for the main loop (async handlers can't block on HTTPS calls
+  // without tripping the watchdog). Home page renders with current data; the
+  // user can reload after ~30s to see the freshly fetched results.
+  weatherRefreshRequested = true;
   displayHomePage(request);
 }
 
@@ -536,7 +551,7 @@ void handleSaveConfig(AsyncWebServerRequest *request) {
   weatherClient.setGeoLocation(geoLocation);
   matrix.fillScreen(LOW); // show black
   savePersistentConfig();
-  getWeatherData(); // this will force a data pull for new weather
+  weatherRefreshRequested = true; // deferred to main loop (see flag comment)
   redirectHome(request);
 }
 
@@ -1490,8 +1505,10 @@ void handleApiRestart(AsyncWebServerRequest *request) {
 void handleApiRefresh(AsyncWebServerRequest *request) {
   if (!requireApiAuth(request)) return;
   if (!requireApiCsrf(request)) return;
-  getWeatherData();
-  sendJsonOk(request, "refresh complete");
+  // Queue work for the main loop — see weatherRefreshRequested comment.
+  // Caller can poll /api/status to see lastRefreshDataTimestamp move.
+  weatherRefreshRequested = true;
+  sendJsonOk(request, "refresh queued");
 }
 
 void handleApiOtaStatus(AsyncWebServerRequest *request) {
