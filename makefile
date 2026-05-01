@@ -150,10 +150,31 @@ build: .passwd
 		pio run -e default
 	@printf '\nBuilt: %s\n\n' "$$(cat artifacts/VERSION.txt)"
 
+.PHONY: buildfs
+buildfs: .passwd
+	mkdir -p $(LOCAL_PIO_CACHE)
+	docker run \
+		--rm $(DOCKER_TTY_ARGS) \
+		-v ${PWD}:${PWD} \
+		-w ${PWD} \
+		-v ${PWD}/.passwd:/etc/passwd:ro \
+		-v $(LOCAL_PIO_CACHE):$(PIO_CACHE) \
+		-u $(shell id -u):$(shell id -g) \
+		$(PIO_IMAGE) \
+		pio run -e default --target buildfs
+
 .PHONY: artifacts
 artifacts:
 	mkdir -p artifacts/
 	cp .pio/build/default/firmware.bin artifacts/firmware.bin
+	@if [ -f .pio/build/default/littlefs.bin ]; then \
+		cp .pio/build/default/littlefs.bin artifacts/littlefs.bin; \
+		echo "Included littlefs.bin ($$(stat -f%z artifacts/littlefs.bin 2>/dev/null || stat -c%s artifacts/littlefs.bin) bytes)"; \
+	fi
+	@if [ -d data/spa ]; then \
+		mkdir -p artifacts/spa && cp -R data/spa/. artifacts/spa/; \
+		echo "Included SPA bundle"; \
+	fi
 
 # webui/ — Preact SPA built with Vite. Output lands in data/spa/ alongside
 # .gz siblings so AsyncWebServer's serveStatic handler can ship gzipped
