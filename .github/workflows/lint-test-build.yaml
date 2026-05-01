@@ -189,19 +189,20 @@ jobs:
         env:
           WAGFAM_API_KEY: ${{ secrets.WAGFAM_API_KEY }}
         run: |
-          echo "Polling /health until server is back up (up to 5 min)..."
+          echo "Polling calendar endpoint until new firmware version is confirmed (up to 5 min)..."
           for i in $(seq 1 30); do
-            STATUS=$(curl -sf \
-                "https://wagfam-server.azurewebsites.net/health" \
-                | jq -r '.status' 2>/dev/null) || STATUS=""
-            if [ "$STATUS" = "ok" ]; then
-              echo "Server is up."
+            REPORTED=$(curl -sf \
+                -H "Authorization: token ${WAGFAM_API_KEY}" \
+                "https://wagfam-server.azurewebsites.net/api/v1/calendar" \
+                | jq -r '.[0].config.latestVersion // ""' 2>/dev/null) || REPORTED=""
+            if [ "$REPORTED" = "${FIRMWARE_VERSION}" ]; then
+              echo "Server is reporting new firmware version ${REPORTED}."
               break
             fi
-            echo "Attempt ${i}/30: got '${STATUS}', retrying in 10s..."
+            echo "Attempt ${i}/30: got '${REPORTED}', retrying in 10s..."
             sleep 10
             if [ "$i" -eq 30 ]; then
-              echo "ERROR: Server did not come back within 300s" >&2
+              echo "ERROR: Server did not report firmware version ${FIRMWARE_VERSION} within 300s" >&2
               exit 1
             fi
           done
