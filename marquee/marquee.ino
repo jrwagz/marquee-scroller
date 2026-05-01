@@ -76,6 +76,7 @@ void checkOtaRollback();
 void handleUpdateFromUrl(AsyncWebServerRequest *request);
 
 // Security helpers
+static bool requestHasValidBasicAuth(AsyncWebServerRequest *request);
 bool requireWebAuth(AsyncWebServerRequest *request);
 static bool requireApiAuth(AsyncWebServerRequest *request);
 static bool requireApiCsrf(AsyncWebServerRequest *request);
@@ -317,11 +318,17 @@ void setup() {
   }
 
   // SEC-01: Firmware upload — manual handler because ESP8266HTTPUpdateServer is
-  // sync-only. Auth-gates via setAuthentication so 401 short-circuits before the
-  // upload body is read. Update.runAsync(true) lets the flash routine cooperate
-  // with the async event loop.
+  // sync-only. Auth check is done manually (via requestHasValidBasicAuth) to
+  // work around the same lib Basic-auth bug that affects request->authenticate().
+  // Upload chunks are silently discarded if auth fails on the first chunk;
+  // the main handler then returns 401 once the body is fully consumed.
+  // Update.runAsync(true) lets the flash routine cooperate with the async event loop.
   server.on("/update", HTTP_POST,
     [](AsyncWebServerRequest *request) {
+      if (!requestHasValidBasicAuth(request)) {
+        request->requestAuthentication("Login Required", false);
+        return;
+      }
       bool ok = !Update.hasError();
       AsyncWebServerResponse *response = request->beginResponse(200, F("text/plain"), ok ? F("OK") : F("FAIL"));
       response->addHeader(F("Connection"), F("close"));
@@ -332,6 +339,7 @@ void setup() {
       }
     },
     [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+      if (!requestHasValidBasicAuth(request)) return; // discard; main handler will issue 401
       if (index == 0) {
         Serial.printf_P(PSTR("[OTA] Upload start: %s\n"), filename.c_str());
         Update.runAsync(true);
@@ -352,7 +360,7 @@ void setup() {
           Update.printError(Serial);
         }
       }
-    }).setAuthentication("admin", webPassword.c_str());
+    });
 
   server.onNotFound(redirectHome);
   // Start the server
@@ -1299,10 +1307,29 @@ void centerPrint(const String &msg, boolean extraStuff) {
 
 // ── Security Helpers ────────────────────────────────────────────────────────
 
+// Manual Basic-auth verifier. Works around a bug in ESPAsyncWebServer-esphome
+// 3.3.0 where `request->authenticate(user, pass)` rejects valid Basic credentials
+// on ESP8266: its checkBasicAuthentication() uses `base64_encode_expected_len(n)`
+// which adds 1 byte to the count to account for a trailing newline that the
+// encoder does NOT emit on inputs short enough to fit on a single base64 line.
+// The length check (`strlen(hash) != encodedLen`) then fails for every real
+// credential. Using base64::encode (ESP8266 core wrapper, doNewLines=false by
+// default) gives us a clean comparable encoding.
+static bool requestHasValidBasicAuth(AsyncWebServerRequest *request) {
+  if (!request->hasHeader("Authorization")) return false;
+  String hdr = request->header("Authorization");
+  if (!hdr.startsWith("Basic ")) return false;
+  String received = hdr.substring(6);
+  received.trim();
+  String expected = base64::encode(String("admin:") + webPassword);
+  return received == expected;
+}
+
 // SEC-04: Require HTTP Basic Auth for all web UI routes
 bool requireWebAuth(AsyncWebServerRequest *request) {
-  if (!request->authenticate("admin", webPassword.c_str())) {
-    request->requestAuthentication();
+  if (!requestHasValidBasicAuth(request)) {
+    // isDigest=false → issue Basic challenge so browsers/curl/scripts use Basic
+    request->requestAuthentication("Login Required", false);
     return false;
   }
   return true;
@@ -1332,7 +1359,7 @@ static void sendJsonError(AsyncWebServerRequest *request, int code, const char *
 
 // SEC-05: Use configurable password for API auth
 static bool requireApiAuth(AsyncWebServerRequest *request) {
-  if (!request->authenticate("admin", webPassword.c_str())) {
+  if (!requestHasValidBasicAuth(request)) {
     sendJsonError(request, 401, "unauthorized");
     return false;
   }

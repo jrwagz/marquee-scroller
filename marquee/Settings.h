@@ -42,6 +42,7 @@ SOFTWARE.
 #include <DNSServer.h>
 #include <ESPAsyncWiFiManager.h> // --> https://github.com/alanswx/ESPAsyncWiFiManager (async-native fork of tzapu/WiFiManager)
 #include <ESP8266httpUpdate.h>
+#include <base64.h> // ESP8266 core's base64 wrapper — used for the manual Basic-auth workaround in marquee.ino
 #include "FS.h"
 #include <SPI.h>
 #include <Adafruit_GFX.h> // --> https://github.com/adafruit/Adafruit-GFX-Library
