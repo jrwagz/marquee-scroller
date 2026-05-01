@@ -147,6 +147,72 @@ jobs:
           publish-profile: ${{ secrets.AZURE_FIRMWARE_PUBLISH_PROFILE }}
           images: docker.io/jrwagz/simple-web-server:${{ env.FIRMWARE_VERSION }}
 
+      - name: Back up wagfam-server before firmware env update
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        id: backup
+        env:
+          WAGFAM_API_KEY: ${{ secrets.WAGFAM_API_KEY }}
+        run: |
+          if curl -sf \
+               -H "Authorization: token ${WAGFAM_API_KEY}" \
+               "https://wagfam-server.azurewebsites.net/api/v1/backup" \
+               -o /tmp/backup.json; then
+            echo "has_backup=true" >> "$GITHUB_OUTPUT"
+            echo "Backup saved ($(wc -c < /tmp/backup.json) bytes)"
+          else
+            echo "has_backup=false" >> "$GITHUB_OUTPUT"
+            echo "No live server reachable — skipping backup"
+          fi
+
+      - name: Login to Azure for wagfam-server update
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_WAGFAM_SERVER_CREDENTIALS }}
+
+      - name: Notify wagfam-server of new firmware version
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            az webapp config appsettings set \
+              --name wagfam-server \
+              --resource-group wagfam-server-group \
+              --settings \
+                WAGFAM_FIRMWARE_VERSION="${{ env.FIRMWARE_VERSION }}" \
+                WAGFAM_FIRMWARE_URL="http://files-jrwagz.azurewebsites.net/marquee-scroller-${{ env.FIRMWARE_VERSION }}.bin"
+
+      - name: Wait for wagfam-server restart and restore backup
+        if: >-
+          github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') &&
+          steps.backup.outputs.has_backup == 'true'
+        env:
+          WAGFAM_API_KEY: ${{ secrets.WAGFAM_API_KEY }}
+        run: |
+          echo "Polling /health until server is back up (up to 5 min)..."
+          for i in $(seq 1 30); do
+            STATUS=$(curl -sf \
+                "https://wagfam-server.azurewebsites.net/health" \
+                | jq -r '.status' 2>/dev/null) || STATUS=""
+            if [ "$STATUS" = "ok" ]; then
+              echo "Server is up."
+              break
+            fi
+            echo "Attempt ${i}/30: got '${STATUS}', retrying in 10s..."
+            sleep 10
+            if [ "$i" -eq 30 ]; then
+              echo "ERROR: Server did not come back within 300s" >&2
+              exit 1
+            fi
+          done
+          echo "Restoring backup..."
+          curl -sf -X POST \
+            -H "Authorization: token ${WAGFAM_API_KEY}" \
+            -H "Content-Type: application/json" \
+            --data-binary @/tmp/backup.json \
+            "https://wagfam-server.azurewebsites.net/api/v1/backup"
+          echo "Restore complete."
+
       - name: Write release summary
         if: github.event_name == 'push' && startsWith( github.ref, 'refs/tags/' )
         run: |
