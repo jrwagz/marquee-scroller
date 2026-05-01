@@ -147,6 +147,24 @@ jobs:
           publish-profile: ${{ secrets.AZURE_FIRMWARE_PUBLISH_PROFILE }}
           images: docker.io/jrwagz/simple-web-server:${{ env.FIRMWARE_VERSION }}
 
+      - name: Login to Azure for wagfam-server update
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_WAGFAM_SERVER_CREDENTIALS }}
+
+      - name: Notify wagfam-server of new firmware version
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            az webapp config appsettings set \
+              --name wagfam-server \
+              --resource-group wagfam-server-group \
+              --settings \
+                WAGFAM_FIRMWARE_VERSION="${{ env.FIRMWARE_VERSION }}" \
+                WAGFAM_FIRMWARE_URL="http://files-jrwagz.azurewebsites.net/marquee-scroller-${{ env.FIRMWARE_VERSION }}.bin"
+
       - name: Write release summary
         if: github.event_name == 'push' && startsWith( github.ref, 'refs/tags/' )
         run: |
