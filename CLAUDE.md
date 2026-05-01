@@ -359,8 +359,8 @@ See `docs/CODE_REVIEW.md` for the full open-issues list. Top items by impact:
 - `isProtectedPath(path)` — prevents API writes/deletes to `/conf.txt` and `/ota_pending.txt`
 - `extractDomain(url)` — parses domain from URLs (handles scheme-less, userinfo, port, query)
 - `isTrustedFirmwareDomain(firmwareUrl, calendarUrl)` — validates OTA firmware URLs against
-  a compile-time domain allowlist (`WAGFAM_TRUSTED_FIRMWARE_DOMAINS` in `Settings.h`) plus the
-  calendar source domain
+  a compile-time domain allowlist (`WAGFAM_TRUSTED_FIRMWARE_DOMAINS` in `Settings.h`, set to
+  `"files-jrwagz.azurewebsites.net"` via `platformio.ini` build flags) plus the calendar source domain
 - `isInTrustedDomainList(domain, list)` — checks domain membership in comma-separated allowlist
 
 These are tested in `tests/native/test_security_helpers/`.
