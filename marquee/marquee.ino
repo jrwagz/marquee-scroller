@@ -200,6 +200,15 @@ volatile bool weatherRefreshRequested = false;
 volatile bool otaFromUrlRequested = false;
 String pendingOtaUrl = "";
 
+// Deferred restart. /api/restart and the /update post-flash path set the
+// flag with a "restart not before" deadline. The main loop pulls the
+// trigger after the deadline, giving the async TCP layer time to flush the
+// response (an in-handler delay() + ESP.restart() can drop the response
+// mid-flight, leaving the client with a recv-failure even though the
+// reboot succeeded).
+volatile bool restartRequested = false;
+volatile uint32_t restartAtMs = 0;
+
 // Security: configurable web password (SEC-05) and CSRF token (SEC-10)
 String webPassword = "";        // Persisted to /conf.txt; generated on first boot if empty
 String csrfToken = "";          // Random token generated on boot, validated on all form submissions
@@ -350,8 +359,10 @@ void setup() {
       response->addHeader(F("Connection"), F("close"));
       request->send(response);
       if (ok) {
-        delay(100);
-        ESP.restart();
+        // Defer restart so the response (and TCP FIN) actually gets to the client
+        // before the network stack tears down.
+        restartAtMs = millis() + 1000;
+        restartRequested = true;
       }
     },
     [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
@@ -440,6 +451,13 @@ void processEverySecond() {
       || lastRefreshDataTimestamp == 0) {
     weatherRefreshRequested = false;
     getWeatherData();
+  }
+
+  // Honor a deferred restart. The deadline gives the async TCP layer time to
+  // flush the response before we tear down the network stack with ESP.restart().
+  if (restartRequested && millis() >= restartAtMs) {
+    Serial.println(F("[loop] Deferred restart firing"));
+    ESP.restart();
   }
 
   // Honor a deferred OTA request from /updateFromUrl. Done from the main loop
@@ -1516,8 +1534,9 @@ void handleApiRestart(AsyncWebServerRequest *request) {
   }
   lastRestartMs = millis();
   sendJsonOk(request, "restarting");
-  delay(500);
-  ESP.restart();
+  // Defer the actual restart so the async TCP layer can transmit the response.
+  restartAtMs = millis() + 1000;
+  restartRequested = true;
 }
 
 void handleApiRefresh(AsyncWebServerRequest *request) {
