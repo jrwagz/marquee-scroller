@@ -82,6 +82,11 @@ bool requireWebAuth(AsyncWebServerRequest *request);
 static bool requireApiAuth(AsyncWebServerRequest *request);
 static bool requireApiCsrf(AsyncWebServerRequest *request);
 
+// JSON response helpers (definitions live with the REST API section)
+static void sendJsonResponse(AsyncWebServerRequest *request, int code, JsonDocument &doc);
+static void sendJsonOk(AsyncWebServerRequest *request, const char *message = "ok");
+static void sendJsonError(AsyncWebServerRequest *request, int code, const char *message);
+
 // REST API handlers
 void handleApiStatus(AsyncWebServerRequest *request);
 void handleApiConfigGet(AsyncWebServerRequest *request);
@@ -325,6 +330,48 @@ void setup() {
   server.on("/api/fs/read", HTTP_GET, handleApiFsRead);
   server.on("/api/fs/delete", HTTP_DELETE, handleApiFsDelete);
   server.on("/api/fs/list", HTTP_GET, handleApiFsList);
+
+  // /api/fs/upload — multipart binary upload, streams chunks to LittleFS via
+  // the upload callback. Used by scripts/deploy_webui.py (and any future tool
+  // that wants to push raw bytes — gzipped SPA assets, certs, etc.) without
+  // serial-flashing the whole partition. Auth + CSRF gated, path-validated.
+  // Pass target path as ?path=/foo query arg. Body is multipart/form-data
+  // with one file part; the part name doesn't matter (we don't read it).
+  server.on("/api/fs/upload", HTTP_POST,
+    // Final response handler — runs after the multipart body is fully consumed.
+    [](AsyncWebServerRequest *request) {
+      if (!requireApiAuth(request)) return;
+      if (!requireApiCsrf(request)) return;
+      if (!request->_tempFile) {
+        sendJsonError(request, 400, "upload failed (missing/invalid path or open failed)");
+        return;
+      }
+      JsonDocument doc;
+      doc["status"] = "uploaded";
+      doc["path"] = request->arg("path");
+      doc["size"] = (uint32_t)request->_tempFile.size();
+      sendJsonResponse(request, 200, doc);
+      // request destructor closes _tempFile after the response is sent.
+    },
+    // Upload chunk handler — runs once per chunk during body parse.
+    [](AsyncWebServerRequest *request, String /*filename*/, size_t index, uint8_t *data, size_t len, bool /*final*/) {
+      if (index == 0) {
+        // Validate auth + CSRF + path before opening the file. If any check
+        // fails we leave _tempFile closed; subsequent chunks no-op and the
+        // main handler issues 401/403/400 as appropriate.
+        if (!requestHasValidBasicAuth(request)) return;
+        if (!request->hasHeader("X-Requested-With")) return;
+        String path = request->arg("path");
+        if (!isValidUploadPath(path.c_str(), CONFIG, OTA_PENDING_FILE)) return;
+        request->_tempFile = SPIFFS.open(path, "w");
+      }
+      if (request->_tempFile && len > 0) {
+        if (request->_tempFile.write(data, len) != len) {
+          // Write failed (FS full?). Close to mark failure for the main handler.
+          request->_tempFile.close();
+        }
+      }
+    });
 
   // JSON-body POST endpoints. AsyncWebServer doesn't populate request->arg("plain")
   // for JSON bodies, so these go through AsyncCallbackJsonWebHandler which parses
@@ -1396,7 +1443,7 @@ static void sendJsonResponse(AsyncWebServerRequest *request, int code, JsonDocum
   request->send(response);
 }
 
-static void sendJsonOk(AsyncWebServerRequest *request, const char *message = "ok") {
+static void sendJsonOk(AsyncWebServerRequest *request, const char *message) {
   JsonDocument doc;
   doc["status"] = message;
   sendJsonResponse(request, 200, doc);
