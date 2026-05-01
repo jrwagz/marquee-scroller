@@ -36,10 +36,12 @@ SOFTWARE.
  ******************************************************************************/
 
 #include <ESP8266WiFi.h>
-#include <ESP8266WebServer.h>
-#include <ESP8266HTTPUpdateServer.h>
+#include <ESPAsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+#include <AsyncJson.h>
+#include <DNSServer.h>
+#include <ESPAsyncWiFiManager.h> // --> https://github.com/alanswx/ESPAsyncWiFiManager (async-native fork of tzapu/WiFiManager)
 #include <ESP8266httpUpdate.h>
-#include <WiFiManager.h> // --> https://github.com/tzapu/WiFiManager
 #include "FS.h"
 #include <SPI.h>
 #include <Adafruit_GFX.h> // --> https://github.com/adafruit/Adafruit-GFX-Library

@@ -37,8 +37,12 @@ Local library copies (not managed by PlatformIO) are in [lib/](lib/):
 
 ## Main Loop Logic
 
-- **Every frame**: When dirty or event-day border is active, clear display and call `centerPrint(displayTime, true)`;
-  service `server.handleClient()`
+The web server is `AsyncWebServer` (ESPAsyncWebServer-esphome), which handles HTTP requests
+in the background via TCP callbacks — **the main loop never calls `handleClient()`**. The
+captive portal during AP mode is handled by `ESPAsyncWiFiManager` sharing the same server
+instance.
+
+- **Every frame**: When dirty or event-day border is active, clear display and call `centerPrint(displayTime, true)`
 - **Every second** (`processEverySecond`): Fires OTA confirmation check; calls `getWeatherData()` if
   `minutesBetweenDataRefresh` has elapsed
 - **Every minute** (`processEveryMinute`): Scroll the marquee message (weather data + next calendar message from
@@ -46,29 +50,31 @@ Local library copies (not managed by PlatformIO) are in [lib/](lib/):
 
 ### Key Line Numbers in `marquee.ino`
 
+These are approximate — search for the symbol if the line is off by a few. The file is ~1600 lines.
+
 | Function | Line |
 | --- | --- |
-| Global variables (settings) | 95–189 |
-| PROGMEM HTML constants | 133–179 |
+| Global variables (settings) | ~95–189 |
+| PROGMEM HTML constants | ~133–179 |
 | `setup()` | 194 |
-| `loop()` | 327 |
-| `processEverySecond()` | 353 |
-| `processEveryMinute()` | 370 |
-| `handleSaveConfig()` | 450 |
-| `handleConfigure()` | 506 |
-| `doOtaFlash()` | 619 |
-| `handleUpdateFromUrl()` | 635 |
-| `performAutoUpdate()` | 690 |
-| `checkOtaRollback()` | 706 |
-| `getWeatherData()` | 760 |
-| `sendHeader()` / `sendFooter()` | 886 / 916 |
-| `displayHomePage()` | 930 |
-| `savePersistentConfig()` | 1067 |
-| `readPersistentConfig()` | 1108 |
-| `scrollMessageWait()` | 1202 |
-| `centerPrint()` | 1226 |
-| Security helpers (`requireWebAuth`, etc.) | 1266 |
-| REST API handlers | 1275–1546 |
+| `loop()` | 375 |
+| `processEverySecond()` | 401 |
+| `processEveryMinute()` | 418 |
+| `handleSaveConfig()` | 498 |
+| `handleConfigure()` | 553 |
+| `doOtaFlash()` | 663 |
+| `handleUpdateFromUrl()` | 679 |
+| `performAutoUpdate()` | 732 |
+| `checkOtaRollback()` | 748 |
+| `getWeatherData()` | 802 |
+| `sendHeader()` / `sendFooter()` | 927 / 957 |
+| `displayHomePage()` | 971 |
+| `savePersistentConfig()` | 1105 |
+| `readPersistentConfig()` | 1146 |
+| `scrollMessageWait()` | 1240 |
+| `centerPrint()` | 1263 |
+| Security helpers (`requireWebAuth`, etc.) | 1303 |
+| REST API handlers | ~1351–1583 |
 
 ## Configuration Storage
 
@@ -85,9 +91,9 @@ JSON response and persisted across reboots via `/conf.txt`.
 
 1. Declare a global variable in `marquee.ino` (near line 95)
 2. Add `f.println("KEY=" + String(value))` in `savePersistentConfig()` (~line 1067)
-3. Add an `if (line.indexOf("KEY=") >= 0)` block in `readPersistentConfig()` (~line 1108)
+3. Add an `if (line.indexOf("KEY=") >= 0)` block in `readPersistentConfig()` (~line 1146)
 4. Add a form field in one of the `CHANGE_FORM*` PROGMEM constants (~line 142)
-5. Read from `server.arg("fieldName")` in `handleSaveConfig()` (~line 450)
+5. Read from `request->arg("fieldName")` in `handleSaveConfig()` (~line 498)
 
 ## Development Practices
 
@@ -136,22 +142,21 @@ returned racy results when the target file was being updated. Re-verify
 out-of-band if you change the heartbeat parameter set or move to a different
 static-JSON host — don't add it back to the suite.
 
-**`gh` CLI: this repo is a fork — always pass `--repo` and `--head` explicitly.**
-This repo is `dallanwagz/marquee-scroller` (a fork of `jrwagz/marquee-scroller`).
-Bare `gh pr create` and `gh repo view` resolve to the upstream parent (`jrwagz/...`)
-because that's the fork's parent — they do **not** target the fork. The error
-when this misfires is a confusing `"Head sha can't be blank, Base sha can't be
-blank, No commits between <base> and <head>, Head ref must be a branch, Base
-ref must be a branch (createPullRequest)"` that doesn't mention forks at all.
-Templates that always work:
+**`gh` CLI: branches and PRs live directly on `jrwagz/marquee-scroller`.**
+As of 2026-05-01, the upstream maintainer (jrwagz) granted direct push access,
+so feature branches go to `upstream` rather than the `dallanwagz` fork. PRs are
+repo-internal — no cross-fork `--head` form needed.
 
-- For an upstream PR (the common case):
-  `gh pr create --repo jrwagz/marquee-scroller --head dallanwagz:<branch> -B master ...`
-- For a fork-internal PR (rare, but used when iterating before going upstream):
-  `gh pr create --repo dallanwagz/marquee-scroller -B <branch> -H <branch> ...`
+Templates:
 
-The same `--repo` rule applies to `gh pr view`, `gh pr comment`, `gh issue`, and
-`gh api repos/...` — use the explicit owner/name form, not the inferred default.
+- Push a branch: `git push -u upstream <branch>` (NOT `origin`).
+- Open a PR: `gh pr create --repo jrwagz/marquee-scroller -B master -H <branch> ...`
+
+Bare `gh pr create` and `gh repo view` still resolve to `jrwagz/...` (the fork's
+parent) because the fork is set up that way — that's now the *correct* default,
+but be explicit anyway with `--repo jrwagz/marquee-scroller` so a future
+`origin`-pointing fork doesn't silently misroute. The same `--repo` rule applies
+to `gh pr view`, `gh pr comment`, `gh issue`, and `gh api repos/...`.
 
 **GitHub Actions: PRs from forks get a read-only `GITHUB_TOKEN` regardless of
 `permissions:` declarations.** A `permissions: packages: write` block in a
@@ -321,8 +326,10 @@ with the current safe URL. If the device reboots twice without confirming (5 min
 
 See the [REST API section in README.md](README.md#rest-api) for the full endpoint table and
 curl examples. All endpoints live under `/api/`, require HTTP Basic Auth, and return JSON.
-Handlers are registered in `setup()` starting at line 296 of `marquee.ino`, with
-implementations at lines 1275–1546.
+Handlers are registered in `setup()` starting at ~line 284 of `marquee.ino`, with
+implementations at ~lines 1351–1583. JSON-body POST endpoints (`/api/config`, `/api/fs/write`)
+are wired through `AsyncCallbackJsonWebHandler` because `AsyncWebServer` does not populate
+`request->arg("plain")` — see the registrations at ~lines 304–316.
 
 ## Key Constraints
 
@@ -335,8 +342,12 @@ implementations at lines 1275–1546.
   `DynamicJsonDocument` / `StaticJsonDocument` code; use `JsonDocument` instead
 - All `String` operations are expensive — prefer `reserve()` before building strings, avoid repeated `+=`
   in tight loops, and never allocate large `String` arrays on the stack
-- `scrollMessageWait()` is blocking but calls `server.handleClient()` each pixel step — web requests
-  during scrolling are handled mid-scroll
+- `scrollMessageWait()` is blocking on the main task but does NOT need to pump the web server —
+  `AsyncWebServer` runs in the background via TCP callbacks. The `delay(displayScrollSpeed)` between
+  pixel steps yields to the system, which is enough for async TCP to make progress
+- The web server is `AsyncWebServer`; the captive portal uses `ESPAsyncWiFiManager` sharing the same
+  server instance. Do NOT include `<ESP8266WebServer.h>` or `<WiFiManager.h>` (tzapu) — their `HTTP_GET`
+  enum constants collide with the async equivalents at link time
 - `getWeatherData()` is the single orchestration point for both weather AND calendar data refresh — they
   always refresh together; it also triggers auto-OTA if `latestVersion` differs from `VERSION`
 - `firmwareUrl` in the calendar config JSON must use `http://` — HTTPS is not supported by ESPhttpUpdate

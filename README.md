@@ -55,7 +55,9 @@ Flash size must be set to **4MB (FS:1MB OTA:~1019KB)** — the filesystem is req
 
 Required libraries (install via Library Manager or download manually):
 
-- [WiFiManager](https://github.com/tzapu/WiFiManager) ≥ 2.0.17
+- [ESPAsyncWiFiManager](https://github.com/alanswx/ESPAsyncWiFiManager) ≥ 0.31.0
+- [ESPAsyncWebServer (esphome fork)](https://github.com/esphome/ESPAsyncWebServer) ≥ 3.3.0
+- [ESPAsyncTCP (esphome fork)](https://github.com/esphome/ESPAsyncTCP) ≥ 2.0.0
 - [Adafruit GFX Library](https://github.com/adafruit/Adafruit-GFX-Library) ≥ 1.12
 - [Time](https://github.com/PaulStoffregen/Time) ≥ 1.6
 - [ArduinoJson](https://github.com/bblanchon/ArduinoJson) ^7.4
