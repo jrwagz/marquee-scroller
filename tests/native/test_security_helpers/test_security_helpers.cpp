@@ -32,6 +32,88 @@ void test_protected_path_rejects_prefix() {
     TEST_ASSERT_FALSE(isProtectedPath("/conf", "/conf.txt", "/ota_pending.txt"));
 }
 
+// ── isValidUploadPath ────────────────────────────────────────────────────────
+
+void test_upload_path_accepts_simple() {
+    TEST_ASSERT_TRUE(isValidUploadPath("/spa/index.html", "/conf.txt", "/ota_pending.txt"));
+}
+
+void test_upload_path_accepts_nested() {
+    TEST_ASSERT_TRUE(isValidUploadPath("/spa/assets/index.js.gz", "/conf.txt", "/ota_pending.txt"));
+}
+
+void test_upload_path_accepts_root_file() {
+    TEST_ASSERT_TRUE(isValidUploadPath("/foo.txt", "/conf.txt", "/ota_pending.txt"));
+}
+
+void test_upload_path_rejects_null() {
+    TEST_ASSERT_FALSE(isValidUploadPath(nullptr, "/conf.txt", "/ota_pending.txt"));
+}
+
+void test_upload_path_rejects_empty() {
+    TEST_ASSERT_FALSE(isValidUploadPath("", "/conf.txt", "/ota_pending.txt"));
+}
+
+void test_upload_path_rejects_no_leading_slash() {
+    TEST_ASSERT_FALSE(isValidUploadPath("foo.txt", "/conf.txt", "/ota_pending.txt"));
+}
+
+void test_upload_path_rejects_trailing_slash() {
+    TEST_ASSERT_FALSE(isValidUploadPath("/spa/", "/conf.txt", "/ota_pending.txt"));
+}
+
+void test_upload_path_rejects_traversal_at_start() {
+    TEST_ASSERT_FALSE(isValidUploadPath("/../etc/passwd", "/conf.txt", "/ota_pending.txt"));
+}
+
+void test_upload_path_rejects_traversal_in_middle() {
+    TEST_ASSERT_FALSE(isValidUploadPath("/spa/../conf.txt", "/conf.txt", "/ota_pending.txt"));
+}
+
+void test_upload_path_rejects_traversal_at_end() {
+    TEST_ASSERT_FALSE(isValidUploadPath("/spa/..", "/conf.txt", "/ota_pending.txt"));
+}
+
+void test_upload_path_accepts_double_dot_in_filename() {
+    // "..bar" or "foo..bar" is not a traversal — only segment "/.." is.
+    TEST_ASSERT_TRUE(isValidUploadPath("/foo..bar", "/conf.txt", "/ota_pending.txt"));
+    TEST_ASSERT_TRUE(isValidUploadPath("/spa/..hidden", "/conf.txt", "/ota_pending.txt"));
+}
+
+void test_upload_path_rejects_double_slash() {
+    TEST_ASSERT_FALSE(isValidUploadPath("/spa//index.html", "/conf.txt", "/ota_pending.txt"));
+}
+
+void test_upload_path_rejects_backslash() {
+    TEST_ASSERT_FALSE(isValidUploadPath("/spa\\index.html", "/conf.txt", "/ota_pending.txt"));
+}
+
+void test_upload_path_rejects_protected_config() {
+    TEST_ASSERT_FALSE(isValidUploadPath("/conf.txt", "/conf.txt", "/ota_pending.txt"));
+}
+
+void test_upload_path_rejects_protected_ota() {
+    TEST_ASSERT_FALSE(isValidUploadPath("/ota_pending.txt", "/conf.txt", "/ota_pending.txt"));
+}
+
+void test_upload_path_rejects_too_long() {
+    // 128 chars including leading slash — too long.
+    char buf[130];
+    buf[0] = '/';
+    for (int i = 1; i < 128; i++) buf[i] = 'a';
+    buf[128] = '\0';
+    TEST_ASSERT_FALSE(isValidUploadPath(buf, "/conf.txt", "/ota_pending.txt"));
+}
+
+void test_upload_path_accepts_at_length_limit() {
+    // 127 chars total — accepted.
+    char buf[130];
+    buf[0] = '/';
+    for (int i = 1; i < 127; i++) buf[i] = 'a';
+    buf[127] = '\0';
+    TEST_ASSERT_TRUE(isValidUploadPath(buf, "/conf.txt", "/ota_pending.txt"));
+}
+
 // ── extractDomain ────────────────────────────────────────────────────────────
 
 void test_extract_domain_https() {
@@ -249,6 +331,24 @@ int main() {
     RUN_TEST(test_protected_path_rejects_empty);
     RUN_TEST(test_protected_path_rejects_substring);
     RUN_TEST(test_protected_path_rejects_prefix);
+
+    RUN_TEST(test_upload_path_accepts_simple);
+    RUN_TEST(test_upload_path_accepts_nested);
+    RUN_TEST(test_upload_path_accepts_root_file);
+    RUN_TEST(test_upload_path_rejects_null);
+    RUN_TEST(test_upload_path_rejects_empty);
+    RUN_TEST(test_upload_path_rejects_no_leading_slash);
+    RUN_TEST(test_upload_path_rejects_trailing_slash);
+    RUN_TEST(test_upload_path_rejects_traversal_at_start);
+    RUN_TEST(test_upload_path_rejects_traversal_in_middle);
+    RUN_TEST(test_upload_path_rejects_traversal_at_end);
+    RUN_TEST(test_upload_path_accepts_double_dot_in_filename);
+    RUN_TEST(test_upload_path_rejects_double_slash);
+    RUN_TEST(test_upload_path_rejects_backslash);
+    RUN_TEST(test_upload_path_rejects_protected_config);
+    RUN_TEST(test_upload_path_rejects_protected_ota);
+    RUN_TEST(test_upload_path_rejects_too_long);
+    RUN_TEST(test_upload_path_accepts_at_length_limit);
 
     RUN_TEST(test_extract_domain_https);
     RUN_TEST(test_extract_domain_http);

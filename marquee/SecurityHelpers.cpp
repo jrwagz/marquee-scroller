@@ -6,6 +6,33 @@ bool isProtectedPath(const char *path, const char *configPath, const char *otaPe
       || strcmp(path, otaPendingPath) == 0;
 }
 
+// SEC-06b: Validate a path for /api/fs/upload and /api/fs/write. See header
+// for the policy. Returns false on any reject case so callers can issue
+// 400 / 403.
+bool isValidUploadPath(const char *path, const char *configPath, const char *otaPendingPath) {
+  if (path == nullptr) return false;
+  size_t len = strlen(path);
+  if (len == 0 || len > 127) return false;
+  if (path[0] != '/') return false;
+  if (path[len - 1] == '/') return false;             // no directories
+
+  for (size_t i = 0; i < len; i++) {
+    char c = path[i];
+    if (c == '\0' || c == '\\') return false;          // null / backslash
+    if (c == '/' && i + 1 < len && path[i + 1] == '/') return false; // "//"
+    // ".." traversal segment: "/.." or trailing "/.." or "/../"
+    if (c == '/' && i + 2 < len && path[i + 1] == '.' && path[i + 2] == '.'
+        && (i + 3 == len || path[i + 3] == '/')) {
+      return false;
+    }
+  }
+
+  // Final guard: don't let upload clobber the protected files.
+  if (isProtectedPath(path, configPath, otaPendingPath)) return false;
+
+  return true;
+}
+
 // SEC-12/SEC-03: Extract domain from a URL for validation.
 // Accepts URLs with or without a scheme:
 //   "https://example.com/path"   -> "example.com"
