@@ -5,7 +5,7 @@ else
 DOCKER_TTY_ARGS=
 endif
 
-MD_FILES:=$(shell find . -name "*.md" -not -path "./.venv/*" -not -path "*/.venv/*" -not -path "./.pytest_cache/*" -not -path "*/.pytest_cache/*" -not -path "./lib/*" -not -path "./.pio/*" -not -path "./.platformio/*")
+MD_FILES:=$(shell find . -name "*.md" -not -path "./.venv/*" -not -path "*/.venv/*" -not -path "./.pytest_cache/*" -not -path "*/.pytest_cache/*" -not -path "./lib/*" -not -path "./.pio/*" -not -path "./.platformio/*" -not -path "*/node_modules/*")
 
 MARKDOWNLINT_IMAGE:=davidanson/markdownlint-cli2:v0.22.0
 PIO_IMAGE:=ghcr.io/jrwagz/pio-image:v6.1.19
@@ -155,6 +155,9 @@ buildfs: .passwd
 	mkdir -p $(LOCAL_PIO_CACHE)
 	docker run \
 		--rm $(DOCKER_TTY_ARGS) \
+		-e CI \
+		-e USER \
+		-e GIT_HASH=$(shell git rev-parse --short HEAD 2>/dev/null || echo unknown) \
 		-v ${PWD}:${PWD} \
 		-w ${PWD} \
 		-v ${PWD}/.passwd:/etc/passwd:ro \
