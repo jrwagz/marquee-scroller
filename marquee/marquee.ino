@@ -248,7 +248,16 @@ int externalLight = LED_BUILTIN; // LED_BUILTIN is is the built in LED on the We
 
 void setup() {
   Serial.begin(115200);
-  SPIFFS.begin();
+  // Use LittleFS directly (not SPIFFS — they are separate objects; SPIFFS
+  // refers to the old SPIFFS format and would silently wipe a valid LittleFS
+  // partition on mount failure). Disable autoFormat so a freshly-flashed
+  // littlefs.bin is never wiped; format explicitly only on blank/corrupt flash.
+  LittleFS.setConfig(LittleFSConfig(false));
+  if (!LittleFS.begin()) {
+    Serial.println(F("[FS] mount failed - formatting (blank or corrupt flash)"));
+    LittleFS.format();
+    LittleFS.begin();
+  }
   delay(10);
 
   // Initialize digital pin for LED
@@ -452,7 +461,7 @@ void setup() {
   // filesystem partition instead of the sketch partition. Same auth +
   // deferred-restart pattern. The FS is ended before the flash starts because
   // the Update lib writes raw bytes to the partition; on success the device
-  // reboots and remounts the new FS in setup(). On failure SPIFFS.begin() is
+  // reboots and remounts the new FS in setup(). On failure LittleFS.begin() is
   // called to remount the (still-old) FS so the device stays usable.
   server.on("/updatefs", HTTP_POST,
     [](AsyncWebServerRequest *request) {
@@ -470,7 +479,7 @@ void setup() {
         restartRequested = true;
       } else {
         // Re-mount the (still-old) FS so subsequent reads of /conf.txt etc. work.
-        SPIFFS.begin();
+        LittleFS.begin();
       }
     },
     [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
@@ -478,13 +487,13 @@ void setup() {
       if (index == 0) {
         Serial.printf_P(PSTR("[OTAFS] Upload start: %s\n"), filename.c_str());
         // Unmount before writing raw bytes to the partition.
-        SPIFFS.end();
+        LittleFS.end();
         Update.runAsync(true);
         uint32_t fsSize = (uint32_t)((size_t)&_FS_end - (size_t)&_FS_start);
         if (!Update.begin(fsSize, U_FS)) {
           Update.printError(Serial);
           // begin() failed — try to remount so the device isn't stranded.
-          SPIFFS.begin();
+          LittleFS.begin();
         }
       }
       if (!Update.hasError()) {
@@ -507,7 +516,7 @@ void setup() {
   // No auth on the static assets themselves; sensitive operations live in
   // /api/* which is auth-gated. Cache for 10 min — short enough that a UI
   // bugfix lands within a reasonable window after reflashing the FS.
-  server.serveStatic("/spa", SPIFFS, "/spa/")
+  server.serveStatic("/spa", LittleFS, "/spa/")
     .setDefaultFile("index.html")
     .setCacheControl("public, max-age=600");
 
@@ -564,7 +573,7 @@ void processEverySecond() {
   // Confirm a pending OTA update after stable uptime
   if (otaConfirmAt != 0 && millis() >= otaConfirmAt) {
     Serial.println(F("[OTA] Update confirmed stable"));
-    SPIFFS.remove(OTA_PENDING_FILE);
+    LittleFS.remove(OTA_PENDING_FILE);
     OTA_SAFE_URL = otaPendingNewUrl;
     otaConfirmAt = 0;
     otaPendingNewUrl = "";
@@ -727,7 +736,7 @@ void handleSaveConfig(AsyncWebServerRequest *request) {
 void handleSystemReset(AsyncWebServerRequest *request) {
   if (!requireWebAuth(request)) return;
   Serial.println("Reset System Configuration");
-  if (SPIFFS.remove(CONFIG)) {
+  if (LittleFS.remove(CONFIG)) {
     redirectHome(request);
     ESP.restart();
   }
@@ -853,7 +862,7 @@ void handleConfigure(AsyncWebServerRequest *request) {
 // Writes a rollback record to LittleFS, calls ESPhttpUpdate, then cleans up on failure.
 // Never returns on success — the device reboots automatically after a successful flash.
 static void doOtaFlash(const String &firmwareUrl) {
-  File f = SPIFFS.open(OTA_PENDING_FILE, "w");
+  File f = LittleFS.open(OTA_PENDING_FILE, "w");
   f.println("safeUrl=" + OTA_SAFE_URL);
   f.println("newUrl=" + firmwareUrl);
   f.println("boots=0");
@@ -863,7 +872,7 @@ static void doOtaFlash(const String &firmwareUrl) {
   t_httpUpdate_return ret = ESPhttpUpdate.update(client, firmwareUrl);
 
   // Only reached on failure — remove pending record so next boot is clean
-  SPIFFS.remove(OTA_PENDING_FILE);
+  LittleFS.remove(OTA_PENDING_FILE);
   Serial.printf_P(PSTR("[OTA] Flash failed (code %d): %s\n"),
     ret, ESPhttpUpdate.getLastErrorString().c_str());
 }
@@ -932,13 +941,13 @@ void performAutoUpdate(const String &firmwareUrl) {
 // If a previous OTA update did not complete its 5-minute confirmation window,
 // this function detects the crash loop and re-flashes the last known-good firmware.
 void checkOtaRollback() {
-  if (!SPIFFS.exists(OTA_PENDING_FILE)) return;
+  if (!LittleFS.exists(OTA_PENDING_FILE)) return;
 
   String safeUrl = "";
   String newUrl = "";
   int boots = 0;
 
-  File f = SPIFFS.open(OTA_PENDING_FILE, "r");
+  File f = LittleFS.open(OTA_PENDING_FILE, "r");
   while (f.available()) {
     String line = f.readStringUntil('\n');
     line.trim();
@@ -956,7 +965,7 @@ void checkOtaRollback() {
 
   if (boots >= 2) {
     // Two unconfirmed boots — assume crash loop; roll back to safe firmware
-    SPIFFS.remove(OTA_PENDING_FILE);
+    LittleFS.remove(OTA_PENDING_FILE);
     if (safeUrl != "" && safeUrl.startsWith("http://")) {
       Serial.println("[OTA] Crash-loop detected — rolling back to: " + safeUrl);
       matrix.fillScreen(LOW);
@@ -973,7 +982,7 @@ void checkOtaRollback() {
   }
 
   // First boot after an update — record it and start the confirmation timer
-  File fw = SPIFFS.open(OTA_PENDING_FILE, "w");
+  File fw = LittleFS.open(OTA_PENDING_FILE, "w");
   fw.println("safeUrl=" + safeUrl);
   fw.println("newUrl=" + newUrl);
   fw.println("boots=" + String(boots));
@@ -1330,8 +1339,8 @@ int getMinutesFromLastRefresh() {
 }
 
 void savePersistentConfig() {
-  // Save decoded message to SPIFFS file for playback on power up.
-  File f = SPIFFS.open(CONFIG, "w");
+  // Save config to LittleFS for playback on power up.
+  File f = LittleFS.open(CONFIG, "w");
   if (!f) {
     Serial.println("File open failed!");
   } else {
@@ -1371,12 +1380,12 @@ void savePersistentConfig() {
 }
 
 void readPersistentConfig() {
-  if (SPIFFS.exists(CONFIG) == false) {
+  if (LittleFS.exists(CONFIG) == false) {
     Serial.println("Settings File does not yet exists.");
     savePersistentConfig();
     return;
   }
-  File fr = SPIFFS.open(CONFIG, "r");
+  File fr = LittleFS.open(CONFIG, "r");
   while (fr.available()) {
     String line = fr.readStringUntil('\n');
     line.trim(); // strip \r and leading/trailing whitespace
@@ -1619,7 +1628,7 @@ void handleApiStatus(AsyncWebServerRequest *request) {
   ota["confirm_at"] = otaConfirmAt;
   ota["pending_url"] = otaPendingNewUrl;
   ota["safe_url"] = OTA_SAFE_URL;
-  ota["pending_file_exists"] = SPIFFS.exists(OTA_PENDING_FILE);
+  ota["pending_file_exists"] = LittleFS.exists(OTA_PENDING_FILE);
 
   sendJsonResponse(request, 200, doc);
 }
@@ -1720,13 +1729,13 @@ void handleApiOtaStatus(AsyncWebServerRequest *request) {
   if (!requireApiAuth(request)) return;
 
   JsonDocument doc;
-  doc["pending_file_exists"] = SPIFFS.exists(OTA_PENDING_FILE);
+  doc["pending_file_exists"] = LittleFS.exists(OTA_PENDING_FILE);
   doc["confirm_at"] = otaConfirmAt;
   doc["pending_url"] = otaPendingNewUrl;
   doc["safe_url"] = OTA_SAFE_URL;
 
-  if (SPIFFS.exists(OTA_PENDING_FILE)) {
-    File f = SPIFFS.open(OTA_PENDING_FILE, "r");
+  if (LittleFS.exists(OTA_PENDING_FILE)) {
+    File f = LittleFS.open(OTA_PENDING_FILE, "r");
     JsonObject file = doc["file_contents"].to<JsonObject>();
     while (f.available()) {
       String line = f.readStringUntil('\n');
@@ -1746,9 +1755,9 @@ void handleApiFsRead(AsyncWebServerRequest *request) {
 
   String path = request->arg("path");
   if (path == "") { sendJsonError(request, 400, "missing 'path' parameter"); return; }
-  if (!SPIFFS.exists(path)) { sendJsonError(request, 404, "file not found"); return; }
+  if (!LittleFS.exists(path)) { sendJsonError(request, 404, "file not found"); return; }
 
-  File f = SPIFFS.open(path, "r");
+  File f = LittleFS.open(path, "r");
   if (f.size() > 4096) {
     f.close();
     sendJsonError(request, 413, "file too large (max 4KB)");
@@ -1780,7 +1789,7 @@ void handleApiFsWrite(AsyncWebServerRequest *request, JsonVariant &json) {
     return;
   }
 
-  File f = SPIFFS.open(path, "w");
+  File f = LittleFS.open(path, "w");
   if (!f) { sendJsonError(request, 500, "failed to open file for writing"); return; }
   f.print(content);
   f.close();
@@ -1798,7 +1807,7 @@ void handleApiFsDelete(AsyncWebServerRequest *request) {
 
   String path = request->arg("path");
   if (path == "") { sendJsonError(request, 400, "missing 'path' parameter"); return; }
-  if (!SPIFFS.exists(path)) { sendJsonError(request, 404, "file not found"); return; }
+  if (!LittleFS.exists(path)) { sendJsonError(request, 404, "file not found"); return; }
 
   // SEC-06: Block deletion of critical system files
   if (isProtectedPath(path.c_str(), CONFIG, OTA_PENDING_FILE)) {
@@ -1806,7 +1815,7 @@ void handleApiFsDelete(AsyncWebServerRequest *request) {
     return;
   }
 
-  SPIFFS.remove(path);
+  LittleFS.remove(path);
   sendJsonOk(request, "deleted");
 }
 
@@ -1816,7 +1825,7 @@ void handleApiFsList(AsyncWebServerRequest *request) {
   JsonDocument doc;
   JsonArray files = doc["files"].to<JsonArray>();
 
-  Dir dir = SPIFFS.openDir("/");
+  Dir dir = LittleFS.openDir("/");
   while (dir.next()) {
     JsonObject entry = files.add<JsonObject>();
     entry["name"] = dir.fileName();
