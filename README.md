@@ -123,8 +123,10 @@ The calendar client fetches a JSON array from the configured URL (HTTPS supporte
 ### Device Heartbeat
 
 Each calendar fetch includes device telemetry as URL query parameters (`chip_id`, `version`,
-`uptime`, `heap`, `rssi`, and `timezone` when configured). A backend can use these to identify
-and monitor all deployed clocks. Static JSON hosts ignore the query params.
+`uptime`, `heap`, `rssi`, and `utc_offset_sec`). The UTC offset in seconds is derived
+automatically from the OpenWeatherMap response — no extra configuration needed. A backend
+can use these to identify and monitor all deployed clocks. Static JSON hosts ignore the query
+params.
 
 ### Geo Location
 

@@ -308,18 +308,21 @@ Expected JSON format:
 Each calendar fetch includes device telemetry as query parameters:
 
 ```text
-GET /data_source.json?chip_id=5fc8ad&version=3.08.0-wagfam&uptime=1234567&heap=32496&rssi=-62&timezone=America/Chicago
+GET /data_source.json?chip_id=5fc8ad&version=3.08.0-wagfam&uptime=1234567&heap=32496&rssi=-62&utc_offset_sec=-21600
 ```
 
-The `timezone` param (IANA name, e.g. `America/Chicago`) is omitted when the setting is blank.
-The wagfam server uses it to compute the client's local "today" so event ordering is correct
-for the clock's location (see [wagfam-server PR #16](https://github.com/jrwagz/wagfam-server/pull/16)).
+The `utc_offset_sec` param is the UTC offset in seconds derived from the OWM weather response
+(e.g. `-21600` for UTC-6 / Central Standard Time). It is always included; when OWM has not yet
+returned data, it defaults to 0 (UTC). The wagfam server uses it to compute the client's local
+"today" so event ordering is correct for the clock's location
+(see [wagfam-server PR #16](https://github.com/jrwagz/wagfam-server/pull/16)).
 
 This lets a backend identify and monitor all deployed clocks without any additional
 connections. Static JSON hosts ignore the current set of params gracefully — this
 was empirically verified during PR #25 review with identical sha256 + HTTP 200 across
-all 5 current param names against `raw.githubusercontent.com` (see commit `bca26e6`
+the original 5 param names against `raw.githubusercontent.com` (see commit `bca26e6`
 and the [review thread](https://github.com/jrwagz/marquee-scroller/pull/25#discussion_r3144204226)).
+`utc_offset_sec` was added later and has not been re-verified against static hosts.
 
 **Caveat from that verification:** `raw.githubusercontent.com` *does* interpret
 `?token=…` as an auth attempt, returning HTTP 404 on a private repo when a bad

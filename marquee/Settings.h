@@ -60,7 +60,6 @@ SOFTWARE.
 
 String WAGFAM_DATA_URL = ""; // URL to Pull WagFam Calendar Data from
 String WAGFAM_API_KEY = ""; // Authorization token to use to authenticate to access the DATA_URL, only used if provided
-String WAGFAM_TIMEZONE = ""; // IANA timezone name sent as &timezone= on calendar requests (e.g. "America/Chicago")
 boolean WAGFAM_EVENT_TODAY = false; // Whether or not an event is happening today
 
 // SEC-03: Compile-time allowlist of domains that are *always* trusted as firmware

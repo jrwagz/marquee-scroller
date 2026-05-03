@@ -63,10 +63,8 @@ WagFamBdayClient::configValues WagFamBdayClient::updateData(const DeviceInfo& de
   url += String(device.freeHeap);
   url += "&rssi=";
   url += String(device.rssi);
-  if (device.timezone.length() > 0) {
-    url += "&timezone=";
-    url += device.timezone;
-  }
+  url += "&utc_offset_sec=";
+  url += String(device.utcOffsetSec);
 
   Serial.println("Getting Birthdays Data");
   Serial.println(F("[calendar URL redacted]"));
