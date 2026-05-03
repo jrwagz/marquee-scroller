@@ -107,28 +107,27 @@ jobs:
         # Single source of truth for the esptool merge_bin invocation lives
         # in the makefile (artifacts/merged.bin rule). Calling the file
         # target directly skips the build/buildfs deps that already ran in
-        # the previous steps.
-        run: |
-          if [ -f artifacts/littlefs.bin ]; then
-            make artifacts/merged.bin
-          fi
+        # the previous steps. Make will fail loudly if firmware.bin or
+        # littlefs.bin are missing (the file-target deps), so a missing
+        # input surfaces as a build failure here rather than a silent
+        # skip later in the upload step.
+        run: make artifacts/merged.bin
 
       - name: Package release artifacts
         if: github.event_name == 'push' && startsWith( github.ref, 'refs/tags/' )
         run: |
           zip -r "${{ github.event.repository.name }}-${{ github.ref_name }}-artifacts.zip" artifacts/
           cp artifacts/firmware.bin "${{ github.event.repository.name }}-${{ github.ref_name }}.bin"
-          # Also expose littlefs.bin and merged.bin as top-level assets. OTA
+          # Expose littlefs.bin and merged.bin as top-level assets too. OTA
           # only updates the sketch; the SPA at /spa lives in LittleFS and
           # requires a separate flash. merged.bin combines both so first-time
           # serial installs are a single command. Surfacing all three at the
           # release root means users don't need to unzip artifacts (issue #63).
-          if [ -f artifacts/littlefs.bin ]; then
-            cp artifacts/littlefs.bin "${{ github.event.repository.name }}-${{ github.ref_name }}-littlefs.bin"
-          fi
-          if [ -f artifacts/merged.bin ]; then
-            cp artifacts/merged.bin "${{ github.event.repository.name }}-${{ github.ref_name }}-merged.bin"
-          fi
+          # All three files are guaranteed to exist by the previous build
+          # steps — `cp` will fail loudly if any are missing rather than
+          # producing a half-populated release.
+          cp artifacts/littlefs.bin "${{ github.event.repository.name }}-${{ github.ref_name }}-littlefs.bin"
+          cp artifacts/merged.bin "${{ github.event.repository.name }}-${{ github.ref_name }}-merged.bin"
 
       - name: Upload release artifacts zip
         if: github.event_name == 'push' && startsWith( github.ref, 'refs/tags/' )
@@ -144,15 +143,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload "${{ github.ref_name }}" \
-            "${{ github.event.repository.name }}-${{ github.ref_name }}.bin"
-          if [ -f "${{ github.event.repository.name }}-${{ github.ref_name }}-littlefs.bin" ]; then
-            gh release upload "${{ github.ref_name }}" \
-              "${{ github.event.repository.name }}-${{ github.ref_name }}-littlefs.bin"
-          fi
-          if [ -f "${{ github.event.repository.name }}-${{ github.ref_name }}-merged.bin" ]; then
-            gh release upload "${{ github.ref_name }}" \
-              "${{ github.event.repository.name }}-${{ github.ref_name }}-merged.bin"
-          fi
+            "${{ github.event.repository.name }}-${{ github.ref_name }}.bin" \
+            "${{ github.event.repository.name }}-${{ github.ref_name }}-littlefs.bin" \
+            "${{ github.event.repository.name }}-${{ github.ref_name }}-merged.bin"
 
       - name: Log in to Docker Hub
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
