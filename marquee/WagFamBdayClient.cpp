@@ -50,7 +50,7 @@ WagFamBdayClient::configValues WagFamBdayClient::updateData(const DeviceInfo& de
 
   // Build URL with device telemetry query params for heartbeat/identification
   String url;
-  url.reserve(myJsonSourceUrl.length() + 120);
+  url.reserve(myJsonSourceUrl.length() + 180);
   url = myJsonSourceUrl;
   url += (url.indexOf('?') >= 0) ? '&' : '?';
   url += "chip_id=";
@@ -63,6 +63,8 @@ WagFamBdayClient::configValues WagFamBdayClient::updateData(const DeviceInfo& de
   url += String(device.freeHeap);
   url += "&rssi=";
   url += String(device.rssi);
+  url += "&utc_offset_sec=";
+  url += String(device.utcOffsetSec);
 
   Serial.println("Getting Birthdays Data");
   Serial.println(F("[calendar URL redacted]"));

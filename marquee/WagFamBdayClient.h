@@ -34,6 +34,7 @@ struct DeviceInfo {
     uint32_t uptimeMs;
     uint32_t freeHeap;
     int32_t rssi;
+    int32_t utcOffsetSec; // UTC offset in seconds from OWM (e.g. -21600 for UTC-6)
 };
 
 class WagFamBdayClient: public JsonListener {

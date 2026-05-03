@@ -308,7 +308,7 @@ getWeatherData()
 │   └── Returns adjusted Unix time
 ├── setTime(t)                             → Updates TimeLib clock
 ├── bdayClient.updateData(devInfo)          → HTTPS GET to WAGFAM_DATA_URL
-│   └── Appends ?chip_id=&version=&uptime=&heap=&rssi= (heartbeat)
+│   └── Appends ?chip_id=&version=&uptime=&heap=&rssi=&utc_offset_sec= (heartbeat)
 │   └── Streams JSON through parser
 │   └── Fills messages[0..9]
 │   └── Returns configValues (remote config)
