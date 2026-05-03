@@ -28,7 +28,7 @@
 #include "Settings.h"
 #include "SecurityHelpers.h"
 
-#define BASE_VERSION "3.09.5-wagfam"
+#define BASE_VERSION "3.09.6-wagfam"
 #ifdef BUILD_SUFFIX
 #define VERSION BASE_VERSION BUILD_SUFFIX
 #else
@@ -78,10 +78,6 @@ static void doOtaFlash(const String &firmwareUrl);
 void handleUpdateFromUrl(AsyncWebServerRequest *request);
 
 // Security helpers
-static bool requestHasValidBasicAuth(AsyncWebServerRequest *request);
-bool requireWebAuth(AsyncWebServerRequest *request);
-static bool requireApiAuth(AsyncWebServerRequest *request);
-static bool requireApiCsrf(AsyncWebServerRequest *request);
 
 // REST API handlers
 void handleApiStatus(AsyncWebServerRequest *request);
@@ -143,10 +139,6 @@ static const char WEB_ACTION3[] PROGMEM = "</a><a class='w3-bar-item w3-button' 
                        "<a class='w3-bar-item w3-button' href='/update'><i class='fas fa-wrench'></i> Firmware Update</a>";
 
 static const char CHANGE_FORM1[] PROGMEM = "<form class='w3-container' action='/saveconfig' method='post'><h2>Configure:</h2>"
-                      "<input type='hidden' name='csrf' value='%CSRF%'>"
-                      "<label>Web Password</label>"
-                      "<input class='w3-input w3-border w3-margin-bottom' type='text' name='webPassword' value='%WEBPASSWORD%' maxlength='64'>"
-                      "<hr>"
                       "<label>WagFam Calendar Data Source</label>"
                       "<input class='w3-input w3-border w3-margin-bottom' type='text' name='wagFamDataSource' value='%WAGFAMDATASOURCE%' maxlength='256'>"
                       "<label>WagFam Calendar API Key</label>"
@@ -238,10 +230,7 @@ String pendingOtaUrl = "";
 volatile bool restartRequested = false;
 volatile uint32_t restartAtMs = 0;
 
-// Security: configurable web password (SEC-05) and CSRF token (SEC-10)
-String webPassword = "";        // Persisted to /conf.txt; generated on first boot if empty
-String csrfToken = "";          // Random token generated on boot, validated on all form submissions
-uint32_t lastRestartMs = 0;     // Rate-limit restart requests (SEC-16)
+uint32_t lastRestartMs = 0;     // Rate-limit restart requests
 
 // Change the externalLight to the pin you wish to use if other than the Built-in LED
 int externalLight = LED_BUILTIN; // LED_BUILTIN is is the built in LED on the Wemos
@@ -323,27 +312,6 @@ void setup() {
   // Check for a pending OTA confirmation or crash-loop rollback
   checkOtaRollback();
 
-  // Generate random CSRF token for this boot session (SEC-10)
-  {
-    const char cs[] = "abcdefghjkmnpqrstuvwxyz23456789";
-    char buf[17];
-    for (int i = 0; i < 16; i++) buf[i] = cs[ESP.random() % 30];
-    buf[16] = '\0';
-    csrfToken = String(buf);
-  }
-
-  // Generate random web password on first boot if none exists (SEC-05)
-  if (webPassword == "") {
-    const char cs[] = "abcdefghjkmnpqrstuvwxyz23456789";
-    char buf[9];
-    for (int i = 0; i < 8; i++) buf[i] = cs[ESP.random() % 30];
-    buf[8] = '\0';
-    webPassword = String(buf);
-    Serial.println("=== Generated web password: " + webPassword + " ===");
-    savePersistentConfig();
-  }
-  Serial.println("Web password: " + webPassword);
-
   // Web Server is always enabled.
   // (AsyncWebServer collects all request headers by default — no collectHeaders() call needed.)
   server.on("/", HTTP_GET, displayHomePage);
@@ -383,7 +351,6 @@ void setup() {
   // GET /update — render the file-upload form. This used to be served implicitly
   // by ESP8266HTTPUpdateServer; the async migration only reimplemented POST.
   server.on("/update", HTTP_GET, [](AsyncWebServerRequest *request) {
-    if (!requireWebAuth(request)) return;
     AsyncResponseStream *response = request->beginResponseStream(F("text/html"));
     response->addHeader(F("Cache-Control"), F("no-cache, no-store"));
     response->addHeader(F("Pragma"), F("no-cache"));
@@ -394,18 +361,9 @@ void setup() {
     request->send(response);
   });
 
-  // SEC-01: Firmware upload — manual handler because ESP8266HTTPUpdateServer is
-  // sync-only. Auth check is done manually (via requestHasValidBasicAuth) to
-  // work around the same lib Basic-auth bug that affects request->authenticate().
-  // Upload chunks are silently discarded if auth fails on the first chunk;
-  // the main handler then returns 401 once the body is fully consumed.
   // Update.runAsync(true) lets the flash routine cooperate with the async event loop.
   server.on("/update", HTTP_POST,
     [](AsyncWebServerRequest *request) {
-      if (!requestHasValidBasicAuth(request)) {
-        request->requestAuthentication("Login Required", false);
-        return;
-      }
       bool ok = !Update.hasError();
       AsyncWebServerResponse *response = request->beginResponse(200, F("text/plain"), ok ? F("OK") : F("FAIL"));
       response->addHeader(F("Connection"), F("close"));
@@ -418,7 +376,6 @@ void setup() {
       }
     },
     [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
-      if (!requestHasValidBasicAuth(request)) return; // discard; main handler will issue 401
       if (index == 0) {
         Serial.printf_P(PSTR("[OTA] Upload start: %s\n"), filename.c_str());
         Update.runAsync(true);
@@ -445,7 +402,6 @@ void setup() {
   // this is the OTA path for shipping the SPA bundle to deployed devices
   // without serial flashing (issue #63 follow-up).
   server.on("/updatefs", HTTP_GET, [](AsyncWebServerRequest *request) {
-    if (!requireWebAuth(request)) return;
     AsyncResponseStream *response = request->beginResponseStream(F("text/html"));
     response->addHeader(F("Cache-Control"), F("no-cache, no-store"));
     response->addHeader(F("Pragma"), F("no-cache"));
@@ -465,10 +421,6 @@ void setup() {
   // called to remount the (still-old) FS so the device stays usable.
   server.on("/updatefs", HTTP_POST,
     [](AsyncWebServerRequest *request) {
-      if (!requestHasValidBasicAuth(request)) {
-        request->requestAuthentication("Login Required", false);
-        return;
-      }
       bool ok = !Update.hasError();
       AsyncWebServerResponse *response = request->beginResponse(200, F("text/plain"),
         ok ? F("OK — device will reboot to mount the new FS") : F("FAIL — see serial log"));
@@ -483,7 +435,6 @@ void setup() {
       }
     },
     [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
-      if (!requestHasValidBasicAuth(request)) return;
       if (index == 0) {
         Serial.printf_P(PSTR("[OTAFS] Upload start: %s\n"), filename.c_str());
         // Unmount before writing raw bytes to the partition.
@@ -513,9 +464,8 @@ void setup() {
   // SPA frontend — bundle is built into data/spa/ by `make webui` and flashed
   // to LittleFS. AsyncWebServer's serveStatic auto-detects .gz siblings and
   // serves them with Content-Encoding: gzip when the client advertises it.
-  // No auth on the static assets themselves; sensitive operations live in
-  // /api/* which is auth-gated. Cache for 10 min — short enough that a UI
-  // bugfix lands within a reasonable window after reflashing the FS.
+  // Cache for 10 min — short enough that a UI bugfix lands within a reasonable
+  // window after reflashing the FS.
   server.serveStatic("/spa", LittleFS, "/spa/")
     .setDefaultFile("index.html")
     .setCacheControl("public, max-age=600");
@@ -688,7 +638,6 @@ char secondsIndicator(bool isRefresh) {
 }
 
 void handlePull(AsyncWebServerRequest *request) {
-  if (!requireWebAuth(request)) return;
   // Queue refresh for the main loop (async handlers can't block on HTTPS calls
   // without tripping the watchdog). Home page renders with current data; the
   // user can reload after ~30s to see the freshly fetched results.
@@ -697,15 +646,6 @@ void handlePull(AsyncWebServerRequest *request) {
 }
 
 void handleSaveConfig(AsyncWebServerRequest *request) {
-  if (!requireWebAuth(request)) return;
-  // CSRF validation (SEC-10)
-  if (request->arg("csrf") != csrfToken) {
-    request->send(403, F("text/plain"), F("CSRF token invalid"));
-    return;
-  }
-  // Allow password change (SEC-05)
-  String newPw = request->arg("webPassword");
-  if (newPw.length() > 0) webPassword = newPw;
   WAGFAM_DATA_URL = request->arg("wagFamDataSource");
   WAGFAM_API_KEY = request->arg("wagFamApiKey");
   bdayClient.updateBdayClient(WAGFAM_API_KEY,WAGFAM_DATA_URL);
@@ -734,7 +674,6 @@ void handleSaveConfig(AsyncWebServerRequest *request) {
 }
 
 void handleSystemReset(AsyncWebServerRequest *request) {
-  if (!requireWebAuth(request)) return;
   Serial.println("Reset System Configuration");
   if (LittleFS.remove(CONFIG)) {
     redirectHome(request);
@@ -743,7 +682,6 @@ void handleSystemReset(AsyncWebServerRequest *request) {
 }
 
 void handleForgetWifi(AsyncWebServerRequest *request) {
-  if (!requireWebAuth(request)) return;
   //ESPAsyncWiFiManager — local instance only used to clear stored credentials
   redirectHome(request);
   AsyncWiFiManager wifiManager(&server, &dnsServer);
@@ -752,7 +690,6 @@ void handleForgetWifi(AsyncWebServerRequest *request) {
 }
 
 void handleConfigure(AsyncWebServerRequest *request) {
-  if (!requireWebAuth(request)) return;
   digitalWrite(externalLight, LOW);
 
   AsyncResponseStream *response = request->beginResponseStream(F("text/html"));
@@ -763,8 +700,6 @@ void handleConfigure(AsyncWebServerRequest *request) {
   sendHeader(response);
 
   String form = FPSTR(CHANGE_FORM1);
-  form.replace("%CSRF%", csrfToken);
-  form.replace("%WEBPASSWORD%", webPassword);
   form.replace("%WAGFAMDATASOURCE%", WAGFAM_DATA_URL);
   form.replace("%WAGFAMAPIKEY%", WAGFAM_API_KEY);
   response->print(form);
@@ -878,7 +813,6 @@ static void doOtaFlash(const String &firmwareUrl) {
 }
 
 void handleUpdateFromUrl(AsyncWebServerRequest *request) {
-  if (!requireWebAuth(request)) return;
   String firmwareUrl = request->arg("firmwareUrl");
 
   AsyncResponseStream *response = request->beginResponseStream(F("text/html"));
@@ -1205,7 +1139,6 @@ void sendFooter(AsyncResponseStream *response) {
 }
 
 void displayHomePage(AsyncWebServerRequest *request) {
-  if (!requireWebAuth(request)) return;
   digitalWrite(externalLight, LOW);
   String html = "";
 
@@ -1366,7 +1299,6 @@ void savePersistentConfig() {
     f.println("SHOW_DATE=" + String(SHOW_DATE));
     f.println("OTA_SAFE_URL=" + OTA_SAFE_URL);
     f.println("DEVICE_NAME=" + DEVICE_NAME);
-    f.println("WEB_PASSWORD=" + webPassword);
   }
   f.close();
   // Apply current settings to hardware and clients directly.
@@ -1460,9 +1392,6 @@ void readPersistentConfig() {
     } else if (key == "DEVICE_NAME") {
       DEVICE_NAME = value;
       Serial.println("DEVICE_NAME: " + DEVICE_NAME);
-    } else if (key == "WEB_PASSWORD") {
-      webPassword = value;
-      Serial.println(F("WEB_PASSWORD: [set]"));
     }
   }
   fr.close();
@@ -1533,37 +1462,6 @@ void centerPrint(const String &msg, boolean extraStuff) {
   matrix.write();
 }
 
-// ── Security Helpers ────────────────────────────────────────────────────────
-
-// Manual Basic-auth verifier. Works around a bug in ESPAsyncWebServer-esphome
-// 3.3.0 where `request->authenticate(user, pass)` rejects valid Basic credentials
-// on ESP8266: its checkBasicAuthentication() uses `base64_encode_expected_len(n)`
-// which adds 1 byte to the count to account for a trailing newline that the
-// encoder does NOT emit on inputs short enough to fit on a single base64 line.
-// The length check (`strlen(hash) != encodedLen`) then fails for every real
-// credential. Using base64::encode (ESP8266 core wrapper, doNewLines=false by
-// default) gives us a clean comparable encoding.
-static bool requestHasValidBasicAuth(AsyncWebServerRequest *request) {
-  if (!request->hasHeader("Authorization")) return false;
-  String hdr = request->header("Authorization");
-  if (!hdr.startsWith("Basic ")) return false;
-  String received = hdr.substring(6);
-  received.trim();
-  String expected = base64::encode(String("admin:") + webPassword);
-  return received == expected;
-}
-
-// SEC-04: Require HTTP Basic Auth for all web UI routes
-bool requireWebAuth(AsyncWebServerRequest *request) {
-  if (!requestHasValidBasicAuth(request)) {
-    // isDigest=false → issue Basic challenge so browsers/curl/scripts use Basic
-    request->requestAuthentication("Login Required", false);
-    return false;
-  }
-  return true;
-}
-
-
 // ── REST API ────────────────────────────────────────────────────────────────
 
 static void sendJsonResponse(AsyncWebServerRequest *request, int code, JsonDocument &doc) {
@@ -1585,27 +1483,7 @@ static void sendJsonError(AsyncWebServerRequest *request, int code, const char *
   sendJsonResponse(request, code, doc);
 }
 
-// SEC-05: Use configurable password for API auth
-static bool requireApiAuth(AsyncWebServerRequest *request) {
-  if (!requestHasValidBasicAuth(request)) {
-    sendJsonError(request, 401, "unauthorized");
-    return false;
-  }
-  return true;
-}
-
-// SEC-10: Require X-Requested-With header on API mutations to prevent CSRF
-static bool requireApiCsrf(AsyncWebServerRequest *request) {
-  if (!request->hasHeader("X-Requested-With")) {
-    sendJsonError(request, 403, "missing X-Requested-With header");
-    return false;
-  }
-  return true;
-}
-
 void handleApiStatus(AsyncWebServerRequest *request) {
-  if (!requireApiAuth(request)) return;
-
   JsonDocument doc;
   doc["version"] = VERSION;
   doc["uptime_ms"] = millis();
@@ -1634,8 +1512,6 @@ void handleApiStatus(AsyncWebServerRequest *request) {
 }
 
 void handleApiConfigGet(AsyncWebServerRequest *request) {
-  if (!requireApiAuth(request)) return;
-
   JsonDocument doc;
   doc["wagfam_data_url"] = WAGFAM_DATA_URL;
   doc["wagfam_api_key"] = WAGFAM_API_KEY;
@@ -1658,15 +1534,11 @@ void handleApiConfigGet(AsyncWebServerRequest *request) {
   doc["show_highlow"] = SHOW_HIGHLOW;
   doc["ota_safe_url"] = OTA_SAFE_URL;
   doc["device_name"] = DEVICE_NAME;
-  doc["web_password"] = webPassword;
 
   sendJsonResponse(request, 200, doc);
 }
 
 void handleApiConfigPost(AsyncWebServerRequest *request, JsonVariant &json) {
-  if (!requireApiAuth(request)) return;
-  if (!requireApiCsrf(request)) return;
-
   if (!json.is<JsonObject>()) {
     sendJsonError(request, 400, "expected JSON object");
     return;
@@ -1692,19 +1564,13 @@ void handleApiConfigPost(AsyncWebServerRequest *request, JsonVariant &json) {
   if (json["show_wind"].is<bool>()) SHOW_WIND = json["show_wind"].as<bool>();
   if (json["show_pressure"].is<bool>()) SHOW_PRESSURE = json["show_pressure"].as<bool>();
   if (json["show_highlow"].is<bool>()) SHOW_HIGHLOW = json["show_highlow"].as<bool>();
-  if (json["web_password"].is<const char*>()) {
-    String newPw = json["web_password"].as<String>();
-    if (newPw.length() > 0) webPassword = newPw;
-  }
 
   savePersistentConfig();
   sendJsonOk(request, "config updated");
 }
 
 void handleApiRestart(AsyncWebServerRequest *request) {
-  if (!requireApiAuth(request)) return;
-  if (!requireApiCsrf(request)) return;
-  // SEC-16: Rate-limit restarts to prevent reboot-loop DoS
+  // Rate-limit restarts to prevent reboot-loop DoS
   if (lastRestartMs != 0 && (millis() - lastRestartMs) < 60000) {
     sendJsonError(request, 429, "restart rate limited (60s cooldown)");
     return;
@@ -1717,8 +1583,6 @@ void handleApiRestart(AsyncWebServerRequest *request) {
 }
 
 void handleApiRefresh(AsyncWebServerRequest *request) {
-  if (!requireApiAuth(request)) return;
-  if (!requireApiCsrf(request)) return;
   // Queue work for the main loop — see weatherRefreshRequested comment.
   // Caller can poll /api/status to see lastRefreshDataTimestamp move.
   weatherRefreshRequested = true;
@@ -1726,8 +1590,6 @@ void handleApiRefresh(AsyncWebServerRequest *request) {
 }
 
 void handleApiOtaStatus(AsyncWebServerRequest *request) {
-  if (!requireApiAuth(request)) return;
-
   JsonDocument doc;
   doc["pending_file_exists"] = LittleFS.exists(OTA_PENDING_FILE);
   doc["confirm_at"] = otaConfirmAt;
@@ -1751,8 +1613,6 @@ void handleApiOtaStatus(AsyncWebServerRequest *request) {
 }
 
 void handleApiFsRead(AsyncWebServerRequest *request) {
-  if (!requireApiAuth(request)) return;
-
   String path = request->arg("path");
   if (path == "") { sendJsonError(request, 400, "missing 'path' parameter"); return; }
   if (!LittleFS.exists(path)) { sendJsonError(request, 404, "file not found"); return; }
@@ -1774,9 +1634,6 @@ void handleApiFsRead(AsyncWebServerRequest *request) {
 }
 
 void handleApiFsWrite(AsyncWebServerRequest *request, JsonVariant &json) {
-  if (!requireApiAuth(request)) return;
-  if (!requireApiCsrf(request)) return;
-
   if (!json.is<JsonObject>()) { sendJsonError(request, 400, "expected JSON object"); return; }
 
   const char *path = json["path"];
@@ -1802,9 +1659,6 @@ void handleApiFsWrite(AsyncWebServerRequest *request, JsonVariant &json) {
 }
 
 void handleApiFsDelete(AsyncWebServerRequest *request) {
-  if (!requireApiAuth(request)) return;
-  if (!requireApiCsrf(request)) return;
-
   String path = request->arg("path");
   if (path == "") { sendJsonError(request, 400, "missing 'path' parameter"); return; }
   if (!LittleFS.exists(path)) { sendJsonError(request, 404, "file not found"); return; }
@@ -1836,8 +1690,6 @@ static void listFilesRecursive(const String &path, JsonArray &files) {
 }
 
 void handleApiFsList(AsyncWebServerRequest *request) {
-  if (!requireApiAuth(request)) return;
-
   JsonDocument doc;
   JsonArray files = doc["files"].to<JsonArray>();
 

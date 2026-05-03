@@ -2,7 +2,6 @@ import type { StatusData, ConfigData } from "./types";
 
 const POST_HEADERS = {
   "Content-Type": "application/json",
-  "X-Requested-With": "XMLHttpRequest",
 } as const;
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {

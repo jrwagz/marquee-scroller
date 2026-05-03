@@ -47,7 +47,6 @@ const DEFAULTS: ConfigData = {
   show_highlow: false,
   ota_safe_url: "",
   device_name: "",
-  web_password: "",
 };
 
 const config = signal<ConfigData | null>(null);
