@@ -44,6 +44,7 @@ SOFTWARE.
 #include <ESP8266httpUpdate.h>
 #include <base64.h> // ESP8266 core's base64 wrapper — used for the manual Basic-auth workaround in marquee.ino
 #include "FS.h"
+#include <LittleFS.h>
 #include <SPI.h>
 #include <Adafruit_GFX.h> // --> https://github.com/adafruit/Adafruit-GFX-Library
 #include <Max72xxPanel.h> // --> https://github.com/markruys/arduino-Max72xxPanel

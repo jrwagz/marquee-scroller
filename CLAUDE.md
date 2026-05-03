@@ -82,7 +82,7 @@ These are approximate — search for the symbol if the line is off by a few. The
 
 ## Configuration Storage
 
-Runtime config is persisted via LittleFS (aliased as `SPIFFS` in the sketch) at `/conf.txt` as `key=value` pairs.
+Runtime config is persisted via LittleFS at `/conf.txt` as `key=value` pairs.
 The functions `savePersistentConfig()` and `readPersistentConfig()` in [marquee.ino](marquee/marquee.ino)
 own all reads and writes to this file. [Settings.h](marquee/Settings.h) contains compile-time defaults only —
 changes there require a filesystem erase to take effect.
@@ -184,13 +184,16 @@ out-of-band if you change the heartbeat parameter set or move to a different
 static-JSON host — don't add it back to the suite.
 
 **`gh` CLI: branches and PRs live directly on `jrwagz/marquee-scroller`.**
-As of 2026-05-01, the upstream maintainer (jrwagz) granted direct push access,
-so feature branches go to `upstream` rather than the `dallanwagz` fork. PRs are
-repo-internal — no cross-fork `--head` form needed.
+As of 2026-05-01, the upstream maintainer (jrwagz) granted direct push access.
+PRs are repo-internal — no cross-fork `--head` form needed.
+
+Note: `origin` is `git@github.com:jrwagz/marquee-scroller.git` (this is the repo
+to push to). `upstream` is `git@github.com:Qrome/marquee-scroller.git` — jrwagz
+does not have push access there; never push to `upstream`.
 
 Templates:
 
-- Push a branch: `git push -u upstream <branch>` (NOT `origin`).
+- Push a branch: `git push -u origin <branch>` (NOT `upstream` — that is Qrome's repo).
 - Open a PR: `gh pr create --repo jrwagz/marquee-scroller -B master -H <branch> ...`
 
 Bare `gh pr create` and `gh repo view` still resolve to `jrwagz/...` (the fork's
