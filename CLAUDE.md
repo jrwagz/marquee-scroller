@@ -108,6 +108,29 @@ Lessons from code review — these are non-obvious enough to state explicitly:
 The only disabled rules in this repo are those with deliberate permanent policy reasons
 (MD033, MD024, MD041) — they were disabled intentionally, not to unblock a failure.
 
+**The `/update` and `/updateFromUrl` routes only touch the sketch
+partition, NOT LittleFS.** This is by design — both invoke
+`Update.begin(size, U_FLASH)` and `ESPhttpUpdate.update()` respectively,
+neither of which knows about the FS partition. To OTA the LittleFS
+image (SPA bundle, defaults), use the `/updatefs` route added in
+3.09.3-wagfam, which calls `Update.begin(fsSize, U_FS)`. Issue #63 was
+the textbook case of forgetting this — a device on `3.09.2-wagfam-429ad98`
+with the SPA route registered but `/spa` silently 302'd to `/` because
+the LittleFS partition was empty. Two implications:
+
+1. Anything stored on LittleFS — `/conf.txt`, OTA rollback record,
+   `/spa/*` bundle — survives a `/update` flash but only because the
+   sketch-OTA path ignores it. A fresh device will not have SPA assets
+   until you flash via `/updatefs` (browser, OTA), `make uploadfs`
+   (serial), or `esptool.py write_flash 0x300000 littlefs.bin` (serial).
+
+2. When adding a new feature that depends on LittleFS files, add a
+   runtime fallback: if the file is missing, render a clear error page
+   that names the deploy step the user is missing, not a 302 to `/`.
+   The pattern is `handleNotFound()` in `marquee.ino` — it detects
+   `/spa*` 404s and returns a "SPA bundle not installed" page that
+   explicitly links `/updatefs` as the easiest fix, instead of falling
+   through to the legacy redirect-home behavior.
 **When dropping a third-party route registrar, audit every HTTP method it
 registered.** Libraries that "set up" an endpoint often register more than
 one method on it. The canonical example: ESP8266HTTPUpdateServer used to

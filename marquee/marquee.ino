@@ -28,7 +28,7 @@
 #include "Settings.h"
 #include "SecurityHelpers.h"
 
-#define BASE_VERSION "3.09.3-wagfam"
+#define BASE_VERSION "3.09.4-wagfam"
 #ifdef BUILD_SUFFIX
 #define VERSION BASE_VERSION BUILD_SUFFIX
 #else
@@ -54,6 +54,7 @@ void handleForgetWifi(AsyncWebServerRequest *request);
 void handleConfigure(AsyncWebServerRequest *request);
 void getWeatherData();
 void redirectHome(AsyncWebServerRequest *request);
+void handleNotFound(AsyncWebServerRequest *request);
 void sendHeader(AsyncResponseStream *response);
 void sendFooter(AsyncResponseStream *response);
 void displayHomePage(AsyncWebServerRequest *request);
@@ -178,7 +179,26 @@ static const char CHANGE_FORM4[] PROGMEM = "<p><button class='w3-button w3-block
 static const char UPDATE_FORM[] PROGMEM = "<form class='w3-container' action='/updateFromUrl' method='get'><h2>Firmware Update Options:</h2>"
                       "<p><label>Firmware Update URL (optional)</label><input class='w3-input w3-border w3-margin-bottom' type='url' name='firmwareUrl' placeholder='http://example.com/firmware.bin' maxlength='256' required></p>"
                       "<p><button class='w3-button w3-block w3-blue w3-section w3-padding' type='submit'>Update from URL</button></p>"
-                      "<p><small>Note: You can also use the <a href='/update'>Firmware Update</a> page to upload a file directly.</small></p></form>";
+                      "<p><small>Note: You can also use the <a href='/update'>Firmware Update</a> page to upload a file directly.</small></p>"
+                      "<p><small>Need to push the SPA bundle (LittleFS image) to a deployed device? Use <a href='/updatefs'>LittleFS Upload</a>.</small></p></form>";
+
+// LittleFS-upload form rendered by GET /updatefs. This is the OTA path for the
+// SPA bundle on already-deployed devices — without it, /spa can only be
+// installed via serial flash. The Update library accepts U_FS images and writes
+// them directly to the LittleFS partition; on success the device reboots and
+// remounts the new FS. Wipes /conf.txt — same caveat as `make uploadfs`.
+static const char UPDATEFS_FORM[] PROGMEM = "<form class='w3-container' method='POST' action='/updatefs' enctype='multipart/form-data'><h2>LittleFS Upload (SPA bundle):</h2>"
+                      "<p><label>LittleFS Image (littlefs.bin)</label><input class='w3-input w3-border w3-margin-bottom' type='file' name='updatefs' accept='.bin' required></p>"
+                      "<p><button class='w3-button w3-block w3-blue w3-section w3-padding' type='submit'>Upload &amp; Flash FS</button></p>"
+                      "<p><small><strong>Warning:</strong> this wipes the entire LittleFS partition, including <code>/conf.txt</code> "
+                      "(web password, calendar URL, API keys). You'll need to reconfigure WiFi and settings after the device reboots.</small></p>"
+                      "<p><small>Looking for the firmware sketch upload? Use <a href='/update'>Firmware Update</a>.</small></p></form>";
+
+// LittleFS partition bounds — defined by the linker for the configured flash
+// layout (4MB FS:1MB on d1_mini in this project; see platformio.ini). Used by
+// /updatefs to size the U_FS update so it spans the entire partition.
+extern "C" uint32_t _FS_start;
+extern "C" uint32_t _FS_end;
 
 // File-upload form rendered by GET /update. ESP8266HTTPUpdateServer used to register
 // both GET (form) and POST (upload) on /update; when we dropped that lib in the async
@@ -412,6 +432,75 @@ void setup() {
       }
     });
 
+  // GET /updatefs — render the LittleFS upload form. Pair to POST /updatefs;
+  // this is the OTA path for shipping the SPA bundle to deployed devices
+  // without serial flashing (issue #63 follow-up).
+  server.on("/updatefs", HTTP_GET, [](AsyncWebServerRequest *request) {
+    if (!requireWebAuth(request)) return;
+    AsyncResponseStream *response = request->beginResponseStream(F("text/html"));
+    response->addHeader(F("Cache-Control"), F("no-cache, no-store"));
+    response->addHeader(F("Pragma"), F("no-cache"));
+    response->addHeader(F("Expires"), F("-1"));
+    sendHeader(response);
+    response->print(FPSTR(UPDATEFS_FORM));
+    sendFooter(response);
+    request->send(response);
+  });
+
+  // POST /updatefs — accept a LittleFS image and flash it to the FS partition
+  // via Update.begin(fsSize, U_FS). Mirrors POST /update but writes to the
+  // filesystem partition instead of the sketch partition. Same auth +
+  // deferred-restart pattern. The FS is ended before the flash starts because
+  // the Update lib writes raw bytes to the partition; on success the device
+  // reboots and remounts the new FS in setup(). On failure SPIFFS.begin() is
+  // called to remount the (still-old) FS so the device stays usable.
+  server.on("/updatefs", HTTP_POST,
+    [](AsyncWebServerRequest *request) {
+      if (!requestHasValidBasicAuth(request)) {
+        request->requestAuthentication("Login Required", false);
+        return;
+      }
+      bool ok = !Update.hasError();
+      AsyncWebServerResponse *response = request->beginResponse(200, F("text/plain"),
+        ok ? F("OK — device will reboot to mount the new FS") : F("FAIL — see serial log"));
+      response->addHeader(F("Connection"), F("close"));
+      request->send(response);
+      if (ok) {
+        restartAtMs = millis() + 1000;
+        restartRequested = true;
+      } else {
+        // Re-mount the (still-old) FS so subsequent reads of /conf.txt etc. work.
+        SPIFFS.begin();
+      }
+    },
+    [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+      if (!requestHasValidBasicAuth(request)) return;
+      if (index == 0) {
+        Serial.printf_P(PSTR("[OTAFS] Upload start: %s\n"), filename.c_str());
+        // Unmount before writing raw bytes to the partition.
+        SPIFFS.end();
+        Update.runAsync(true);
+        uint32_t fsSize = (uint32_t)((size_t)&_FS_end - (size_t)&_FS_start);
+        if (!Update.begin(fsSize, U_FS)) {
+          Update.printError(Serial);
+          // begin() failed — try to remount so the device isn't stranded.
+          SPIFFS.begin();
+        }
+      }
+      if (!Update.hasError()) {
+        if (Update.write(data, len) != len) {
+          Update.printError(Serial);
+        }
+      }
+      if (final) {
+        if (Update.end(true)) {
+          Serial.printf_P(PSTR("[OTAFS] Upload complete: %u bytes\n"), (unsigned)(index + len));
+        } else {
+          Update.printError(Serial);
+        }
+      }
+    });
+
   // SPA frontend — bundle is built into data/spa/ by `make webui` and flashed
   // to LittleFS. AsyncWebServer's serveStatic auto-detects .gz siblings and
   // serves them with Content-Encoding: gzip when the client advertises it.
@@ -422,7 +511,12 @@ void setup() {
     .setDefaultFile("index.html")
     .setCacheControl("public, max-age=600");
 
-  server.onNotFound(redirectHome);
+  // notFound dispatch — a request for /spa/* that didn't match serveStatic
+  // means the LittleFS doesn't have the bundle (the most common cause:
+  // user OTA-flashed firmware but never flashed LittleFS). Render an
+  // explanatory page rather than silently redirecting to /, which makes it
+  // look like the SPA is broken instead of just absent (issue #63).
+  server.onNotFound(handleNotFound);
   // Start the server
   server.begin();
   Serial.println(F("Server started"));
@@ -1015,6 +1109,46 @@ void redirectHome(AsyncWebServerRequest *request) {
   response->addHeader(F("Pragma"), F("no-cache"));
   response->addHeader(F("Expires"), F("-1"));
   request->send(response);
+}
+
+// 404 dispatch. /spa* requests that fall through here mean the SPA bundle
+// isn't on LittleFS — almost always because the user OTA-flashed firmware
+// without flashing LittleFS too (issue #63). Returning a 404 with deploy
+// instructions makes the failure mode self-explanatory; everything else
+// falls through to the legacy redirect-home behavior.
+void handleNotFound(AsyncWebServerRequest *request) {
+  if (request->url().startsWith("/spa")) {
+    AsyncResponseStream *response = request->beginResponseStream(F("text/html"));
+    response->setCode(404);
+    response->addHeader(F("Cache-Control"), F("no-store"));
+    response->print(F(
+      "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+      "<title>SPA bundle not installed</title>"
+      "<style>body{font-family:system-ui,sans-serif;max-width:42rem;margin:2rem auto;padding:0 1rem;line-height:1.55}"
+      "code{background:#eee;padding:.1em .35em;border-radius:3px}h1{font-size:1.4rem}</style></head><body>"
+      "<h1>SPA bundle not installed (HTTP 404)</h1>"
+      "<p>The firmware is registering <code>/spa</code> as a static-file route, "
+      "but no files exist at <code>/spa/index.html</code> on the device's LittleFS partition.</p>"
+      "<p><strong>Most likely cause:</strong> you OTA-flashed firmware via "
+      "<code>/update</code> or <code>/updateFromUrl</code>. OTA only updates the "
+      "firmware sketch — it does not touch the LittleFS partition where the SPA lives.</p>"
+      "<p><strong>To install the SPA bundle</strong>, do one of:</p>"
+      "<ul>"
+      "<li><strong>Easiest (no serial cable):</strong> <a href='/updatefs'>upload <code>littlefs.bin</code> via OTA</a> — "
+      "browser-only, but wipes <code>/conf.txt</code></li>"
+      "<li>From a checkout: <code>make uploadfs</code> (serial flash, also wipes <code>/conf.txt</code>)</li>"
+      "<li>From a release, manual serial flash: download <code>littlefs.bin</code> and run "
+      "<code>esptool.py write_flash 0x300000 littlefs.bin</code></li>"
+      "<li>From a release, fresh install: use <code>merged.bin</code> "
+      "(<code>esptool.py write_flash 0x0 merged.bin</code>) — single image, both sketch + SPA</li>"
+      "</ul>"
+      "<p>See <a href='https://github.com/jrwagz/marquee-scroller/blob/master/docs/WEBUI.md'>docs/WEBUI.md</a> for details.</p>"
+      "<p>The legacy UI is still available at <a href='/'>/</a> and <a href='/configure'>/configure</a>.</p>"
+      "</body></html>"));
+    request->send(response);
+    return;
+  }
+  redirectHome(request);
 }
 
 void sendHeader(AsyncResponseStream *response) {
