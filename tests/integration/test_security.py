@@ -3,12 +3,10 @@ Security integration tests for WagFam CalClock REST API.
 
 Run against a live device:
     pytest tests/integration/ --host 192.168.1.100
-    pytest tests/integration/ --host 192.168.1.100 --password mypass
 
 Or via make:
     make test-integration HOST=192.168.1.100
 
-Tests each finding from docs/SECURITY_AUDIT.md programmatically.
 Requires: requests, pytest (pip install requests pytest)
 """
 
@@ -16,61 +14,22 @@ import pytest
 import requests
 
 
-# ── SEC-01: Firmware upload auth ─────────────────────────────────────────────
-
-class TestSec01FirmwareUploadAuth:
-    def test_update_requires_auth(self, device_url):
-        r = requests.get(f"{device_url}/update", timeout=10)
-        assert r.status_code == 401
-
-
-# ── SEC-04: Web UI auth ─────────────────────────────────────────────────────
-
-class TestSec04WebUiAuth:
-    @pytest.mark.parametrize("path", ["/", "/configure", "/pull", "/systemreset", "/forgetwifi"])
-    def test_route_requires_auth(self, device_url, path):
-        r = requests.get(f"{device_url}{path}", timeout=10, allow_redirects=False)
-        assert r.status_code == 401
-
-
-# ── SEC-05: Configurable password ────────────────────────────────────────────
-
-class TestSec05ConfigurablePassword:
-    def test_default_credentials_rejected(self, device_url, default_auth):
-        r = requests.get(f"{device_url}/api/status", auth=default_auth, timeout=10)
-        if r.status_code == 200:
-            # Default creds work — check if password is still literally "password"
-            r2 = requests.get(f"{device_url}/api/config", auth=default_auth, timeout=10)
-            assert r2.status_code == 200
-            assert r2.json().get("web_password", "") != "password", \
-                "web_password is still the hardcoded default 'password'"
-
-    def test_web_password_field_exists(self, device_url, device_auth):
-        r = requests.get(f"{device_url}/api/config", auth=device_auth, timeout=10)
-        assert r.status_code == 200
-        assert "web_password" in r.json()
-
-
 # ── SEC-06: Protected filesystem paths ───────────────────────────────────────
 
 class TestSec06ProtectedPaths:
     @pytest.mark.parametrize("path", ["/conf.txt", "/ota_pending.txt"])
-    def test_write_blocked(self, device_url, device_auth, csrf_headers, path):
+    def test_write_blocked(self, device_url, path):
         r = requests.post(
             f"{device_url}/api/fs/write",
-            auth=device_auth,
-            headers=csrf_headers,
             json={"path": path, "content": "test"},
             timeout=10,
         )
         assert r.status_code == 403
 
     @pytest.mark.parametrize("path", ["/conf.txt", "/ota_pending.txt"])
-    def test_delete_blocked(self, device_url, device_auth, csrf_headers, path):
+    def test_delete_blocked(self, device_url, path):
         r = requests.delete(
             f"{device_url}/api/fs/delete?path={path}",
-            auth=device_auth,
-            headers=csrf_headers,
             timeout=10,
         )
         assert r.status_code in (403, 404)
@@ -98,29 +57,6 @@ class TestSec09FormMethod:
             src = f.read()
         assert "method='get'><h2>Configure" not in src, "form still uses GET"
         assert "method='post'><h2>Configure" in src, "form POST not found"
-
-
-# ── SEC-10: CSRF protection ─────────────────────────────────────────────────
-
-class TestSec10Csrf:
-    def test_post_without_csrf_header_rejected(self, device_url, device_auth):
-        r = requests.post(
-            f"{device_url}/api/config",
-            auth=device_auth,
-            json={"show_date": False},
-            timeout=10,
-        )
-        assert r.status_code == 403
-
-    def test_post_with_csrf_header_accepted(self, device_url, device_auth, csrf_headers):
-        r = requests.post(
-            f"{device_url}/api/config",
-            auth=device_auth,
-            headers=csrf_headers,
-            json={"show_date": False},
-            timeout=10,
-        )
-        assert r.status_code == 200
 
 
 # ── SEC-11: Serial output redaction (source code check) ─────────────────────
@@ -166,5 +102,5 @@ class TestSec14BoundsCheck:
 
 class TestSec16RateLimiting:
     @pytest.mark.skip(reason="skipped to avoid rebooting device during test run")
-    def test_restart_rate_limited(self, device_url, device_auth, csrf_headers):
+    def test_restart_rate_limited(self, device_url):
         pass

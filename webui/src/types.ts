@@ -49,5 +49,4 @@ export interface ConfigData {
   show_highlow: boolean;
   ota_safe_url: string;
   device_name: string;
-  web_password: string;
 }
