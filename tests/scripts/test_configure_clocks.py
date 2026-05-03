@@ -19,9 +19,8 @@ from argparse import Namespace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 import configure_clocks
+import pytest
 
 ROOT = Path(__file__).parent.parent.parent
 SCRIPT_PATH = ROOT / "scripts" / "configure_clocks.py"
