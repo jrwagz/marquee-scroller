@@ -108,6 +108,22 @@ Lessons from code review — these are non-obvious enough to state explicitly:
 The only disabled rules in this repo are those with deliberate permanent policy reasons
 (MD033, MD024, MD041) — they were disabled intentionally, not to unblock a failure.
 
+**OTA firmware updates do NOT touch LittleFS.** This bites every time
+someone forgets it (issue #63 was the textbook case: device on
+`3.09.2-wagfam-429ad98` with the SPA route registered, but `/spa`
+silently 302'd to `/` because the LittleFS partition was empty). Two
+implications: (1) anything stored on LittleFS — `/conf.txt`, OTA
+rollback record, `/spa/*` bundle — survives an OTA but only because OTA
+ignores it, not because OTA preserves it; a fresh device will not have
+SPA assets until you run `make uploadfs` or flash `littlefs.bin`
+separately via esptool. (2) When adding a new feature that depends on
+LittleFS files, add a runtime fallback: if the file is missing, render
+a clear error page that names the deploy step the user is missing,
+not a 302 to `/`. The pattern is `handleNotFound()` in
+`marquee.ino` — it detects `/spa*` 404s and returns a "SPA bundle not
+installed" page with `make uploadfs` instructions, instead of falling
+through to the legacy redirect-home behavior.
+
 **Don't duplicate logic when a shared helper exists or is obvious.**
 When writing a second code path that does the same core operation as an existing one,
 extract a shared function. The `doOtaFlash()` / `handleUpdateFromUrl()` /

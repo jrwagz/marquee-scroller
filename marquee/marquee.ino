@@ -54,6 +54,7 @@ void handleForgetWifi(AsyncWebServerRequest *request);
 void handleConfigure(AsyncWebServerRequest *request);
 void getWeatherData();
 void redirectHome(AsyncWebServerRequest *request);
+void handleNotFound(AsyncWebServerRequest *request);
 void sendHeader(AsyncResponseStream *response);
 void sendFooter(AsyncResponseStream *response);
 void displayHomePage(AsyncWebServerRequest *request);
@@ -399,7 +400,12 @@ void setup() {
     .setDefaultFile("index.html")
     .setCacheControl("public, max-age=600");
 
-  server.onNotFound(redirectHome);
+  // notFound dispatch — a request for /spa/* that didn't match serveStatic
+  // means the LittleFS doesn't have the bundle (the most common cause:
+  // user OTA-flashed firmware but never flashed LittleFS). Render an
+  // explanatory page rather than silently redirecting to /, which makes it
+  // look like the SPA is broken instead of just absent (issue #63).
+  server.onNotFound(handleNotFound);
   // Start the server
   server.begin();
   Serial.println(F("Server started"));
@@ -992,6 +998,42 @@ void redirectHome(AsyncWebServerRequest *request) {
   response->addHeader(F("Pragma"), F("no-cache"));
   response->addHeader(F("Expires"), F("-1"));
   request->send(response);
+}
+
+// 404 dispatch. /spa* requests that fall through here mean the SPA bundle
+// isn't on LittleFS — almost always because the user OTA-flashed firmware
+// without flashing LittleFS too (issue #63). Returning a 404 with deploy
+// instructions makes the failure mode self-explanatory; everything else
+// falls through to the legacy redirect-home behavior.
+void handleNotFound(AsyncWebServerRequest *request) {
+  if (request->url().startsWith("/spa")) {
+    AsyncResponseStream *response = request->beginResponseStream(F("text/html"));
+    response->setCode(404);
+    response->addHeader(F("Cache-Control"), F("no-store"));
+    response->print(F(
+      "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+      "<title>SPA bundle not installed</title>"
+      "<style>body{font-family:system-ui,sans-serif;max-width:42rem;margin:2rem auto;padding:0 1rem;line-height:1.55}"
+      "code{background:#eee;padding:.1em .35em;border-radius:3px}h1{font-size:1.4rem}</style></head><body>"
+      "<h1>SPA bundle not installed (HTTP 404)</h1>"
+      "<p>The firmware is registering <code>/spa</code> as a static-file route, "
+      "but no files exist at <code>/spa/index.html</code> on the device's LittleFS partition.</p>"
+      "<p><strong>Most likely cause:</strong> you OTA-flashed firmware via "
+      "<code>/update</code> or <code>/updateFromUrl</code>. OTA only updates the "
+      "firmware sketch — it does not touch the LittleFS partition where the SPA lives.</p>"
+      "<p><strong>To install the SPA bundle</strong>, do one of:</p>"
+      "<ul>"
+      "<li>From a checkout: <code>make uploadfs</code> (serial flash, wipes <code>/conf.txt</code>)</li>"
+      "<li>From a release: download <code>littlefs.bin</code> and flash with "
+      "<code>esptool.py write_flash 0x300000 littlefs.bin</code></li>"
+      "</ul>"
+      "<p>See <a href='https://github.com/jrwagz/marquee-scroller/blob/master/docs/WEBUI.md'>docs/WEBUI.md</a> for details.</p>"
+      "<p>The legacy UI is still available at <a href='/'>/</a> and <a href='/configure'>/configure</a>.</p>"
+      "</body></html>"));
+    request->send(response);
+    return;
+  }
+  redirectHome(request);
 }
 
 void sendHeader(AsyncResponseStream *response) {

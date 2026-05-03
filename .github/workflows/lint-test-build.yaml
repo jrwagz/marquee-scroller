@@ -107,6 +107,14 @@ jobs:
         run: |
           zip -r "${{ github.event.repository.name }}-${{ github.ref_name }}-artifacts.zip" artifacts/
           cp artifacts/firmware.bin "${{ github.event.repository.name }}-${{ github.ref_name }}.bin"
+          # Also expose littlefs.bin as a top-level asset. OTA only updates
+          # the firmware sketch; the SPA at /spa lives in LittleFS and
+          # requires a separate flash. Surfacing the .bin at the release
+          # root means users don't need to unzip artifacts to install it
+          # (issue #63).
+          if [ -f artifacts/littlefs.bin ]; then
+            cp artifacts/littlefs.bin "${{ github.event.repository.name }}-${{ github.ref_name }}-littlefs.bin"
+          fi
 
       - name: Upload release artifacts zip
         if: github.event_name == 'push' && startsWith( github.ref, 'refs/tags/' )
@@ -123,6 +131,10 @@ jobs:
         run: |
           gh release upload "${{ github.ref_name }}" \
             "${{ github.event.repository.name }}-${{ github.ref_name }}.bin"
+          if [ -f "${{ github.event.repository.name }}-${{ github.ref_name }}-littlefs.bin" ]; then
+            gh release upload "${{ github.ref_name }}" \
+              "${{ github.event.repository.name }}-${{ github.ref_name }}-littlefs.bin"
+          fi
 
       - name: Log in to Docker Hub
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')

@@ -69,9 +69,32 @@ The following libraries are cached locally in `/lib` (no separate install needed
 
 ## Pre-built Binaries
 
-CI builds generate firmware artifacts on every tagged release. Download `firmware.bin` from the
+CI builds generate firmware artifacts on every tagged release.
+
+### Updating an existing device (firmware only)
+
+Download `marquee-scroller-<version>.bin` from the
 [Releases page](https://github.com/jrwagz/marquee-scroller/releases) and upload via the web
-interface at `http://<device-ip>/update`.
+interface at `http://<device-ip>/update`. This is the fast path for shipping firmware fixes.
+
+> **Important:** OTA flashing the firmware does **not** touch the LittleFS partition where the
+> SPA bundle lives. If you visit `/spa/` and see "SPA bundle not installed", flash the
+> filesystem image as below.
+
+### Installing the SPA bundle (LittleFS image)
+
+The SPA at `/spa/` is served from LittleFS, which OTA cannot update. To install or update
+the SPA bundle on a device, download `littlefs.bin` from the release artifacts zip and
+flash it with `esptool.py`:
+
+```bash
+unzip marquee-scroller-<version>-artifacts.zip
+esptool.py --port /dev/cu.usbserial-XXXX write_flash 0x300000 artifacts/littlefs.bin
+```
+
+This wipes `/conf.txt` (web password, calendar URL, API keys), so you'll need to reconfigure
+WiFi and settings after flashing. From a source checkout, `make uploadfs` does the same in
+one step.
 
 ## Initial Setup
 
