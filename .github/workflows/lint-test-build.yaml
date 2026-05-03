@@ -104,20 +104,13 @@ jobs:
 
       - name: Build merged image
         if: github.event_name == 'push' && startsWith( github.ref, 'refs/tags/' )
+        # Single source of truth for the esptool merge_bin invocation lives
+        # in the makefile (artifacts/merged.bin rule). Calling the file
+        # target directly skips the build/buildfs deps that already ran in
+        # the previous steps.
         run: |
-          # firmware.bin (sketch @ 0x0) + littlefs.bin (FS @ 0x300000) joined
-          # into a single image users can flash with one esptool command.
-          # OTA still uses firmware.bin alone (sketch only) and SPA refresh
-          # still uses littlefs.bin alone — merged.bin is the recommended
-          # first-time install path because it eliminates offset arithmetic
-          # and version-skew between sketch and SPA.
           if [ -f artifacts/littlefs.bin ]; then
-            python3 -m pip install --quiet 'esptool>=4.0'
-            esptool.py --chip esp8266 merge_bin \
-              -o artifacts/merged.bin \
-              --flash_mode dio --flash_size 4MB \
-              0x0 artifacts/firmware.bin \
-              0x300000 artifacts/littlefs.bin
+            make artifacts/merged.bin
           fi
 
       - name: Package release artifacts

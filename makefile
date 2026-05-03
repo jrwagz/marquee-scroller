@@ -194,13 +194,11 @@ artifacts:
 #
 # 0x300000 is the LittleFS partition start for d1_mini with the 4MB
 # FS:1MB OTA:~1019KB layout used by this project (see platformio.ini).
-.PHONY: merged
-merged: build buildfs
-	@if [ ! -f artifacts/firmware.bin ] || [ ! -f .pio/build/default/littlefs.bin ]; then \
-		echo "ERROR: firmware.bin or littlefs.bin missing — run 'make build buildfs artifacts' first"; \
-		exit 1; \
-	fi
-	$(MAKE) artifacts
+#
+# This is the single source of truth for the merge step — both `make merged`
+# and the CI release workflow target this rule, so the esptool invocation
+# only exists in one place.
+artifacts/merged.bin: artifacts/firmware.bin artifacts/littlefs.bin .passwd
 	docker run \
 		--rm $(DOCKER_TTY_ARGS) \
 		-v ${PWD}:${PWD} \
@@ -216,6 +214,13 @@ merged: build buildfs
 		         0x0 artifacts/firmware.bin \
 		         0x300000 artifacts/littlefs.bin"
 	@printf '\nmerged.bin: %s bytes\n' "$$(stat -f%z artifacts/merged.bin 2>/dev/null || stat -c%s artifacts/merged.bin)"
+
+# Full pipeline: build sketch, build FS, gather artifacts, merge. Use this
+# from a fresh checkout. From CI (where build/buildfs/artifacts already
+# ran), invoke `make artifacts/merged.bin` directly to skip the rebuild
+# check on the upstream targets.
+.PHONY: merged
+merged: build buildfs artifacts artifacts/merged.bin
 
 # webui/ — Preact SPA built with Vite. Output lands in data/spa/ alongside
 # .gz siblings so AsyncWebServer's serveStatic handler can ship gzipped
