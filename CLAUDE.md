@@ -131,6 +131,19 @@ the LittleFS partition was empty. Two implications:
    `/spa*` 404s and returns a "SPA bundle not installed" page that
    explicitly links `/updatefs` as the easiest fix, instead of falling
    through to the legacy redirect-home behavior.
+**When dropping a third-party route registrar, audit every HTTP method it
+registered.** Libraries that "set up" an endpoint often register more than
+one method on it. The canonical example: ESP8266HTTPUpdateServer used to
+register BOTH `GET /update` (file-upload form) AND `POST /update` (upload
+handler). The async migration in commit `fdbc6fb` only reimplemented POST,
+so GET fell through to `onNotFound → redirectHome` and the firmware-upload
+page silently 302'd to `/` (issue #60, fixed in PR #61). Before deleting
+any `server.something()` line, grep the lib's source for every
+`on()`/`addHandler()`/`serveStatic()` call it makes and reimplement each.
+The static regression test
+[`tests/scripts/test_firmware_routes.py`](tests/scripts/test_firmware_routes.py)
+pins `/update`'s GET+POST pair so this specific regression can't recur — add
+similar pins for any other multi-method endpoint you migrate.
 
 **Don't duplicate logic when a shared helper exists or is obvious.**
 When writing a second code path that does the same core operation as an existing one,
