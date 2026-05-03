@@ -108,8 +108,7 @@ over OTA via the web interface:
 2. Open `http://<device-ip>/updatefs` in a browser
 3. Select the file and click **Upload & Flash FS** — the device reboots into the new FS
 
-This wipes `/conf.txt` (web password, calendar URL, API keys), so you'll need to reconfigure
-after flashing.
+This wipes `/conf.txt` (calendar URL, API keys), so you'll need to reconfigure after flashing.
 
 > **Bootstrapping note:** OTA-flashing the LittleFS image requires firmware that
 > includes the `/updatefs` route (added in 3.09.3-wagfam). Devices on older firmware
@@ -133,9 +132,6 @@ On first boot (or after "Forget WiFi"), the device creates a WiFi AP named `CLOC
 Connect to it with a phone or laptop to enter your WiFi credentials.
 
 Once connected to WiFi, the device displays its IP address. Open `http://<ip>/` in a browser to access the web interface.
-
-On first boot, a random web password is generated and printed to the serial console. It can be
-changed from the Configure page. The username for HTTP Basic Auth is **admin**.
 
 ## Configuration
 
@@ -209,7 +205,7 @@ directly from a hosted `.bin` file. The device will restart automatically on suc
 
 ## REST API
 
-All `/api/*` endpoints require HTTP Basic Auth (`admin` / your web password) and return JSON.
+All `/api/*` endpoints return JSON.
 
 | Endpoint | Method | Description |
 | --- | --- | --- |
@@ -227,12 +223,12 @@ All `/api/*` endpoints require HTTP Basic Auth (`admin` / your web password) and
 Example — read config:
 
 ```bash
-curl -u admin:password http://<device-ip>/api/config
+curl http://<device-ip>/api/config
 ```
 
 Example — update brightness to 10:
 
 ```bash
-curl -u admin:password -X POST -H 'Content-Type: application/json' \
+curl -X POST -H 'Content-Type: application/json' \
   -d '{"display_intensity": 10}' http://<device-ip>/api/config
 ```

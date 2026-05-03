@@ -77,7 +77,6 @@ These are approximate — search for the symbol if the line is off by a few. The
 | `readPersistentConfig()` | 1146 |
 | `scrollMessageWait()` | 1240 |
 | `centerPrint()` | 1263 |
-| Security helpers (`requireWebAuth`, etc.) | 1303 |
 | REST API handlers | ~1351–1583 |
 
 ## Configuration Storage
@@ -386,10 +385,18 @@ ArduinoOTA was removed in v3.08.0-wagfam. Updates are now delivered three ways:
 with the current safe URL. If the device reboots twice without confirming (5 min stable uptime),
 `checkOtaRollback()` re-flashes the previous firmware. See `docs/OTA_STRATEGY.md` for full details.
 
+## Authentication
+
+Authentication has been intentionally removed from the web UI and REST API. All routes are
+currently open (no credentials required). The device is assumed to be on a trusted home
+network. A proper authentication system should be designed and implemented in the future —
+the prior HTTP Basic Auth implementation was removed because it was friction without meaningful
+security on a LAN-only device.
+
 ## REST API
 
 See the [REST API section in README.md](README.md#rest-api) for the full endpoint table and
-curl examples. All endpoints live under `/api/`, require HTTP Basic Auth, and return JSON.
+curl examples. All endpoints live under `/api/` and return JSON.
 Handlers are registered in `setup()` starting at ~line 284 of `marquee.ino`, with
 implementations at ~lines 1351–1583. JSON-body POST endpoints (`/api/config`, `/api/fs/write`)
 are wired through `AsyncCallbackJsonWebHandler` because `AsyncWebServer` does not populate
