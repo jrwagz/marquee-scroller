@@ -28,7 +28,7 @@
 #include "Settings.h"
 #include "SecurityHelpers.h"
 
-#define BASE_VERSION "3.09.2-wagfam"
+#define BASE_VERSION "3.09.3-wagfam"
 #ifdef BUILD_SUFFIX
 #define VERSION BASE_VERSION BUILD_SUFFIX
 #else
@@ -179,6 +179,15 @@ static const char UPDATE_FORM[] PROGMEM = "<form class='w3-container' action='/u
                       "<p><label>Firmware Update URL (optional)</label><input class='w3-input w3-border w3-margin-bottom' type='url' name='firmwareUrl' placeholder='http://example.com/firmware.bin' maxlength='256' required></p>"
                       "<p><button class='w3-button w3-block w3-blue w3-section w3-padding' type='submit'>Update from URL</button></p>"
                       "<p><small>Note: You can also use the <a href='/update'>Firmware Update</a> page to upload a file directly.</small></p></form>";
+
+// File-upload form rendered by GET /update. ESP8266HTTPUpdateServer used to register
+// both GET (form) and POST (upload) on /update; when we dropped that lib in the async
+// migration, only the POST half was reimplemented, so GET fell through to onNotFound
+// and redirected to "/". This form posts the firmware binary back to POST /update.
+static const char UPLOAD_FORM[] PROGMEM = "<form class='w3-container' method='POST' action='/update' enctype='multipart/form-data'><h2>Firmware Upload:</h2>"
+                      "<p><label>Firmware Binary (.bin)</label><input class='w3-input w3-border w3-margin-bottom' type='file' name='update' accept='.bin' required></p>"
+                      "<p><button class='w3-button w3-block w3-blue w3-section w3-padding' type='submit'>Upload &amp; Flash</button></p>"
+                      "<p><small>The device will reboot automatically when the upload completes.</small></p></form>";
 
 // OTA auto-update state
 String OTA_SAFE_URL = "";       // URL of last confirmed firmware; rollback target for next update
@@ -341,6 +350,20 @@ void setup() {
     fsWritePost->setMaxContentLength(8192);
     server.addHandler(fsWritePost);
   }
+
+  // GET /update — render the file-upload form. This used to be served implicitly
+  // by ESP8266HTTPUpdateServer; the async migration only reimplemented POST.
+  server.on("/update", HTTP_GET, [](AsyncWebServerRequest *request) {
+    if (!requireWebAuth(request)) return;
+    AsyncResponseStream *response = request->beginResponseStream(F("text/html"));
+    response->addHeader(F("Cache-Control"), F("no-cache, no-store"));
+    response->addHeader(F("Pragma"), F("no-cache"));
+    response->addHeader(F("Expires"), F("-1"));
+    sendHeader(response);
+    response->print(FPSTR(UPLOAD_FORM));
+    sendFooter(response);
+    request->send(response);
+  });
 
   // SEC-01: Firmware upload — manual handler because ESP8266HTTPUpdateServer is
   // sync-only. Auth check is done manually (via requestHasValidBasicAuth) to
