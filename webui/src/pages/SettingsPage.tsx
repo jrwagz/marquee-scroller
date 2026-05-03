@@ -51,10 +51,6 @@ const DEFAULTS: ConfigData = {
 
 const config = signal<ConfigData | null>(null);
 const draft = signal<Partial<ConfigData>>({});
-// Password is held separately because the firmware only updates it when the
-// posted value is non-empty (marquee.ino handleApiConfigPost). The form input
-// always starts blank — typing replaces, leaving it blank keeps the current.
-const newPassword = signal("");
 const loadError = signal<string | null>(null);
 const saveStatus = signal<"idle" | "saving" | "ok" | "error">("idle");
 const saveError = signal<string | null>(null);
@@ -65,9 +61,7 @@ const effective = computed<ConfigData>(() => ({
   ...draft.value,
 }));
 
-const isDirty = computed(
-  () => Object.keys(draft.value).length > 0 || newPassword.value.length > 0,
-);
+const isDirty = computed(() => Object.keys(draft.value).length > 0);
 
 function setVal<K extends keyof ConfigData>(key: K, val: ConfigData[K]) {
   if (config.value?.[key] === val) {
@@ -90,15 +84,10 @@ function setStr(key: StringKey, val: string) {
 async function save() {
   saveStatus.value = "saving";
   saveError.value = null;
-  const payload: Partial<ConfigData> = { ...draft.value };
-  if (newPassword.value.length > 0) {
-    payload.web_password = newPassword.value;
-  }
   try {
-    await patchConfig(payload);
+    await patchConfig(draft.value);
     config.value = { ...effective.value };
     draft.value = {};
-    newPassword.value = "";
     saveStatus.value = "ok";
     setTimeout(() => {
       saveStatus.value = "idle";
@@ -310,30 +299,6 @@ export function SettingsPage() {
         />
       </div>
 
-      <div class="form-section">
-        <h2>Security</h2>
-        <div class="form-row">
-          <label class="form-label" for="webpw">
-            Web password
-          </label>
-          <div class="text-group">
-            <input
-              id="webpw"
-              type="password"
-              autocomplete="new-password"
-              value={newPassword.value}
-              placeholder="leave blank to keep current"
-              onInput={(e) => {
-                newPassword.value = (e.target as HTMLInputElement).value;
-              }}
-            />
-            <span class="form-note">
-              You'll need to re-authenticate after save.
-            </span>
-          </div>
-        </div>
-      </div>
-
       <div class="save-bar">
         <button
           class="btn"
@@ -350,8 +315,8 @@ export function SettingsPage() {
         )}
         {isDirty.value && saveStatus.value === "idle" && (
           <span class="muted">
-            {Object.keys(draft.value).length + (newPassword.value ? 1 : 0)} change
-            {Object.keys(draft.value).length + (newPassword.value ? 1 : 0) !== 1 ? "s" : ""} unsaved
+            {Object.keys(draft.value).length} change
+            {Object.keys(draft.value).length !== 1 ? "s" : ""} unsaved
           </span>
         )}
       </div>

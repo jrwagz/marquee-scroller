@@ -5,11 +5,11 @@ or be on the explicit READ_ONLY allowlist.
 
 Why this exists:
   PR #59 shipped a Settings page that only covered ~12 of 19 mutable config
-  keys — calendar URL, API keys, geo location, web password, and the PM
-  toggle were silently missing. Anyone setting up a fresh device still had
-  to use the legacy /configure page. This test pins the contract: if you
-  add a new ConfigData key to types.ts, you also wire it into the form (or
-  declare it read-only here, with a reason).
+  keys — calendar URL, API keys, geo location, and the PM toggle were
+  silently missing. Anyone setting up a fresh device still had to use the
+  legacy /configure page. This test pins the contract: if you add a new
+  ConfigData key to types.ts, you also wire it into the form (or declare it
+  read-only here, with a reason).
 """
 
 import re
@@ -58,7 +58,7 @@ def test_every_config_field_is_either_wired_or_read_only(
         if field in READ_ONLY:
             continue
         # Look for the field name as either a string literal (setBool("is_24hour", …))
-        # or as a property access (payload.web_password = …) anywhere in the form.
+        # or as a property access anywhere in the form.
         # Use a word boundary so "show_city" doesn't accidentally match "show_city_extra".
         pattern = rf"[\"'.]({re.escape(field)})\b"
         if not re.search(pattern, settings_source):
