@@ -221,6 +221,11 @@ volatile bool weatherRefreshRequested = false;
 volatile bool otaFromUrlRequested = false;
 String pendingOtaUrl = "";
 
+// /conf.txt contents saved across a /updatefs flash. Read before LittleFS.end(),
+// written back after Update.end() + LittleFS.begin() so the user does not lose
+// API keys and display settings when upgrading the SPA bundle.
+String fsUpdateConfBackup = "";
+
 // Deferred restart. /api/restart and the /update post-flash path set the
 // flag with a "restart not before" deadline. The main loop pulls the
 // trigger after the deadline, giving the async TCP layer time to flush the
@@ -427,6 +432,22 @@ void setup() {
       response->addHeader(F("Connection"), F("close"));
       request->send(response);
       if (ok) {
+        // Mount the new FS and restore /conf.txt so the user's API keys and
+        // settings survive the SPA bundle upgrade.
+        LittleFS.begin();
+        if (!fsUpdateConfBackup.isEmpty()) {
+          File confFile = LittleFS.open("/conf.txt", "w");
+          if (confFile) {
+            confFile.print(fsUpdateConfBackup);
+            confFile.close();
+            Serial.printf_P(PSTR("[OTAFS] Restored /conf.txt (%u bytes)\n"),
+                            (unsigned)fsUpdateConfBackup.length());
+          } else {
+            Serial.println(F("[OTAFS] WARN: could not write /conf.txt to new FS"));
+          }
+          fsUpdateConfBackup = "";
+        }
+        LittleFS.end();
         restartAtMs = millis() + 1000;
         restartRequested = true;
       } else {
@@ -437,6 +458,15 @@ void setup() {
     [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
       if (index == 0) {
         Serial.printf_P(PSTR("[OTAFS] Upload start: %s\n"), filename.c_str());
+        // Save /conf.txt before unmounting so it survives the FS wipe.
+        fsUpdateConfBackup = "";
+        File confFile = LittleFS.open("/conf.txt", "r");
+        if (confFile) {
+          fsUpdateConfBackup = confFile.readString();
+          confFile.close();
+          Serial.printf_P(PSTR("[OTAFS] Saved /conf.txt (%u bytes) for restore\n"),
+                          (unsigned)fsUpdateConfBackup.length());
+        }
         // Unmount before writing raw bytes to the partition.
         LittleFS.end();
         Update.runAsync(true);
