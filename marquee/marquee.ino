@@ -1819,18 +1819,29 @@ void handleApiFsDelete(AsyncWebServerRequest *request) {
   sendJsonOk(request, "deleted");
 }
 
+static void listFilesRecursive(const String &path, JsonArray &files) {
+  Dir dir = LittleFS.openDir(path);
+  while (dir.next()) {
+    String entryPath = path;
+    if (!entryPath.endsWith("/")) entryPath += "/";
+    entryPath += dir.fileName();
+    if (dir.isDirectory()) {
+      listFilesRecursive(entryPath, files);
+    } else {
+      JsonObject entry = files.add<JsonObject>();
+      entry["name"] = entryPath;
+      entry["size"] = dir.fileSize();
+    }
+  }
+}
+
 void handleApiFsList(AsyncWebServerRequest *request) {
   if (!requireApiAuth(request)) return;
 
   JsonDocument doc;
   JsonArray files = doc["files"].to<JsonArray>();
 
-  Dir dir = LittleFS.openDir("/");
-  while (dir.next()) {
-    JsonObject entry = files.add<JsonObject>();
-    entry["name"] = dir.fileName();
-    entry["size"] = dir.fileSize();
-  }
+  listFilesRecursive("/", files);
 
   sendJsonResponse(request, 200, doc);
 }
