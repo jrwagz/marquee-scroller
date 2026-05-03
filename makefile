@@ -12,6 +12,9 @@ PIO_IMAGE:=ghcr.io/jrwagz/pio-image:v6.1.19
 PYTEST_IMAGE:=marquee-pytest:local
 RUFF_IMAGE:=ghcr.io/astral-sh/ruff:0.15.12
 NODE_IMAGE:=node:20-alpine
+# python:3-alpine is small and gives us pip for `esptool merge_bin`. The
+# pio-bundled esptool is v3.0 which predates merge_bin (added in 3.1).
+ESPTOOL_IMAGE:=python:3-alpine
 LOCAL_PIO_CACHE:=./.platformio
 PIO_CACHE:=$(HOME)/.platformio
 
@@ -31,6 +34,7 @@ help:
 	@echo "  webui-typecheck   - TypeScript-typecheck the SPA without emitting"
 	@echo "  webui-clean       - Remove SPA build output and node_modules"
 	@echo "  uploadfs          - Build webui + serial-flash data/ to device LittleFS (wipes /conf.txt)"
+	@echo "  merged            - Combine firmware.bin + littlefs.bin → artifacts/merged.bin (first-install image)"
 	@echo "  ready             - Full pipeline"
 
 .passwd:
@@ -188,6 +192,45 @@ artifacts:
 		mkdir -p artifacts/spa && cp -R data/spa/. artifacts/spa/; \
 		echo "Included SPA bundle"; \
 	fi
+
+# merged.bin = firmware.bin (at 0x0) + littlefs.bin (at 0x300000) joined
+# into a single image via `esptool merge_bin`. This is the recommended
+# first-time install path: one esptool command, no offset arithmetic, no
+# risk of mismatched firmware/SPA versions on a fresh device.
+#
+# OTA updates still use firmware.bin alone (sketch only) and SPA refreshes
+# still use littlefs.bin alone — the merged image is for fresh installs
+# only because it wipes /conf.txt. See docs/WEBUI.md and README.md.
+#
+# 0x300000 is the LittleFS partition start for d1_mini with the 4MB
+# FS:1MB OTA:~1019KB layout used by this project (see platformio.ini).
+#
+# This is the single source of truth for the merge step — both `make merged`
+# and the CI release workflow target this rule, so the esptool invocation
+# only exists in one place.
+artifacts/merged.bin: artifacts/firmware.bin artifacts/littlefs.bin .passwd
+	docker run \
+		--rm $(DOCKER_TTY_ARGS) \
+		-v ${PWD}:${PWD} \
+		-w ${PWD} \
+		-v ${PWD}/.passwd:/etc/passwd:ro \
+		-u $(shell id -u):$(shell id -g) \
+		-e HOME=/tmp \
+		$(ESPTOOL_IMAGE) \
+		sh -c "pip install --quiet --no-cache-dir --target=/tmp/pylib 'esptool>=4.0' && \
+		       PYTHONPATH=/tmp/pylib python /tmp/pylib/bin/esptool.py --chip esp8266 merge_bin \
+		         -o artifacts/merged.bin \
+		         --flash_mode dio --flash_size 4MB \
+		         0x0 artifacts/firmware.bin \
+		         0x300000 artifacts/littlefs.bin"
+	@printf '\nmerged.bin: %s bytes\n' "$$(stat -f%z artifacts/merged.bin 2>/dev/null || stat -c%s artifacts/merged.bin)"
+
+# Full pipeline: build sketch, build FS, gather artifacts, merge. Use this
+# from a fresh checkout. From CI (where build/buildfs/artifacts already
+# ran), invoke `make artifacts/merged.bin` directly to skip the rebuild
+# check on the upstream targets.
+.PHONY: merged
+merged: build buildfs artifacts artifacts/merged.bin
 
 # webui/ — Preact SPA built with Vite. Output lands in data/spa/ alongside
 # .gz siblings so AsyncWebServer's serveStatic handler can ship gzipped

@@ -82,7 +82,7 @@ These are approximate — search for the symbol if the line is off by a few. The
 
 ## Configuration Storage
 
-Runtime config is persisted via LittleFS (aliased as `SPIFFS` in the sketch) at `/conf.txt` as `key=value` pairs.
+Runtime config is persisted via LittleFS at `/conf.txt` as `key=value` pairs.
 The functions `savePersistentConfig()` and `readPersistentConfig()` in [marquee.ino](marquee/marquee.ino)
 own all reads and writes to this file. [Settings.h](marquee/Settings.h) contains compile-time defaults only —
 changes there require a filesystem erase to take effect.
@@ -108,6 +108,29 @@ Lessons from code review — these are non-obvious enough to state explicitly:
 The only disabled rules in this repo are those with deliberate permanent policy reasons
 (MD033, MD024, MD041) — they were disabled intentionally, not to unblock a failure.
 
+**The `/update` and `/updateFromUrl` routes only touch the sketch
+partition, NOT LittleFS.** This is by design — both invoke
+`Update.begin(size, U_FLASH)` and `ESPhttpUpdate.update()` respectively,
+neither of which knows about the FS partition. To OTA the LittleFS
+image (SPA bundle, defaults), use the `/updatefs` route added in
+3.09.3-wagfam, which calls `Update.begin(fsSize, U_FS)`. Issue #63 was
+the textbook case of forgetting this — a device on `3.09.2-wagfam-429ad98`
+with the SPA route registered but `/spa` silently 302'd to `/` because
+the LittleFS partition was empty. Two implications:
+
+1. Anything stored on LittleFS — `/conf.txt`, OTA rollback record,
+   `/spa/*` bundle — survives a `/update` flash but only because the
+   sketch-OTA path ignores it. A fresh device will not have SPA assets
+   until you flash via `/updatefs` (browser, OTA), `make uploadfs`
+   (serial), or `esptool.py write_flash 0x300000 littlefs.bin` (serial).
+
+2. When adding a new feature that depends on LittleFS files, add a
+   runtime fallback: if the file is missing, render a clear error page
+   that names the deploy step the user is missing, not a 302 to `/`.
+   The pattern is `handleNotFound()` in `marquee.ino` — it detects
+   `/spa*` 404s and returns a "SPA bundle not installed" page that
+   explicitly links `/updatefs` as the easiest fix, instead of falling
+   through to the legacy redirect-home behavior.
 **When dropping a third-party route registrar, audit every HTTP method it
 registered.** Libraries that "set up" an endpoint often register more than
 one method on it. The canonical example: ESP8266HTTPUpdateServer used to
@@ -161,13 +184,16 @@ out-of-band if you change the heartbeat parameter set or move to a different
 static-JSON host — don't add it back to the suite.
 
 **`gh` CLI: branches and PRs live directly on `jrwagz/marquee-scroller`.**
-As of 2026-05-01, the upstream maintainer (jrwagz) granted direct push access,
-so feature branches go to `upstream` rather than the `dallanwagz` fork. PRs are
-repo-internal — no cross-fork `--head` form needed.
+As of 2026-05-01, the upstream maintainer (jrwagz) granted direct push access.
+PRs are repo-internal — no cross-fork `--head` form needed.
+
+Note: `origin` is `git@github.com:jrwagz/marquee-scroller.git` (this is the repo
+to push to). `upstream` is `git@github.com:Qrome/marquee-scroller.git` — jrwagz
+does not have push access there; never push to `upstream`.
 
 Templates:
 
-- Push a branch: `git push -u upstream <branch>` (NOT `origin`).
+- Push a branch: `git push -u origin <branch>` (NOT `upstream` — that is Qrome's repo).
 - Open a PR: `gh pr create --repo jrwagz/marquee-scroller -B master -H <branch> ...`
 
 Bare `gh pr create` and `gh repo view` still resolve to `jrwagz/...` (the fork's
