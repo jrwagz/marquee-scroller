@@ -72,15 +72,16 @@ to the device through one of two paths:
 
 ### Option A: Serial flash (full LittleFS replace)
 
-`pio run --target uploadfs` (or `make uploadfs` if/when we add it).
-**Caveat: this wipes the entire LittleFS partition**, including
-`/conf.txt` (web password, calendar URL, API keys, OTA state). After a
-serial flash you'll need to reconnect WiFi and reconfigure from
-scratch. Use this for first-time SPA install or major changes.
+`make uploadfs` (which builds the SPA first, then runs
+`pio run --target uploadfs`). **Caveat: this wipes the entire LittleFS
+partition**, including `/conf.txt` (web password, calendar URL, API
+keys, OTA state). After a serial flash you'll need to reconnect WiFi
+and reconfigure from scratch. Use this for first-time SPA install or
+major changes.
 
 ```bash
-make webui
-pio run -e default --target uploadfs --upload-port /dev/cu.usbserial-XXXX
+make uploadfs                                   # autodetected port
+make uploadfs UPLOAD_PORT=/dev/cu.usbserial-XXXX
 ```
 
 ### Option B: API-based upload (per-file, preserves /conf.txt)
@@ -157,11 +158,13 @@ runtime heap during peak load. Stay small.
 
 ## Future work (separate PRs)
 
-1. **Status dashboard page** — uses `@preact/signals` to render
-   `/api/status` data, refreshed via SSE (when the SSE endpoint lands)
-   or polling.
-2. **Configure form** — replaces the `CHANGE_FORM*` PROGMEM HTML with a
-   typed Preact form against `POST /api/config`.
+1. ~~**Status dashboard page**~~ — landed in PR #59. Polls `/api/status`
+   every 30 s; SSE upgrade still open.
+2. ~~**Configure form**~~ — landed in PRs #59 + #62. All `CHANGE_FORM*`
+   fields (display, refresh, weather toggles, OWM/calendar sources, web
+   password) are now exposed in the SPA Settings tab. The legacy
+   `/configure` route is still wired but no longer needed for any user
+   action.
 3. **Filesystem browser** — leans on `/api/fs/list`, `/api/fs/read`,
    `/api/fs/write`, `/api/fs/delete`.
 4. **Binary file upload endpoint** (`/api/fs/upload`) — multipart

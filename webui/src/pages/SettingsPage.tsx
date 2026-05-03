@@ -17,6 +17,14 @@ type BoolKey = Extract<
   | "show_highlow"
 >;
 
+type StringKey = Extract<
+  keyof ConfigData,
+  | "wagfam_data_url"
+  | "wagfam_api_key"
+  | "owm_api_key"
+  | "geo_location"
+>;
+
 const DEFAULTS: ConfigData = {
   wagfam_data_url: "",
   wagfam_api_key: "",
@@ -44,6 +52,10 @@ const DEFAULTS: ConfigData = {
 
 const config = signal<ConfigData | null>(null);
 const draft = signal<Partial<ConfigData>>({});
+// Password is held separately because the firmware only updates it when the
+// posted value is non-empty (marquee.ino handleApiConfigPost). The form input
+// always starts blank — typing replaces, leaving it blank keeps the current.
+const newPassword = signal("");
 const loadError = signal<string | null>(null);
 const saveStatus = signal<"idle" | "saving" | "ok" | "error">("idle");
 const saveError = signal<string | null>(null);
@@ -54,7 +66,9 @@ const effective = computed<ConfigData>(() => ({
   ...draft.value,
 }));
 
-const isDirty = computed(() => Object.keys(draft.value).length > 0);
+const isDirty = computed(
+  () => Object.keys(draft.value).length > 0 || newPassword.value.length > 0,
+);
 
 function setVal<K extends keyof ConfigData>(key: K, val: ConfigData[K]) {
   if (config.value?.[key] === val) {
@@ -70,13 +84,22 @@ function setBool(key: BoolKey, val: boolean) {
   setVal(key, val);
 }
 
+function setStr(key: StringKey, val: string) {
+  setVal(key, val);
+}
+
 async function save() {
   saveStatus.value = "saving";
   saveError.value = null;
+  const payload: Partial<ConfigData> = { ...draft.value };
+  if (newPassword.value.length > 0) {
+    payload.web_password = newPassword.value;
+  }
   try {
-    await patchConfig(draft.value);
+    await patchConfig(payload);
     config.value = { ...effective.value };
     draft.value = {};
+    newPassword.value = "";
     saveStatus.value = "ok";
     setTimeout(() => {
       saveStatus.value = "idle";
@@ -165,6 +188,14 @@ export function SettingsPage() {
           checked={cfg.is_24hour}
           onChange={(v) => setBool("is_24hour", v)}
         />
+        {!cfg.is_24hour && (
+          <ToggleRow
+            id="pm"
+            label="Show PM indicator"
+            checked={cfg.is_pm}
+            onChange={(v) => setBool("is_pm", v)}
+          />
+        )}
         <ToggleRow
           id="metric"
           label="Metric units (°C / km/h)"
@@ -244,6 +275,66 @@ export function SettingsPage() {
         ))}
       </div>
 
+      <div class="form-section">
+        <h2>Weather source</h2>
+        <TextRow
+          id="owm-key"
+          label="OpenWeatherMap API key"
+          value={cfg.owm_api_key}
+          onChange={(v) => setStr("owm_api_key", v)}
+          placeholder="get one at openweathermap.org"
+        />
+        <TextRow
+          id="geo"
+          label="City / location"
+          value={cfg.geo_location}
+          onChange={(v) => setStr("geo_location", v)}
+          placeholder="city ID, 'Chicago,US', or 'lat,lon'"
+        />
+      </div>
+
+      <div class="form-section">
+        <h2>Calendar source</h2>
+        <TextRow
+          id="wagfam-url"
+          label="Calendar JSON URL"
+          value={cfg.wagfam_data_url}
+          onChange={(v) => setStr("wagfam_data_url", v)}
+          placeholder="https://example.com/data.json"
+        />
+        <TextRow
+          id="wagfam-key"
+          label="Calendar API key"
+          value={cfg.wagfam_api_key}
+          onChange={(v) => setStr("wagfam_api_key", v)}
+          placeholder="optional"
+        />
+      </div>
+
+      <div class="form-section">
+        <h2>Security</h2>
+        <div class="form-row">
+          <label class="form-label" for="webpw">
+            Web password
+          </label>
+          <div class="text-group">
+            <input
+              id="webpw"
+              type="password"
+              autocomplete="new-password"
+              value={newPassword.value}
+              placeholder="leave blank to keep current"
+              onInput={(e) => {
+                newPassword.value = (e.target as HTMLInputElement).value;
+              }}
+            />
+            <span class="form-note">
+              You'll need to re-authenticate after save.
+            </span>
+          </div>
+        </div>
+      </div>
+
       <div class="save-bar">
         <button
           class="btn"
@@ -259,7 +350,10 @@ export function SettingsPage() {
           <span class="error-msg">{saveError.value}</span>
         )}
         {isDirty.value && saveStatus.value === "idle" && (
-          <span class="muted">{Object.keys(draft.value).length} change{Object.keys(draft.value).length !== 1 ? "s" : ""} unsaved</span>
+          <span class="muted">
+            {Object.keys(draft.value).length + (newPassword.value ? 1 : 0)} change
+            {Object.keys(draft.value).length + (newPassword.value ? 1 : 0) !== 1 ? "s" : ""} unsaved
+          </span>
         )}
       </div>
     </div>
@@ -288,5 +382,36 @@ function ToggleRow({
         onChange={(e) => onChange((e.target as HTMLInputElement).checked)}
       />
     </label>
+  );
+}
+
+function TextRow({
+  id,
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <div class="form-row">
+      <label class="form-label" for={id}>
+        {label}
+      </label>
+      <div class="text-group">
+        <input
+          id={id}
+          type="text"
+          value={value}
+          placeholder={placeholder}
+          onInput={(e) => onChange((e.target as HTMLInputElement).value)}
+        />
+      </div>
+    </div>
   );
 }

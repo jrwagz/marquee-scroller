@@ -105,6 +105,20 @@ export function ActionsPage() {
         </div>
       </div>
 
+      <div class="action-card">
+        <div class="action-info">
+          <strong>Firmware Update</strong>
+          <p>
+            Upload a firmware <code>.bin</code> file or flash from a URL.
+            Both pages live outside the SPA.
+          </p>
+        </div>
+        <div class="action-controls">
+          <a class="btn" href="/update">Upload .bin</a>
+          <a class="btn" href="/updateFromUrl">From URL</a>
+        </div>
+      </div>
+
       <p class="muted" style={{ marginTop: "1.5rem", fontSize: "0.8rem" }}>
         Legacy web interface:{" "}
         <a href="/">Home</a> · <a href="/configure">Configure</a>

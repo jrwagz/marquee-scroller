@@ -178,6 +178,27 @@ a {
   gap: 0.5rem;
 }
 
+.text-group {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.25rem;
+  flex: 1.4;
+  min-width: 0;
+}
+
+.text-group input[type="text"],
+.text-group input[type="password"] {
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 0.9rem;
+  font-family: inherit;
+}
+
 .slider-val {
   font-size: 0.85rem;
   color: var(--muted);
@@ -271,6 +292,7 @@ input[type="checkbox"].toggle:checked::after {
   gap: 0.4rem;
   transition: opacity 0.15s;
   white-space: nowrap;
+  text-decoration: none;
 }
 
 .btn:hover:not(:disabled) { opacity: 0.85; }
