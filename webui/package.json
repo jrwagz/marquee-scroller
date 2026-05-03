@@ -1,0 +1,24 @@
+{
+  "name": "marquee-webui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "SPA frontend for the WagFam CalClock — Preact + signals, served from LittleFS at /spa/",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b --noEmit",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "preact": "^10.22.1",
+    "@preact/signals": "^1.3.0"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.9.1",
+    "@types/node": "^20.14.10",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.1",
+    "vite-plugin-compression2": "^1.2.0"
+  }
+}

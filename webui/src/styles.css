@@ -1,0 +1,36 @@
+/* Minimal hand-rolled CSS. No frameworks — flash budget is tight.
+   Variables drive both light + dark mode automatically via color-scheme. */
+:root {
+  --bg: Canvas;
+  --fg: CanvasText;
+  --muted: GrayText;
+  --accent: #2563eb;
+  --border: color-mix(in srgb, CanvasText 15%, transparent);
+  --radius: 6px;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  line-height: 1.5;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.container {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem;
+}
+
+h1 { margin-top: 0; }
+
+a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.muted { color: var(--muted); font-size: 0.9rem; }

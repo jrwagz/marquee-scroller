@@ -47,17 +47,17 @@ void processEverySecond();
 void processEveryMinute();
 String hourMinutes(bool isRefresh);
 char secondsIndicator(bool isRefresh);
-void handlePull();
-void handleSaveConfig();
-void handleSystemReset();
-void handleForgetWifi();
-void handleConfigure();
+void handlePull(AsyncWebServerRequest *request);
+void handleSaveConfig(AsyncWebServerRequest *request);
+void handleSystemReset(AsyncWebServerRequest *request);
+void handleForgetWifi(AsyncWebServerRequest *request);
+void handleConfigure(AsyncWebServerRequest *request);
 void getWeatherData();
-void redirectHome();
-void sendHeader();
-void sendFooter();
-void displayHomePage();
-void configModeCallback (WiFiManager *myWiFiManager);
+void redirectHome(AsyncWebServerRequest *request);
+void sendHeader(AsyncResponseStream *response);
+void sendFooter(AsyncResponseStream *response);
+void displayHomePage(AsyncWebServerRequest *request);
+void configModeCallback (AsyncWiFiManager *myWiFiManager);
 void flashLED(int number, int delayTime);
 String getTempSymbol(bool forWeb = false);
 String getSpeedSymbol();
@@ -72,25 +72,27 @@ void centerPrint(const String &msg, bool extraStuff = false);
 String EncodeUrlSpecialChars(const char *msg);
 void performAutoUpdate(const String &firmwareUrl);
 void checkOtaRollback();
+static void doOtaFlash(const String &firmwareUrl);
 
-void handleUpdateFromUrl();
+void handleUpdateFromUrl(AsyncWebServerRequest *request);
 
 // Security helpers
-bool requireWebAuth();
-static bool requireApiAuth();
-static bool requireApiCsrf();
+static bool requestHasValidBasicAuth(AsyncWebServerRequest *request);
+bool requireWebAuth(AsyncWebServerRequest *request);
+static bool requireApiAuth(AsyncWebServerRequest *request);
+static bool requireApiCsrf(AsyncWebServerRequest *request);
 
 // REST API handlers
-void handleApiStatus();
-void handleApiConfigGet();
-void handleApiConfigPost();
-void handleApiRestart();
-void handleApiRefresh();
-void handleApiOtaStatus();
-void handleApiFsRead();
-void handleApiFsWrite();
-void handleApiFsDelete();
-void handleApiFsList();
+void handleApiStatus(AsyncWebServerRequest *request);
+void handleApiConfigGet(AsyncWebServerRequest *request);
+void handleApiConfigPost(AsyncWebServerRequest *request, JsonVariant &json);
+void handleApiRestart(AsyncWebServerRequest *request);
+void handleApiRefresh(AsyncWebServerRequest *request);
+void handleApiOtaStatus(AsyncWebServerRequest *request);
+void handleApiFsRead(AsyncWebServerRequest *request);
+void handleApiFsWrite(AsyncWebServerRequest *request, JsonVariant &json);
+void handleApiFsDelete(AsyncWebServerRequest *request);
+void handleApiFsList(AsyncWebServerRequest *request);
 
 // LED Settings
 int spacer = 1;  // dots between letters
@@ -127,8 +129,8 @@ boolean SHOW_WIND = false;
 boolean SHOW_PRESSURE = false;
 boolean SHOW_HIGHLOW = false;
 
-ESP8266WebServer server(WEBSERVER_PORT);
-ESP8266HTTPUpdateServer serverUpdater;
+AsyncWebServer server(WEBSERVER_PORT);
+DNSServer dnsServer;  // Used by ESPAsyncWiFiManager for captive-portal DNS during AP mode
 
 static const char WEB_ACTIONS1[] PROGMEM = "<a class='w3-bar-item w3-button' href='/'><i class='fas fa-home'></i> Home</a>"
                         "<a class='w3-bar-item w3-button' href='/configure'><i class='fas fa-cog'></i> Configure</a>";
@@ -183,6 +185,30 @@ String OTA_SAFE_URL = "";       // URL of last confirmed firmware; rollback targ
 uint32_t otaConfirmAt = 0;      // non-zero: millis() target after which the pending update is confirmed
 String otaPendingNewUrl = "";   // URL of firmware pending confirmation (becomes OTA_SAFE_URL on confirm)
 
+// Async-handler deferred-work flag. AsyncWebServer handlers run in the TCP
+// event loop and must NOT block — getWeatherData() makes HTTPS calls that
+// can take 10–20s, long enough to trip the soft watchdog and crash the
+// device with an Exception reset. Handlers that want a refresh set this
+// flag and return immediately; processEverySecond() picks it up and runs
+// the actual fetch in the main loop.
+volatile bool weatherRefreshRequested = false;
+
+// Deferred OTA-from-URL request. /updateFromUrl validates the URL and sends
+// the response, then sets these. processEverySecond() picks it up and runs
+// the (blocking) flash from the main loop. Same async-handler-cant-block
+// rationale as weatherRefreshRequested.
+volatile bool otaFromUrlRequested = false;
+String pendingOtaUrl = "";
+
+// Deferred restart. /api/restart and the /update post-flash path set the
+// flag with a "restart not before" deadline. The main loop pulls the
+// trigger after the deadline, giving the async TCP layer time to flush the
+// response (an in-handler delay() + ESP.restart() can drop the response
+// mid-flight, leaving the client with a recv-failure even though the
+// reboot succeeded).
+volatile bool restartRequested = false;
+volatile uint32_t restartAtMs = 0;
+
 // Security: configurable web password (SEC-05) and CSRF token (SEC-10)
 String webPassword = "";        // Persisted to /conf.txt; generated on first boot if empty
 String csrfToken = "";          // Random token generated on boot, validated on all form submissions
@@ -231,9 +257,9 @@ void setup() {
 
   scrollMessageWait(F("Welcome to the Wagner Family Calendar Clock!!!"));
 
-  //WiFiManager
-  //Local intialization. Once its business is done, there is no need to keep it around
-  WiFiManager wifiManager;
+  //ESPAsyncWiFiManager — shares our AsyncWebServer for the captive portal.
+  //Local initialization. Once its business is done, there is no need to keep it around.
+  AsyncWiFiManager wifiManager(&server, &dnsServer);
 
   // Uncomment for testing wifi manager
   //wifiManager.resetSettings();
@@ -280,33 +306,100 @@ void setup() {
   }
   Serial.println("Web password: " + webPassword);
 
-  // SEC-10: Track custom headers for CSRF protection on API routes
-  server.collectHeaders("X-Requested-With");
-
-  // Web Server is always enabled
-  server.on("/", displayHomePage);
-  server.on("/pull", handlePull);
-  server.on("/systemreset", handleSystemReset);
-  server.on("/forgetwifi", handleForgetWifi);
-  server.on("/configure", handleConfigure);
+  // Web Server is always enabled.
+  // (AsyncWebServer collects all request headers by default — no collectHeaders() call needed.)
+  server.on("/", HTTP_GET, displayHomePage);
+  server.on("/pull", HTTP_GET, handlePull);
+  server.on("/systemreset", HTTP_GET, handleSystemReset);
+  server.on("/forgetwifi", HTTP_GET, handleForgetWifi);
+  server.on("/configure", HTTP_GET, handleConfigure);
   server.on("/saveconfig", HTTP_POST, handleSaveConfig);
-  server.on("/updateFromUrl", handleUpdateFromUrl);
+  server.on("/updateFromUrl", HTTP_GET, handleUpdateFromUrl);
 
   // REST API endpoints
   server.on("/api/status", HTTP_GET, handleApiStatus);
   server.on("/api/config", HTTP_GET, handleApiConfigGet);
-  server.on("/api/config", HTTP_POST, handleApiConfigPost);
   server.on("/api/restart", HTTP_POST, handleApiRestart);
   server.on("/api/refresh", HTTP_POST, handleApiRefresh);
   server.on("/api/ota/status", HTTP_GET, handleApiOtaStatus);
   server.on("/api/fs/read", HTTP_GET, handleApiFsRead);
-  server.on("/api/fs/write", HTTP_POST, handleApiFsWrite);
   server.on("/api/fs/delete", HTTP_DELETE, handleApiFsDelete);
   server.on("/api/fs/list", HTTP_GET, handleApiFsList);
 
+  // JSON-body POST endpoints. AsyncWebServer doesn't populate request->arg("plain")
+  // for JSON bodies, so these go through AsyncCallbackJsonWebHandler which parses
+  // the body into a JsonVariant before invoking the callback.
+  {
+    auto *configPost = new AsyncCallbackJsonWebHandler("/api/config", handleApiConfigPost);
+    configPost->setMethod(HTTP_POST);
+    configPost->setMaxContentLength(2048);
+    server.addHandler(configPost);
+  }
+  {
+    auto *fsWritePost = new AsyncCallbackJsonWebHandler("/api/fs/write", handleApiFsWrite);
+    fsWritePost->setMethod(HTTP_POST);
+    fsWritePost->setMaxContentLength(8192);
+    server.addHandler(fsWritePost);
+  }
+
+  // SEC-01: Firmware upload — manual handler because ESP8266HTTPUpdateServer is
+  // sync-only. Auth check is done manually (via requestHasValidBasicAuth) to
+  // work around the same lib Basic-auth bug that affects request->authenticate().
+  // Upload chunks are silently discarded if auth fails on the first chunk;
+  // the main handler then returns 401 once the body is fully consumed.
+  // Update.runAsync(true) lets the flash routine cooperate with the async event loop.
+  server.on("/update", HTTP_POST,
+    [](AsyncWebServerRequest *request) {
+      if (!requestHasValidBasicAuth(request)) {
+        request->requestAuthentication("Login Required", false);
+        return;
+      }
+      bool ok = !Update.hasError();
+      AsyncWebServerResponse *response = request->beginResponse(200, F("text/plain"), ok ? F("OK") : F("FAIL"));
+      response->addHeader(F("Connection"), F("close"));
+      request->send(response);
+      if (ok) {
+        // Defer restart so the response (and TCP FIN) actually gets to the client
+        // before the network stack tears down.
+        restartAtMs = millis() + 1000;
+        restartRequested = true;
+      }
+    },
+    [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+      if (!requestHasValidBasicAuth(request)) return; // discard; main handler will issue 401
+      if (index == 0) {
+        Serial.printf_P(PSTR("[OTA] Upload start: %s\n"), filename.c_str());
+        Update.runAsync(true);
+        uint32_t maxSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
+        if (!Update.begin(maxSketchSpace, U_FLASH)) {
+          Update.printError(Serial);
+        }
+      }
+      if (!Update.hasError()) {
+        if (Update.write(data, len) != len) {
+          Update.printError(Serial);
+        }
+      }
+      if (final) {
+        if (Update.end(true)) {
+          Serial.printf_P(PSTR("[OTA] Upload complete: %u bytes\n"), (unsigned)(index + len));
+        } else {
+          Update.printError(Serial);
+        }
+      }
+    });
+
+  // SPA frontend — bundle is built into data/spa/ by `make webui` and flashed
+  // to LittleFS. AsyncWebServer's serveStatic auto-detects .gz siblings and
+  // serves them with Content-Encoding: gzip when the client advertises it.
+  // No auth on the static assets themselves; sensitive operations live in
+  // /api/* which is auth-gated. Cache for 10 min — short enough that a UI
+  // bugfix lands within a reasonable window after reflashing the FS.
+  server.serveStatic("/spa", SPIFFS, "/spa/")
+    .setDefaultFile("index.html")
+    .setCacheControl("public, max-age=600");
+
   server.onNotFound(redirectHome);
-  // SEC-01: Protect firmware upload with authentication
-  serverUpdater.setup(&server, "/update", "admin", webPassword.c_str());
   // Start the server
   server.begin();
   Serial.println(F("Server started"));
@@ -346,8 +439,8 @@ void loop() {
     displayDirty = false;
   }
 
-  // Web Server is always enabled
-  server.handleClient();
+  // AsyncWebServer runs in the background via TCP callbacks; no handleClient()
+  // call needed in the main loop.
 }
 
 void processEverySecond() {
@@ -361,9 +454,36 @@ void processEverySecond() {
     savePersistentConfig();
   }
 
-  //Get some Weather Data to serve
-  if ((getMinutesFromLastRefresh() >= minutesBetweenDataRefresh) || lastRefreshDataTimestamp == 0) {
+  //Get some Weather Data to serve, or honor a deferred refresh request from
+  //an async HTTP handler (/pull, /api/refresh) that couldn't block the event loop.
+  if (weatherRefreshRequested
+      || (getMinutesFromLastRefresh() >= minutesBetweenDataRefresh)
+      || lastRefreshDataTimestamp == 0) {
+    weatherRefreshRequested = false;
     getWeatherData();
+  }
+
+  // Honor a deferred restart. The deadline gives the async TCP layer time to
+  // flush the response before we tear down the network stack with ESP.restart().
+  if (restartRequested && millis() >= restartAtMs) {
+    Serial.println(F("[loop] Deferred restart firing"));
+    ESP.restart();
+  }
+
+  // Honor a deferred OTA request from /updateFromUrl. Done from the main loop
+  // because doOtaFlash() blocks for 20–30s and would crash the async event loop.
+  if (otaFromUrlRequested && pendingOtaUrl.length() > 0) {
+    String url = pendingOtaUrl;
+    otaFromUrlRequested = false;
+    pendingOtaUrl = "";
+    digitalWrite(externalLight, LOW);
+    matrix.fillScreen(LOW);
+    scrollMessageWait(F("   ...Updating..."));
+    centerPrint(F("..."));
+    Serial.printf_P(PSTR("[OTA] Starting deferred update from URL: %s\n"), url.c_str());
+    doOtaFlash(url);
+    // Only reached on failure — doOtaFlash reboots the device on success.
+    digitalWrite(externalLight, HIGH);
   }
 }
 
@@ -441,86 +561,87 @@ char secondsIndicator(bool isRefresh) {
   return rtnValue;
 }
 
-void handlePull() {
-  if (!requireWebAuth()) return;
-  getWeatherData(); // this will force a data pull for new weather
-  displayHomePage();
+void handlePull(AsyncWebServerRequest *request) {
+  if (!requireWebAuth(request)) return;
+  // Queue refresh for the main loop (async handlers can't block on HTTPS calls
+  // without tripping the watchdog). Home page renders with current data; the
+  // user can reload after ~30s to see the freshly fetched results.
+  weatherRefreshRequested = true;
+  displayHomePage(request);
 }
 
-void handleSaveConfig() {
-  if (!requireWebAuth()) return;
+void handleSaveConfig(AsyncWebServerRequest *request) {
+  if (!requireWebAuth(request)) return;
   // CSRF validation (SEC-10)
-  if (server.arg("csrf") != csrfToken) {
-    server.send(403, F("text/plain"), F("CSRF token invalid"));
+  if (request->arg("csrf") != csrfToken) {
+    request->send(403, F("text/plain"), F("CSRF token invalid"));
     return;
   }
   // Allow password change (SEC-05)
-  String newPw = server.arg("webPassword");
+  String newPw = request->arg("webPassword");
   if (newPw.length() > 0) webPassword = newPw;
-  WAGFAM_DATA_URL = server.arg("wagFamDataSource");
-  WAGFAM_API_KEY = server.arg("wagFamApiKey");
+  WAGFAM_DATA_URL = request->arg("wagFamDataSource");
+  WAGFAM_API_KEY = request->arg("wagFamApiKey");
   bdayClient.updateBdayClient(WAGFAM_API_KEY,WAGFAM_DATA_URL);
-  APIKEY = server.arg("openWeatherMapApiKey");
-  geoLocation = server.arg("city1");
-  IS_24HOUR = server.hasArg("is24hour");
-  IS_PM = server.hasArg("isPM");
-  SHOW_DATE = server.hasArg("showdate");
-  SHOW_CITY = server.hasArg("showcity");
-  SHOW_CONDITION = server.hasArg("showcondition");
-  SHOW_HUMIDITY = server.hasArg("showhumidity");
-  SHOW_WIND = server.hasArg("showwind");
-  SHOW_PRESSURE = server.hasArg("showpressure");
-  SHOW_HIGHLOW = server.hasArg("showhighlow");
-  IS_METRIC = server.hasArg("metric");
-  displayIntensity = constrain(server.arg("ledintensity").toInt(), 0, 15);
-  minutesBetweenDataRefresh = max(1, (int)server.arg("refresh").toInt());
-  minutesBetweenScrolling = max(1, (int)server.arg("refreshDisplay").toInt());
-  displayScrollSpeed = max(1, (int)server.arg("scrollspeed").toInt());
+  APIKEY = request->arg("openWeatherMapApiKey");
+  geoLocation = request->arg("city1");
+  IS_24HOUR = request->hasArg("is24hour");
+  IS_PM = request->hasArg("isPM");
+  SHOW_DATE = request->hasArg("showdate");
+  SHOW_CITY = request->hasArg("showcity");
+  SHOW_CONDITION = request->hasArg("showcondition");
+  SHOW_HUMIDITY = request->hasArg("showhumidity");
+  SHOW_WIND = request->hasArg("showwind");
+  SHOW_PRESSURE = request->hasArg("showpressure");
+  SHOW_HIGHLOW = request->hasArg("showhighlow");
+  IS_METRIC = request->hasArg("metric");
+  displayIntensity = constrain(request->arg("ledintensity").toInt(), 0, 15);
+  minutesBetweenDataRefresh = max(1, (int)request->arg("refresh").toInt());
+  minutesBetweenScrolling = max(1, (int)request->arg("refreshDisplay").toInt());
+  displayScrollSpeed = max(1, (int)request->arg("scrollspeed").toInt());
   weatherClient.setMetric(IS_METRIC);
   weatherClient.setGeoLocation(geoLocation);
   matrix.fillScreen(LOW); // show black
   savePersistentConfig();
-  getWeatherData(); // this will force a data pull for new weather
-  redirectHome();
+  weatherRefreshRequested = true; // deferred to main loop (see flag comment)
+  redirectHome(request);
 }
 
-void handleSystemReset() {
-  if (!requireWebAuth()) return;
+void handleSystemReset(AsyncWebServerRequest *request) {
+  if (!requireWebAuth(request)) return;
   Serial.println("Reset System Configuration");
   if (SPIFFS.remove(CONFIG)) {
-    redirectHome();
+    redirectHome(request);
     ESP.restart();
   }
 }
 
-void handleForgetWifi() {
-  if (!requireWebAuth()) return;
-  //WiFiManager
-  //Local intialization. Once its business is done, there is no need to keep it around
-  redirectHome();
-  WiFiManager wifiManager;
+void handleForgetWifi(AsyncWebServerRequest *request) {
+  if (!requireWebAuth(request)) return;
+  //ESPAsyncWiFiManager — local instance only used to clear stored credentials
+  redirectHome(request);
+  AsyncWiFiManager wifiManager(&server, &dnsServer);
   wifiManager.resetSettings();
   ESP.restart();
 }
 
-void handleConfigure() {
-  if (!requireWebAuth()) return;
+void handleConfigure(AsyncWebServerRequest *request) {
+  if (!requireWebAuth(request)) return;
   digitalWrite(externalLight, LOW);
-  String html = "";
-  server.sendHeader("Cache-Control", "no-cache, no-store");
-  server.sendHeader("Pragma", "no-cache");
-  server.sendHeader("Expires", "-1");
-  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
-  server.send(200, "text/html", "");
 
-  sendHeader();
+  AsyncResponseStream *response = request->beginResponseStream(F("text/html"));
+  response->addHeader(F("Cache-Control"), F("no-cache, no-store"));
+  response->addHeader(F("Pragma"), F("no-cache"));
+  response->addHeader(F("Expires"), F("-1"));
+
+  sendHeader(response);
 
   String form = FPSTR(CHANGE_FORM1);
   form.replace("%CSRF%", csrfToken);
   form.replace("%WEBPASSWORD%", webPassword);
   form.replace("%WAGFAMDATASOURCE%", WAGFAM_DATA_URL);
   form.replace("%WAGFAMAPIKEY%", WAGFAM_API_KEY);
-  server.sendContent(form); // Send another chunk of the form
+  response->print(form);
 
 
   form = FPSTR(CHANGE_FORM2);
@@ -579,7 +700,7 @@ void handleConfigure() {
     checked = "checked='checked'";
   }
   form.replace("%CHECKED%", checked);
-  server.sendContent(form);
+  response->print(form);
 
   form = FPSTR(CHANGE_FORM3);
   String isPmChecked = "";
@@ -598,18 +719,16 @@ void handleConfigure() {
   form.replace("%OPTIONS%", options);
   form.replace("%REFRESH_DISPLAY%", String(minutesBetweenScrolling));
 
-  server.sendContent(form); // Send another chunk of the form
+  response->print(form);
 
-  server.sendContent(FPSTR(CHANGE_FORM4)); // Send another chunk of the for
+  response->print(FPSTR(CHANGE_FORM4));
 
-  // Add the firmware update form
-  form = FPSTR(UPDATE_FORM);
-  server.sendContent(form); // Send the update form
+  // Firmware update form
+  response->print(FPSTR(UPDATE_FORM));
 
-  sendFooter();
+  sendFooter(response);
 
-  server.sendContent("");
-  server.client().stop();
+  request->send(response);
   digitalWrite(externalLight, HIGH);
 }
 
@@ -632,16 +751,16 @@ static void doOtaFlash(const String &firmwareUrl) {
     ret, ESPhttpUpdate.getLastErrorString().c_str());
 }
 
-void handleUpdateFromUrl() {
-  if (!requireWebAuth()) return;
-  String firmwareUrl = server.arg("firmwareUrl");
-  server.sendHeader("Cache-Control", "no-cache, no-store");
-  server.sendHeader("Pragma", "no-cache");
-  server.sendHeader("Expires", "-1");
-  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
-  server.send(200, "text/html", "");
+void handleUpdateFromUrl(AsyncWebServerRequest *request) {
+  if (!requireWebAuth(request)) return;
+  String firmwareUrl = request->arg("firmwareUrl");
 
-  sendHeader();
+  AsyncResponseStream *response = request->beginResponseStream(F("text/html"));
+  response->addHeader(F("Cache-Control"), F("no-cache, no-store"));
+  response->addHeader(F("Pragma"), F("no-cache"));
+  response->addHeader(F("Expires"), F("-1"));
+
+  sendHeader(response);
 
   int has_error = 0;
   String error_message = "";
@@ -660,28 +779,20 @@ void handleUpdateFromUrl() {
   }
 
   if (has_error != 0) {
-    server.sendContent("<p>ERROR: "+error_message+"</p>");
-    sendFooter();
-    server.sendContent("");
-    server.client().stop();
+    response->print("<p>ERROR: "+error_message+"</p>");
+    sendFooter(response);
+    request->send(response);
     return;
   }
 
-  server.sendContent("<p>STARTING UPDATE from "+firmwareUrl+"</p>");
-  sendFooter();
-  server.sendContent("");
-  server.client().stop();
+  response->print("<p>STARTING UPDATE from "+firmwareUrl+"</p><p>The device will reboot when the update completes.</p>");
+  sendFooter(response);
+  request->send(response);
 
-  digitalWrite(externalLight, LOW);
-  matrix.fillScreen(LOW);
-  scrollMessageWait("   ...Updating...");
-  centerPrint("...");
-
-  Serial.printf_P(PSTR("[OTA] Starting update from URL: %s\n"), firmwareUrl.c_str());
-  doOtaFlash(firmwareUrl);
-
-  // Only reached on failure
-  digitalWrite(externalLight, HIGH);
+  // Defer the actual flash to the main loop — async handlers can't block on
+  // the 20–30s ESPhttpUpdate.update() call without crashing the event loop.
+  pendingOtaUrl = firmwareUrl;
+  otaFromUrlRequested = true;
 }
 
 // Trigger an OTA update from the given HTTP URL (called from the auto-update path).
@@ -872,18 +983,17 @@ void getWeatherData() //client function to send/receive GET request data.
   digitalWrite(externalLight, HIGH);
 }
 
-void redirectHome() {
+void redirectHome(AsyncWebServerRequest *request) {
   // Send them back to the Root Directory
-  server.sendHeader("Location", String("/"), true);
-  server.sendHeader("Cache-Control", "no-cache, no-store");
-  server.sendHeader("Pragma", "no-cache");
-  server.sendHeader("Expires", "-1");
-  server.send(302, "text/plain", "");
-  server.client().stop();
-  delay(1000);
+  AsyncWebServerResponse *response = request->beginResponse(302, F("text/plain"), F(""));
+  response->addHeader(F("Location"), F("/"));
+  response->addHeader(F("Cache-Control"), F("no-cache, no-store"));
+  response->addHeader(F("Pragma"), F("no-cache"));
+  response->addHeader(F("Expires"), F("-1"));
+  request->send(response);
 }
 
-void sendHeader() {
+void sendHeader(AsyncResponseStream *response) {
   String html = "<!DOCTYPE HTML>";
   html += "<html><head><title>Marquee Scroller</title><link rel='icon' href='data:;base64,='>";
   html += "<meta http-equiv='Content-Type' content='text/html; charset=UTF-8' />";
@@ -892,17 +1002,17 @@ void sendHeader() {
   html += "<link rel='stylesheet' href='https://www.w3schools.com/lib/w3-theme-blue-grey.css'>";
   html += "<link rel='stylesheet' href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.8.1/css/all.min.css'>";
   html += "</head><body>";
-  server.sendContent(html);
+  response->print(html);
   html = "<nav class='w3-sidebar w3-bar-block w3-card' style='margin-top:88px' id='mySidebar'>";
   html += "<div class='w3-container w3-theme-d2'>";
   html += "<span onclick='closeSidebar()' class='w3-button w3-display-topright w3-large'><i class='fas fa-times'></i></span>";
   html += "<div class='w3-left'><img src='https://openweathermap.org/img/w/" + weatherClient.getIcon() + ".png' alt='" + weatherClient.getWeatherDescription() + "'></div>";
   html += "<div class='w3-padding'>Menu</div></div>";
-  server.sendContent(html);
+  response->print(html);
 
-  server.sendContent(FPSTR(WEB_ACTIONS1));
-  server.sendContent(FPSTR(WEB_ACTIONS2));
-  server.sendContent(FPSTR(WEB_ACTION3));
+  response->print(FPSTR(WEB_ACTIONS1));
+  response->print(FPSTR(WEB_ACTIONS2));
+  response->print(FPSTR(WEB_ACTION3));
 
   html = "</nav>";
   html += "<header class='w3-top w3-bar w3-theme'><button class='w3-bar-item w3-button w3-xxxlarge w3-hover-theme' onclick='openSidebar()'><i class='fas fa-bars'></i></button><h2 class='w3-bar-item'>WagFam CalClock</h2></header>";
@@ -910,10 +1020,10 @@ void sendHeader() {
   html += "function openSidebar(){document.getElementById('mySidebar').style.display='block'}function closeSidebar(){document.getElementById('mySidebar').style.display='none'}closeSidebar();";
   html += "</script>";
   html += "<br><div class='w3-container w3-large' style='margin-top:88px'>";
-  server.sendContent(html);
+  response->print(html);
 }
 
-void sendFooter() {
+void sendFooter(AsyncResponseStream *response) {
   int8_t rssi = getWifiQuality();
   String html = "<br><br><br>";
   html += "</div>";
@@ -924,20 +1034,19 @@ void sendFooter() {
   html += String(rssi) + "%";
   html += "</footer>";
   html += "</body></html>";
-  server.sendContent(html);
+  response->print(html);
 }
 
-void displayHomePage() {
-  if (!requireWebAuth()) return;
+void displayHomePage(AsyncWebServerRequest *request) {
+  if (!requireWebAuth(request)) return;
   digitalWrite(externalLight, LOW);
   String html = "";
 
-  server.sendHeader("Cache-Control", "no-cache, no-store");
-  server.sendHeader("Pragma", "no-cache");
-  server.sendHeader("Expires", "-1");
-  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
-  server.send(200, "text/html", "");
-  sendHeader();
+  AsyncResponseStream *response = request->beginResponseStream(F("text/html"));
+  response->addHeader(F("Cache-Control"), F("no-cache, no-store"));
+  response->addHeader(F("Pragma"), F("no-cache"));
+  response->addHeader(F("Expires"), F("-1"));
+  sendHeader(response);
 
   // Send Over the Main Wagner Family Data Section first
   if (WAGFAM_DATA_URL == "") {
@@ -958,7 +1067,7 @@ void displayHomePage() {
     html += "</ul></div>";
   }
   html += "<hr>";
-  server.sendContent(html); // Send over the first section
+  response->print(html);
   html = "";
 
 
@@ -993,15 +1102,13 @@ void displayHomePage() {
   }
 
 
-  server.sendContent(html); // spit out what we got
-  html = ""; // fresh start
-  sendFooter();
-  server.sendContent("");
-  server.client().stop();
+  response->print(html);
+  sendFooter(response);
+  request->send(response);
   digitalWrite(externalLight, HIGH);
 }
 
-void configModeCallback (WiFiManager *myWiFiManager) {
+void configModeCallback (AsyncWiFiManager *myWiFiManager) {
   Serial.println("Entered config mode");
   Serial.println(WiFi.softAPIP());
   Serial.println("Wifi Manager");
@@ -1201,7 +1308,6 @@ void readPersistentConfig() {
 
 void scrollMessageWait(const String &msg) {
   for ( int i = 0 ; i < width * (int)msg.length() + matrix.width() - 1 - spacer; i++ ) {
-    server.handleClient();
     matrix.fillScreen(LOW);
 
     int letter = i / width;
@@ -1262,10 +1368,29 @@ void centerPrint(const String &msg, boolean extraStuff) {
 
 // ── Security Helpers ────────────────────────────────────────────────────────
 
+// Manual Basic-auth verifier. Works around a bug in ESPAsyncWebServer-esphome
+// 3.3.0 where `request->authenticate(user, pass)` rejects valid Basic credentials
+// on ESP8266: its checkBasicAuthentication() uses `base64_encode_expected_len(n)`
+// which adds 1 byte to the count to account for a trailing newline that the
+// encoder does NOT emit on inputs short enough to fit on a single base64 line.
+// The length check (`strlen(hash) != encodedLen`) then fails for every real
+// credential. Using base64::encode (ESP8266 core wrapper, doNewLines=false by
+// default) gives us a clean comparable encoding.
+static bool requestHasValidBasicAuth(AsyncWebServerRequest *request) {
+  if (!request->hasHeader("Authorization")) return false;
+  String hdr = request->header("Authorization");
+  if (!hdr.startsWith("Basic ")) return false;
+  String received = hdr.substring(6);
+  received.trim();
+  String expected = base64::encode(String("admin:") + webPassword);
+  return received == expected;
+}
+
 // SEC-04: Require HTTP Basic Auth for all web UI routes
-bool requireWebAuth() {
-  if (!server.authenticate("admin", webPassword.c_str())) {
-    server.requestAuthentication();
+bool requireWebAuth(AsyncWebServerRequest *request) {
+  if (!requestHasValidBasicAuth(request)) {
+    // isDigest=false → issue Basic challenge so browsers/curl/scripts use Basic
+    request->requestAuthentication("Login Required", false);
     return false;
   }
   return true;
@@ -1274,44 +1399,45 @@ bool requireWebAuth() {
 
 // ── REST API ────────────────────────────────────────────────────────────────
 
-static void sendJsonResponse(int code, JsonDocument &doc) {
-  String body;
-  serializeJson(doc, body);
-  server.send(code, F("application/json"), body);
+static void sendJsonResponse(AsyncWebServerRequest *request, int code, JsonDocument &doc) {
+  AsyncResponseStream *response = request->beginResponseStream(F("application/json"));
+  response->setCode(code);
+  serializeJson(doc, *response);
+  request->send(response);
 }
 
-static void sendJsonOk(const char *message = "ok") {
+static void sendJsonOk(AsyncWebServerRequest *request, const char *message = "ok") {
   JsonDocument doc;
   doc["status"] = message;
-  sendJsonResponse(200, doc);
+  sendJsonResponse(request, 200, doc);
 }
 
-static void sendJsonError(int code, const char *message) {
+static void sendJsonError(AsyncWebServerRequest *request, int code, const char *message) {
   JsonDocument doc;
   doc["error"] = message;
-  sendJsonResponse(code, doc);
+  sendJsonResponse(request, code, doc);
 }
 
 // SEC-05: Use configurable password for API auth
-static bool requireApiAuth() {
-  if (!server.authenticate("admin", webPassword.c_str())) {
-    sendJsonError(401, "unauthorized");
+static bool requireApiAuth(AsyncWebServerRequest *request) {
+  if (!requestHasValidBasicAuth(request)) {
+    sendJsonError(request, 401, "unauthorized");
     return false;
   }
   return true;
 }
 
 // SEC-10: Require X-Requested-With header on API mutations to prevent CSRF
-static bool requireApiCsrf() {
-  if (server.header("X-Requested-With") == "") {
-    sendJsonError(403, "missing X-Requested-With header");
+static bool requireApiCsrf(AsyncWebServerRequest *request) {
+  if (!request->hasHeader("X-Requested-With")) {
+    sendJsonError(request, 403, "missing X-Requested-With header");
     return false;
   }
   return true;
 }
 
-void handleApiStatus() {
-  if (!requireApiAuth()) return;
+void handleApiStatus(AsyncWebServerRequest *request) {
+  if (!requireApiAuth(request)) return;
 
   JsonDocument doc;
   doc["version"] = VERSION;
@@ -1337,11 +1463,11 @@ void handleApiStatus() {
   ota["safe_url"] = OTA_SAFE_URL;
   ota["pending_file_exists"] = SPIFFS.exists(OTA_PENDING_FILE);
 
-  sendJsonResponse(200, doc);
+  sendJsonResponse(request, 200, doc);
 }
 
-void handleApiConfigGet() {
-  if (!requireApiAuth()) return;
+void handleApiConfigGet(AsyncWebServerRequest *request) {
+  if (!requireApiAuth(request)) return;
 
   JsonDocument doc;
   doc["wagfam_data_url"] = WAGFAM_DATA_URL;
@@ -1367,72 +1493,73 @@ void handleApiConfigGet() {
   doc["device_name"] = DEVICE_NAME;
   doc["web_password"] = webPassword;
 
-  sendJsonResponse(200, doc);
+  sendJsonResponse(request, 200, doc);
 }
 
-void handleApiConfigPost() {
-  if (!requireApiAuth()) return;
-  if (!requireApiCsrf()) return;
+void handleApiConfigPost(AsyncWebServerRequest *request, JsonVariant &json) {
+  if (!requireApiAuth(request)) return;
+  if (!requireApiCsrf(request)) return;
 
-  JsonDocument doc;
-  DeserializationError err = deserializeJson(doc, server.arg("plain"));
-  if (err) {
-    sendJsonError(400, "invalid JSON");
+  if (!json.is<JsonObject>()) {
+    sendJsonError(request, 400, "expected JSON object");
     return;
   }
 
   // Partial update: only set fields that are present in the request body
-  if (doc["wagfam_data_url"].is<const char*>()) WAGFAM_DATA_URL = doc["wagfam_data_url"].as<String>();
-  if (doc["wagfam_api_key"].is<const char*>()) WAGFAM_API_KEY = doc["wagfam_api_key"].as<String>();
-  if (doc["wagfam_event_today"].is<bool>()) WAGFAM_EVENT_TODAY = doc["wagfam_event_today"].as<bool>();
-  if (doc["owm_api_key"].is<const char*>()) APIKEY = doc["owm_api_key"].as<String>();
-  if (doc["geo_location"].is<const char*>()) geoLocation = doc["geo_location"].as<String>();
-  if (doc["is_24hour"].is<bool>()) IS_24HOUR = doc["is_24hour"].as<bool>();
-  if (doc["is_pm"].is<bool>()) IS_PM = doc["is_pm"].as<bool>();
-  if (doc["is_metric"].is<bool>()) IS_METRIC = doc["is_metric"].as<bool>();
-  if (doc["display_intensity"].is<int>()) displayIntensity = constrain(doc["display_intensity"].as<int>(), 0, 15);
-  if (doc["display_scroll_speed"].is<int>()) displayScrollSpeed = max(1, doc["display_scroll_speed"].as<int>());
-  if (doc["minutes_between_data_refresh"].is<int>()) minutesBetweenDataRefresh = max(1, doc["minutes_between_data_refresh"].as<int>());
-  if (doc["minutes_between_scrolling"].is<int>()) minutesBetweenScrolling = max(1, doc["minutes_between_scrolling"].as<int>());
-  if (doc["show_date"].is<bool>()) SHOW_DATE = doc["show_date"].as<bool>();
-  if (doc["show_city"].is<bool>()) SHOW_CITY = doc["show_city"].as<bool>();
-  if (doc["show_condition"].is<bool>()) SHOW_CONDITION = doc["show_condition"].as<bool>();
-  if (doc["show_humidity"].is<bool>()) SHOW_HUMIDITY = doc["show_humidity"].as<bool>();
-  if (doc["show_wind"].is<bool>()) SHOW_WIND = doc["show_wind"].as<bool>();
-  if (doc["show_pressure"].is<bool>()) SHOW_PRESSURE = doc["show_pressure"].as<bool>();
-  if (doc["show_highlow"].is<bool>()) SHOW_HIGHLOW = doc["show_highlow"].as<bool>();
-  if (doc["web_password"].is<const char*>()) {
-    String newPw = doc["web_password"].as<String>();
+  if (json["wagfam_data_url"].is<const char*>()) WAGFAM_DATA_URL = json["wagfam_data_url"].as<String>();
+  if (json["wagfam_api_key"].is<const char*>()) WAGFAM_API_KEY = json["wagfam_api_key"].as<String>();
+  if (json["wagfam_event_today"].is<bool>()) WAGFAM_EVENT_TODAY = json["wagfam_event_today"].as<bool>();
+  if (json["owm_api_key"].is<const char*>()) APIKEY = json["owm_api_key"].as<String>();
+  if (json["geo_location"].is<const char*>()) geoLocation = json["geo_location"].as<String>();
+  if (json["is_24hour"].is<bool>()) IS_24HOUR = json["is_24hour"].as<bool>();
+  if (json["is_pm"].is<bool>()) IS_PM = json["is_pm"].as<bool>();
+  if (json["is_metric"].is<bool>()) IS_METRIC = json["is_metric"].as<bool>();
+  if (json["display_intensity"].is<int>()) displayIntensity = constrain(json["display_intensity"].as<int>(), 0, 15);
+  if (json["display_scroll_speed"].is<int>()) displayScrollSpeed = max(1, json["display_scroll_speed"].as<int>());
+  if (json["minutes_between_data_refresh"].is<int>()) minutesBetweenDataRefresh = max(1, json["minutes_between_data_refresh"].as<int>());
+  if (json["minutes_between_scrolling"].is<int>()) minutesBetweenScrolling = max(1, json["minutes_between_scrolling"].as<int>());
+  if (json["show_date"].is<bool>()) SHOW_DATE = json["show_date"].as<bool>();
+  if (json["show_city"].is<bool>()) SHOW_CITY = json["show_city"].as<bool>();
+  if (json["show_condition"].is<bool>()) SHOW_CONDITION = json["show_condition"].as<bool>();
+  if (json["show_humidity"].is<bool>()) SHOW_HUMIDITY = json["show_humidity"].as<bool>();
+  if (json["show_wind"].is<bool>()) SHOW_WIND = json["show_wind"].as<bool>();
+  if (json["show_pressure"].is<bool>()) SHOW_PRESSURE = json["show_pressure"].as<bool>();
+  if (json["show_highlow"].is<bool>()) SHOW_HIGHLOW = json["show_highlow"].as<bool>();
+  if (json["web_password"].is<const char*>()) {
+    String newPw = json["web_password"].as<String>();
     if (newPw.length() > 0) webPassword = newPw;
   }
 
   savePersistentConfig();
-  sendJsonOk("config updated");
+  sendJsonOk(request, "config updated");
 }
 
-void handleApiRestart() {
-  if (!requireApiAuth()) return;
-  if (!requireApiCsrf()) return;
+void handleApiRestart(AsyncWebServerRequest *request) {
+  if (!requireApiAuth(request)) return;
+  if (!requireApiCsrf(request)) return;
   // SEC-16: Rate-limit restarts to prevent reboot-loop DoS
   if (lastRestartMs != 0 && (millis() - lastRestartMs) < 60000) {
-    sendJsonError(429, "restart rate limited (60s cooldown)");
+    sendJsonError(request, 429, "restart rate limited (60s cooldown)");
     return;
   }
   lastRestartMs = millis();
-  sendJsonOk("restarting");
-  delay(500);
-  ESP.restart();
+  sendJsonOk(request, "restarting");
+  // Defer the actual restart so the async TCP layer can transmit the response.
+  restartAtMs = millis() + 1000;
+  restartRequested = true;
 }
 
-void handleApiRefresh() {
-  if (!requireApiAuth()) return;
-  if (!requireApiCsrf()) return;
-  getWeatherData();
-  sendJsonOk("refresh complete");
+void handleApiRefresh(AsyncWebServerRequest *request) {
+  if (!requireApiAuth(request)) return;
+  if (!requireApiCsrf(request)) return;
+  // Queue work for the main loop — see weatherRefreshRequested comment.
+  // Caller can poll /api/status to see lastRefreshDataTimestamp move.
+  weatherRefreshRequested = true;
+  sendJsonOk(request, "refresh queued");
 }
 
-void handleApiOtaStatus() {
-  if (!requireApiAuth()) return;
+void handleApiOtaStatus(AsyncWebServerRequest *request) {
+  if (!requireApiAuth(request)) return;
 
   JsonDocument doc;
   doc["pending_file_exists"] = SPIFFS.exists(OTA_PENDING_FILE);
@@ -1453,20 +1580,20 @@ void handleApiOtaStatus() {
     f.close();
   }
 
-  sendJsonResponse(200, doc);
+  sendJsonResponse(request, 200, doc);
 }
 
-void handleApiFsRead() {
-  if (!requireApiAuth()) return;
+void handleApiFsRead(AsyncWebServerRequest *request) {
+  if (!requireApiAuth(request)) return;
 
-  String path = server.arg("path");
-  if (path == "") { sendJsonError(400, "missing 'path' parameter"); return; }
-  if (!SPIFFS.exists(path)) { sendJsonError(404, "file not found"); return; }
+  String path = request->arg("path");
+  if (path == "") { sendJsonError(request, 400, "missing 'path' parameter"); return; }
+  if (!SPIFFS.exists(path)) { sendJsonError(request, 404, "file not found"); return; }
 
   File f = SPIFFS.open(path, "r");
   if (f.size() > 4096) {
     f.close();
-    sendJsonError(413, "file too large (max 4KB)");
+    sendJsonError(request, 413, "file too large (max 4KB)");
     return;
   }
   String content = f.readString();
@@ -1476,29 +1603,27 @@ void handleApiFsRead() {
   doc["path"] = path;
   doc["size"] = content.length();
   doc["content"] = content;
-  sendJsonResponse(200, doc);
+  sendJsonResponse(request, 200, doc);
 }
 
-void handleApiFsWrite() {
-  if (!requireApiAuth()) return;
-  if (!requireApiCsrf()) return;
+void handleApiFsWrite(AsyncWebServerRequest *request, JsonVariant &json) {
+  if (!requireApiAuth(request)) return;
+  if (!requireApiCsrf(request)) return;
 
-  JsonDocument doc;
-  DeserializationError err = deserializeJson(doc, server.arg("plain"));
-  if (err) { sendJsonError(400, "invalid JSON"); return; }
+  if (!json.is<JsonObject>()) { sendJsonError(request, 400, "expected JSON object"); return; }
 
-  const char *path = doc["path"];
-  const char *content = doc["content"];
-  if (!path || !content) { sendJsonError(400, "missing 'path' or 'content'"); return; }
+  const char *path = json["path"];
+  const char *content = json["content"];
+  if (!path || !content) { sendJsonError(request, 400, "missing 'path' or 'content'"); return; }
 
   // SEC-06: Block writes to critical system files
   if (isProtectedPath(path, CONFIG, OTA_PENDING_FILE)) {
-    sendJsonError(403, "protected path — use /api/config instead");
+    sendJsonError(request, 403, "protected path — use /api/config instead");
     return;
   }
 
   File f = SPIFFS.open(path, "w");
-  if (!f) { sendJsonError(500, "failed to open file for writing"); return; }
+  if (!f) { sendJsonError(request, 500, "failed to open file for writing"); return; }
   f.print(content);
   f.close();
 
@@ -1506,29 +1631,29 @@ void handleApiFsWrite() {
   resp["status"] = "written";
   resp["path"] = path;
   resp["size"] = (int)strlen(content);
-  sendJsonResponse(200, resp);
+  sendJsonResponse(request, 200, resp);
 }
 
-void handleApiFsDelete() {
-  if (!requireApiAuth()) return;
-  if (!requireApiCsrf()) return;
+void handleApiFsDelete(AsyncWebServerRequest *request) {
+  if (!requireApiAuth(request)) return;
+  if (!requireApiCsrf(request)) return;
 
-  String path = server.arg("path");
-  if (path == "") { sendJsonError(400, "missing 'path' parameter"); return; }
-  if (!SPIFFS.exists(path)) { sendJsonError(404, "file not found"); return; }
+  String path = request->arg("path");
+  if (path == "") { sendJsonError(request, 400, "missing 'path' parameter"); return; }
+  if (!SPIFFS.exists(path)) { sendJsonError(request, 404, "file not found"); return; }
 
   // SEC-06: Block deletion of critical system files
   if (isProtectedPath(path.c_str(), CONFIG, OTA_PENDING_FILE)) {
-    sendJsonError(403, "protected path");
+    sendJsonError(request, 403, "protected path");
     return;
   }
 
   SPIFFS.remove(path);
-  sendJsonOk("deleted");
+  sendJsonOk(request, "deleted");
 }
 
-void handleApiFsList() {
-  if (!requireApiAuth()) return;
+void handleApiFsList(AsyncWebServerRequest *request) {
+  if (!requireApiAuth(request)) return;
 
   JsonDocument doc;
   JsonArray files = doc["files"].to<JsonArray>();
@@ -1540,7 +1665,7 @@ void handleApiFsList() {
     entry["size"] = dir.fileSize();
   }
 
-  sendJsonResponse(200, doc);
+  sendJsonResponse(request, 200, doc);
 }
 
 // ── End REST API ────────────────────────────────────────────────────────────

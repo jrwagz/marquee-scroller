@@ -5,12 +5,13 @@ else
 DOCKER_TTY_ARGS=
 endif
 
-MD_FILES:=$(shell find . -name "*.md" -not -path "./.venv/*" -not -path "*/.venv/*" -not -path "./.pytest_cache/*" -not -path "*/.pytest_cache/*" -not -path "./lib/*" -not -path "./.pio/*" -not -path "./.platformio/*")
+MD_FILES:=$(shell find . -name "*.md" -not -path "./.venv/*" -not -path "*/.venv/*" -not -path "./.pytest_cache/*" -not -path "*/.pytest_cache/*" -not -path "./lib/*" -not -path "./.pio/*" -not -path "./.platformio/*" -not -path "*/node_modules/*")
 
 MARKDOWNLINT_IMAGE:=davidanson/markdownlint-cli2:v0.22.0
 PIO_IMAGE:=ghcr.io/jrwagz/pio-image:v6.1.19
 PYTEST_IMAGE:=marquee-pytest:local
 RUFF_IMAGE:=ghcr.io/astral-sh/ruff:0.15.12
+NODE_IMAGE:=node:20-alpine
 LOCAL_PIO_CACHE:=./.platformio
 PIO_CACHE:=$(HOME)/.platformio
 
@@ -26,6 +27,9 @@ help:
 	@echo "  test-scripts      - Run Python tests for scripts/ with 100% coverage check"
 	@echo "  test-integration  - Run integration tests against a live device (requires HOST=<ip>)"
 	@echo "  test              - Run test-native + test-scripts"
+	@echo "  webui             - Build the SPA frontend (Vite/Preact) into data/spa/"
+	@echo "  webui-typecheck   - TypeScript-typecheck the SPA without emitting"
+	@echo "  webui-clean       - Remove SPA build output and node_modules"
 	@echo "  ready             - Full pipeline"
 
 .passwd:
@@ -50,7 +54,7 @@ clean-pytest-image:
 	docker rmi $(PYTEST_IMAGE) 2>/dev/null || true
 
 .PHONY: clean
-clean: clean-pio clean-passwd clean-artifacts clean-pytest-image
+clean: clean-pio clean-passwd clean-artifacts clean-pytest-image webui-clean
 
 .PHONY: lint-markdown
 lint-markdown: .passwd
@@ -146,10 +150,90 @@ build: .passwd
 		pio run -e default
 	@printf '\nBuilt: %s\n\n' "$$(cat artifacts/VERSION.txt)"
 
+.PHONY: buildfs
+buildfs: .passwd
+	mkdir -p $(LOCAL_PIO_CACHE)
+	docker run \
+		--rm $(DOCKER_TTY_ARGS) \
+		-e CI \
+		-e USER \
+		-e GIT_HASH=$(shell git rev-parse --short HEAD 2>/dev/null || echo unknown) \
+		-v ${PWD}:${PWD} \
+		-w ${PWD} \
+		-v ${PWD}/.passwd:/etc/passwd:ro \
+		-v $(LOCAL_PIO_CACHE):$(PIO_CACHE) \
+		-u $(shell id -u):$(shell id -g) \
+		$(PIO_IMAGE) \
+		pio run -e default --target buildfs
+
 .PHONY: artifacts
 artifacts:
 	mkdir -p artifacts/
 	cp .pio/build/default/firmware.bin artifacts/firmware.bin
+	@if [ -f .pio/build/default/littlefs.bin ]; then \
+		cp .pio/build/default/littlefs.bin artifacts/littlefs.bin; \
+		echo "Included littlefs.bin ($$(stat -f%z artifacts/littlefs.bin 2>/dev/null || stat -c%s artifacts/littlefs.bin) bytes)"; \
+	fi
+	@if [ -d data/spa ]; then \
+		mkdir -p artifacts/spa && cp -R data/spa/. artifacts/spa/; \
+		echo "Included SPA bundle"; \
+	fi
+
+# webui/ — Preact SPA built with Vite. Output lands in data/spa/ alongside
+# .gz siblings so AsyncWebServer's serveStatic handler can ship gzipped
+# bytes directly (saves ~3-4x on flash bandwidth + LittleFS storage).
+#
+# The npm install step is gated on a stamp file so we don't reinstall on
+# every build. If webui/package.json changes, the stamp is invalidated
+# and dependencies are reinstalled.
+webui/node_modules/.installed: webui/package.json
+	docker run \
+		--rm $(DOCKER_TTY_ARGS) \
+		-v ${PWD}:${PWD} \
+		-w ${PWD}/webui \
+		-v ${PWD}/.passwd:/etc/passwd:ro \
+		-u $(shell id -u):$(shell id -g) \
+		-e HOME=${PWD}/webui \
+		-e npm_config_cache=${PWD}/webui/.npm-cache \
+		$(NODE_IMAGE) \
+		npm install --no-audit --no-fund
+	touch webui/node_modules/.installed
+
+.PHONY: webui
+webui: .passwd webui/node_modules/.installed
+	docker run \
+		--rm $(DOCKER_TTY_ARGS) \
+		-v ${PWD}:${PWD} \
+		-w ${PWD}/webui \
+		-v ${PWD}/.passwd:/etc/passwd:ro \
+		-u $(shell id -u):$(shell id -g) \
+		-e HOME=${PWD}/webui \
+		-e npm_config_cache=${PWD}/webui/.npm-cache \
+		$(NODE_IMAGE) \
+		npm run build
+	@echo ""
+	@echo "SPA bundle written to data/spa/. Sizes:"
+	@cd data/spa && find . -type f \( -name '*.js' -o -name '*.css' -o -name '*.html' \) -exec ls -l {} \; | awk '{printf "  %8d  %s\n", $$5, $$NF}'
+	@echo ""
+	@echo "  Total raw  : $$(find data/spa -type f -not -name '*.gz' -exec cat {} + | wc -c) bytes"
+	@echo "  Total gzip : $$(find data/spa -name '*.gz' -exec cat {} + | wc -c) bytes"
+
+.PHONY: webui-typecheck
+webui-typecheck: .passwd webui/node_modules/.installed
+	docker run \
+		--rm $(DOCKER_TTY_ARGS) \
+		-v ${PWD}:${PWD} \
+		-w ${PWD}/webui \
+		-v ${PWD}/.passwd:/etc/passwd:ro \
+		-u $(shell id -u):$(shell id -g) \
+		-e HOME=${PWD}/webui \
+		-e npm_config_cache=${PWD}/webui/.npm-cache \
+		$(NODE_IMAGE) \
+		npm run typecheck
+
+.PHONY: webui-clean
+webui-clean:
+	rm -rf data/spa webui/node_modules webui/.vite
 
 .PHONY: ready
-ready: clean lint test build artifacts
+ready: clean lint test build artifacts webui webui-typecheck

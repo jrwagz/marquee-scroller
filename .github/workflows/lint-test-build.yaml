@@ -33,6 +33,9 @@ jobs:
       - name: Lint
         run: make lint
 
+      - name: Webui typecheck
+        run: make webui-typecheck
+
       - name: Test
         run: make test
 
@@ -57,6 +60,12 @@ jobs:
       - name: Build
         run: make build
 
+      - name: Build webui
+        run: make webui
+
+      - name: Build LittleFS image
+        run: make buildfs
+
       - name: Gather Artifacts
         run: make artifacts
 
@@ -64,8 +73,12 @@ jobs:
         if: success()
         run: |
           VERSION=$(cat artifacts/VERSION.txt)
+          SPA_RAW=$(find data/spa -type f -not -name '*.gz' -exec cat {} + | wc -c)
+          SPA_GZ=$(find data/spa -name '*.gz' -exec cat {} + | wc -c)
           echo "## Build" >> "$GITHUB_STEP_SUMMARY"
           echo "**Version:** \`${VERSION}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**SPA bundle:** ${SPA_RAW} B raw / ${SPA_GZ} B gzipped" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Keep Artifacts
         uses: actions/upload-artifact@v7
