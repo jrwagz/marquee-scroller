@@ -101,25 +101,48 @@ on the binary itself + boot-confirmation rollback on top
 (see [`docs/OTA_STRATEGY.md`](OTA_STRATEGY.md)).
 
 ```bash
-# Build firmware locally
+# Build firmware locally (use `make build` + `make artifacts` for the same
+# bundle CI produces, with the build-version suffix baked in)
 pio run                     # produces .pio/build/default/firmware.bin
+# or:
+make build && make artifacts  # produces artifacts/firmware.bin + VERSION.txt
 
-# Host on plain HTTP
-cd .pio/build/default
-python3 -m http.server 8080
+# Host on plain HTTP — bind to your LAN IP so the clock can reach it
+cd artifacts
+python3 -m http.server 8080 --bind <your-LAN-IP>
 
-# Trigger flash (must be POST, must use HTTP not HTTPS for the URL)
+# Trigger flash. Must be GET (the device's UPDATE_FORM uses method='get'
+# and the route is registered HTTP_GET) and the URL must be http:// since
+# ESPhttpUpdate doesn't speak TLS.
 curl -s -u admin:<pw> \
-  -X POST http://<clock-ip>/updateFromUrl \
+  -G http://<clock-ip>/updateFromUrl \
   --data-urlencode "firmwareUrl=http://<your-LAN-IP>:8080/firmware.bin"
 ```
 
-The clock displays "Updating..." on the matrix while flashing, reboots in
-~30s, and `/api/status` will then show `ota.confirm_at: <ms>` (the time at
-which the new firmware will be considered "confirmed" — typically 5 minutes
-post-boot per `OTA_CONFIRM_MS` in `marquee.ino`). If the firmware crashes
-during the confirmation window, boot-confirmation rollback re-flashes the
-previous safe URL.
+The handler responds *immediately* with a "STARTING UPDATE" page (because
+the actual flash is deferred to the main loop — async handlers can't
+block on the 20–30s `ESPhttpUpdate.update()` call without crashing).
+The clock then displays "Updating..." on the matrix, fetches the binary,
+reboots in ~30s. `/api/status` afterward shows `ota.confirm_at: <ms>`
+(the deadline by which the new firmware is considered "confirmed" —
+typically 5 minutes post-boot per `OTA_CONFIRM_MS` in `marquee.ino`).
+If the firmware crashes during the confirmation window, boot-confirmation
+rollback re-flashes the previous safe URL.
+
+**Alternative: file upload via `/update`** (use this if `/updateFromUrl`
+times out — for instance if your LAN host can't reach the clock for some
+reason, or you want to flash without exposing an HTTP server):
+
+```bash
+curl -s -u admin:<pw> \
+  -F "image=@artifacts/firmware.bin" \
+  http://<clock-ip>/update
+```
+
+The upload arrives chunk-by-chunk via async callbacks, the device flashes
+as it arrives, and reboots when done. curl will see a `recv failure` after
+~30s — that's just the reboot dropping the connection, not an error.
+Verify success by polling `/api/status` for the new `version` string.
 
 ### Caveat: `OTA_SAFE_URL` rewrite
 

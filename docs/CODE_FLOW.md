@@ -91,10 +91,11 @@ loop()
 │   └── The colon is replaced with ' ' every other second (flashing effect)
 │
 ├── matrix.fillScreen(LOW)           // Clear display framebuffer
-├── centerPrint(displayTime, true)   // Draw time + extras, then SPI flush
-│
-└── server.handleClient()            // Process any pending HTTP request
+└── centerPrint(displayTime, true)   // Draw time + extras, then SPI flush
 ```
+
+(The web server is `AsyncWebServer`; HTTP requests are handled in the background
+via TCP callbacks, so `server.handleClient()` is *not* called from `loop()`.)
 
 The display is **redrawn every loop iteration**. `matrix.write()` (inside `centerPrint`)
 does a full SPI transfer on every frame. This is fast on ESP8266 but could be optimized
@@ -348,15 +349,14 @@ Text is drawn at `y=0` (top of the 8-pixel-tall display).
 
 ## Display: Scroll Ticker (`scrollMessageWait()`)
 
-**File:** `marquee/marquee.ino:1202`
+**File:** `marquee/marquee.ino:1240`
 
 ```text
 scrollMessageWait(msg)
 │
 └── for i = 0 to (width * msg.length() + matrix.width() - 1 - spacer):
     │
-    ├── server.handleClient()          // Keep web server alive
-    ├── matrix.fillScreen(LOW)         // Clear
+    ├── matrix.fillScreen(LOW)         // Clear (AsyncWebServer runs in background)
     │
     ├── letter = i / width             // Which character is at the left edge
     ├── x = (matrix.width() - 1) - (i % width)  // Pixel offset within that character
