@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 configure_clocks.py — apply configuration to one or more WagFam CalClock devices
 
@@ -8,36 +9,39 @@ existing device settings are preserved.
 
 .env file format (one KEY=value per line; # comments and blank lines are ignored):
 
+    CLOCK_HOSTS=192.168.1.100,192.168.1.101
     WAGFAM_API_KEY=my-secret-token
     WAGFAM_DATA_URL=https://example.com/calendar.json
     OWM_API_KEY=abc123def456
     GEO_LOCATION=Chicago,US
 
-Supported configuration keys:
+Supported keys:
 
+    CLOCK_HOSTS       Comma-separated list of device IPs or host names to configure
     WAGFAM_API_KEY    WagFam calendar API key (Authorization token)
     WAGFAM_DATA_URL   WagFam calendar data source URL (HTTPS)
     OWM_API_KEY       OpenWeatherMap API key
     GEO_LOCATION      City name+country, city ID, or "lat,lon"
 
-Command-line arguments override any value present in the .env file.
+CLI --host flags override CLOCK_HOSTS from .env; all other CLI arguments
+override their corresponding .env values.
 
 Usage examples:
 
-    # Configure one clock with all values from scripts/.env
-    python scripts/configure_clocks.py --host 192.168.1.100
+    # Configure clocks listed in scripts/.env CLOCK_HOSTS
+    python scripts/configure_clocks.py
 
-    # Override one key on the command line
-    python scripts/configure_clocks.py --host 192.168.1.100 --owm-api-key abc123
-
-    # Configure multiple clocks
+    # Override hosts on the command line (replaces CLOCK_HOSTS from .env)
     python scripts/configure_clocks.py --host 192.168.1.100 --host 192.168.1.101
 
+    # Override one config key on the command line
+    python scripts/configure_clocks.py --owm-api-key abc123
+
     # Use a custom .env file location
-    python scripts/configure_clocks.py --host 192.168.1.100 --env ~/secret.env
+    python scripts/configure_clocks.py --env ~/secret.env
 
     # Preview the payload without sending anything
-    python scripts/configure_clocks.py --host 192.168.1.100 --dry-run
+    python scripts/configure_clocks.py --dry-run
 """
 
 import json
@@ -48,7 +52,7 @@ from argparse import ArgumentParser, Namespace
 from pathlib import Path
 from typing import Optional
 
-__all__ = ["load_dotenv", "build_payload", "apply_config"]
+__all__ = ["load_dotenv", "resolve_hosts", "build_payload", "apply_config"]
 
 # Default .env location: scripts/.env (same directory as this script).
 _DEFAULT_ENV: Path = Path(__file__).parent / ".env"
@@ -92,6 +96,27 @@ def load_dotenv(path: Optional[Path] = None) -> dict[str, str]:
         key, _, value = line.partition("=")
         result[key.strip().upper()] = value.strip()
     return result
+
+
+def resolve_hosts(env_vars: dict[str, str], args: Namespace) -> list[str]:
+    """Resolve the list of target hosts from CLI args and/or the .env file.
+
+    ``--host`` flags on the command line take full precedence: if any are
+    present they are returned as-is and ``CLOCK_HOSTS`` in the .env is
+    ignored.  When no ``--host`` flags were given, ``CLOCK_HOSTS`` is parsed
+    as a comma-separated list; blank entries are stripped.
+
+    Args:
+        env_vars: Dict returned by :func:`load_dotenv`.
+        args:     Parsed :class:`~argparse.Namespace` from :func:`_parse_args`.
+
+    Returns:
+        Ordered list of host strings.  Empty if neither source supplies a host.
+    """
+    if args.hosts:
+        return list(args.hosts)
+    raw = env_vars.get("CLOCK_HOSTS", "")
+    return [h.strip() for h in raw.split(",") if h.strip()]
 
 
 def build_payload(env_vars: dict[str, str], args: Namespace) -> dict[str, str]:
@@ -182,6 +207,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> Namespace:
             "Only keys that are explicitly set (via .env or CLI) are sent to the device. "
             "Unset keys are omitted so existing device settings are preserved.\n\n"
             "Example .env file (scripts/.env):\n"
+            "  CLOCK_HOSTS=192.168.1.100,192.168.1.101\n"
             "  WAGFAM_API_KEY=my-secret-token\n"
             "  WAGFAM_DATA_URL=https://example.com/calendar.json\n"
             "  OWM_API_KEY=abc123def456\n"
@@ -193,10 +219,11 @@ def _parse_args(argv: Optional[list[str]] = None) -> Namespace:
         dest="hosts",
         metavar="HOST",
         action="append",
-        required=True,
+        default=None,
         help=(
-            "Device IP address or hostname (e.g. 192.168.1.100). "
-            "Repeat to configure multiple clocks."
+            "Device IP address or host name (e.g. 192.168.1.100). "
+            "Repeat to configure multiple clocks. "
+            "Overrides CLOCK_HOSTS in .env when provided."
         ),
     )
     parser.add_argument(
@@ -274,6 +301,15 @@ def _cli_main(argv: Optional[list[str]] = None) -> int:
     env_path = Path(args.env_file) if args.env_file else None
     env_vars = load_dotenv(env_path)
 
+    hosts = resolve_hosts(env_vars, args)
+    if not hosts:
+        print(
+            "error: no hosts specified — provide --host on the command line "
+            "or set CLOCK_HOSTS in the .env file",
+            file=sys.stderr,
+        )
+        return 1
+
     payload = build_payload(env_vars, args)
 
     if not payload:
@@ -290,7 +326,7 @@ def _cli_main(argv: Optional[list[str]] = None) -> int:
         return 0
 
     any_failed = False
-    for host in args.hosts:
+    for host in hosts:
         ok, message = apply_config(host, payload, port=args.port, timeout=args.timeout)
         status_label = "OK  " if ok else "FAIL"
         print(f"[{status_label}] {host}:{args.port} — {message}")

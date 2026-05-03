@@ -242,13 +242,62 @@ class TestApplyConfig:
         assert sent == payload
 
 
+# ── resolve_hosts ─────────────────────────────────────────────────────────────
+
+
+def _args_hosts(**kwargs) -> Namespace:
+    """Return a Namespace with hosts defaulted to None."""
+    defaults = {"hosts": None}
+    defaults.update(kwargs)
+    return Namespace(**defaults)
+
+
+class TestResolveHosts:
+    def test_cli_hosts_returned_directly(self):
+        args = _args_hosts(hosts=["192.168.1.1", "192.168.1.2"])
+        assert configure_clocks.resolve_hosts({}, args) == ["192.168.1.1", "192.168.1.2"]
+
+    def test_clock_hosts_from_env_single(self):
+        env = {"CLOCK_HOSTS": "192.168.1.100"}
+        assert configure_clocks.resolve_hosts(env, _args_hosts()) == ["192.168.1.100"]
+
+    def test_clock_hosts_from_env_multiple(self):
+        env = {"CLOCK_HOSTS": "192.168.1.100,192.168.1.101"}
+        assert configure_clocks.resolve_hosts(env, _args_hosts()) == [
+            "192.168.1.100", "192.168.1.101"
+        ]
+
+    def test_clock_hosts_strips_whitespace(self):
+        env = {"CLOCK_HOSTS": " 10.0.0.1 , 10.0.0.2 "}
+        assert configure_clocks.resolve_hosts(env, _args_hosts()) == ["10.0.0.1", "10.0.0.2"]
+
+    def test_clock_hosts_skips_blank_entries(self):
+        env = {"CLOCK_HOSTS": "10.0.0.1,,10.0.0.2"}
+        assert configure_clocks.resolve_hosts(env, _args_hosts()) == ["10.0.0.1", "10.0.0.2"]
+
+    def test_cli_overrides_env_clock_hosts(self):
+        env = {"CLOCK_HOSTS": "192.168.1.99"}
+        args = _args_hosts(hosts=["10.0.0.1"])
+        assert configure_clocks.resolve_hosts(env, args) == ["10.0.0.1"]
+
+    def test_empty_env_and_no_cli_returns_empty(self):
+        assert configure_clocks.resolve_hosts({}, _args_hosts()) == []
+
+    def test_empty_clock_hosts_value_returns_empty(self):
+        assert configure_clocks.resolve_hosts({"CLOCK_HOSTS": ""}, _args_hosts()) == []
+
+    def test_whitespace_only_clock_hosts_returns_empty(self):
+        assert configure_clocks.resolve_hosts({"CLOCK_HOSTS": "  ,  "}, _args_hosts()) == []
+
+
 # ── _parse_args ───────────────────────────────────────────────────────────────
 
 
 class TestParseArgs:
-    def test_host_required(self):
-        with pytest.raises(SystemExit):
-            configure_clocks._parse_args([])
+    def test_no_host_is_accepted_by_parser(self):
+        # --host is now optional; hosts are resolved later via resolve_hosts.
+        args = configure_clocks._parse_args([])
+        assert args.hosts is None
 
     def test_single_host(self):
         args = configure_clocks._parse_args(["--host", "192.168.1.1"])
@@ -261,24 +310,23 @@ class TestParseArgs:
         assert args.hosts == ["192.168.1.1", "192.168.1.2"]
 
     def test_default_port(self):
-        args = configure_clocks._parse_args(["--host", "h"])
+        args = configure_clocks._parse_args([])
         assert args.port == 80
 
     def test_custom_port(self):
-        args = configure_clocks._parse_args(["--host", "h", "--port", "8080"])
+        args = configure_clocks._parse_args(["--port", "8080"])
         assert args.port == 8080
 
     def test_default_env_file_is_none(self):
-        args = configure_clocks._parse_args(["--host", "h"])
+        args = configure_clocks._parse_args([])
         assert args.env_file is None
 
     def test_env_file_stored(self):
-        args = configure_clocks._parse_args(["--host", "h", "--env", "/tmp/k.env"])
+        args = configure_clocks._parse_args(["--env", "/tmp/k.env"])
         assert args.env_file == "/tmp/k.env"
 
     def test_all_config_flags(self):
         args = configure_clocks._parse_args([
-            "--host", "h",
             "--wagfam-api-key", "wk",
             "--wagfam-data-url", "https://x.com/c.json",
             "--owm-api-key", "ok",
@@ -290,19 +338,19 @@ class TestParseArgs:
         assert args.geo_location == "Chicago,US"
 
     def test_dry_run_flag(self):
-        args = configure_clocks._parse_args(["--host", "h", "--dry-run"])
+        args = configure_clocks._parse_args(["--dry-run"])
         assert args.dry_run is True
 
     def test_dry_run_default_false(self):
-        args = configure_clocks._parse_args(["--host", "h"])
+        args = configure_clocks._parse_args([])
         assert args.dry_run is False
 
     def test_timeout_default(self):
-        args = configure_clocks._parse_args(["--host", "h"])
+        args = configure_clocks._parse_args([])
         assert args.timeout == 10
 
     def test_timeout_custom(self):
-        args = configure_clocks._parse_args(["--host", "h", "--timeout", "30"])
+        args = configure_clocks._parse_args(["--timeout", "30"])
         assert args.timeout == 30
 
 
@@ -361,11 +409,47 @@ class TestCliMain:
             ])
         assert rc == 0
 
-    def test_no_payload_returns_exit_1_with_message(self, capsys):
-        rc = configure_clocks._cli_main(["--host", "192.168.1.1"])
+    def test_hosts_from_env_clock_hosts(self, tmp_path, capsys):
+        env = tmp_path / ".env"
+        env.write_text("CLOCK_HOSTS=192.168.1.50\nOWM_API_KEY=k\n")
+        captured_hosts: list = []
+
+        def fake_apply(host, payload, **kwargs):
+            captured_hosts.append(host)
+            return True, "OK"
+
+        with patch("configure_clocks.apply_config", side_effect=fake_apply):
+            rc = configure_clocks._cli_main(["--env", str(env)])
+        assert rc == 0
+        assert captured_hosts == ["192.168.1.50"]
+
+    def test_cli_host_overrides_env_clock_hosts(self, tmp_path, capsys):
+        env = tmp_path / ".env"
+        env.write_text("CLOCK_HOSTS=192.168.1.99\nOWM_API_KEY=k\n")
+        captured_hosts: list = []
+
+        def fake_apply(host, payload, **kwargs):
+            captured_hosts.append(host)
+            return True, "OK"
+
+        with patch("configure_clocks.apply_config", side_effect=fake_apply):
+            configure_clocks._cli_main(["--host", "10.0.0.1", "--env", str(env)])
+        assert captured_hosts == ["10.0.0.1"]
+
+    def test_no_hosts_returns_exit_1_with_message(self, tmp_path, capsys):
+        env = tmp_path / ".env"
+        env.write_text("OWM_API_KEY=k\n")
+        rc = configure_clocks._cli_main(["--env", str(env)])
         assert rc == 1
-        captured = capsys.readouterr()
-        assert "no configuration values" in captured.err
+        assert "no hosts" in capsys.readouterr().err
+
+    def test_no_payload_returns_exit_1_with_message(self, tmp_path, capsys):
+        # Use an empty .env so no values leak in from a real scripts/.env on disk.
+        env = tmp_path / ".env"
+        env.write_text("")
+        rc = configure_clocks._cli_main(["--host", "192.168.1.1", "--env", str(env)])
+        assert rc == 1
+        assert "no configuration values" in capsys.readouterr().err
 
     def test_dry_run_prints_payload_and_returns_0(self, tmp_path, capsys):
         env = tmp_path / ".env"
