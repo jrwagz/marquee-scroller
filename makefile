@@ -33,6 +33,7 @@ help:
 	@echo "  webui             - Build the SPA frontend (Vite/Preact) into data/spa/"
 	@echo "  webui-typecheck   - TypeScript-typecheck the SPA without emitting"
 	@echo "  webui-clean       - Remove SPA build output and node_modules"
+	@echo "  uploadfs          - Build webui + serial-flash data/ to device LittleFS (wipes /conf.txt)"
 	@echo "  merged            - Combine firmware.bin + littlefs.bin → artifacts/merged.bin (first-install image)"
 	@echo "  ready             - Full pipeline"
 
@@ -169,6 +170,15 @@ buildfs: .passwd
 		-u $(shell id -u):$(shell id -g) \
 		$(PIO_IMAGE) \
 		pio run -e default --target buildfs
+
+# Serial-flash data/ to the device's LittleFS partition. Wipes the entire FS
+# (including /conf.txt) — see docs/WEBUI.md "Option A". Builds the SPA bundle
+# first so a stale data/spa/ doesn't get flashed. Pass UPLOAD_PORT=/dev/cu.X
+# to override port autodetection. Runs against the host's pio (esptool needs
+# real USB device access, which doesn't work cleanly through Docker on macOS).
+.PHONY: uploadfs
+uploadfs: webui
+	pio run -e default --target uploadfs $(if $(UPLOAD_PORT),--upload-port $(UPLOAD_PORT))
 
 .PHONY: artifacts
 artifacts:
