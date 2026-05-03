@@ -308,8 +308,12 @@ Expected JSON format:
 Each calendar fetch includes device telemetry as query parameters:
 
 ```text
-GET /data_source.json?chip_id=5fc8ad&version=3.08.0-wagfam&uptime=1234567&heap=32496&rssi=-62
+GET /data_source.json?chip_id=5fc8ad&version=3.08.0-wagfam&uptime=1234567&heap=32496&rssi=-62&timezone=America/Chicago
 ```
+
+The `timezone` param (IANA name, e.g. `America/Chicago`) is omitted when the setting is blank.
+The wagfam server uses it to compute the client's local "today" so event ordering is correct
+for the clock's location (see [wagfam-server PR #16](https://github.com/jrwagz/wagfam-server/pull/16)).
 
 This lets a backend identify and monitor all deployed clocks without any additional
 connections. Static JSON hosts ignore the current set of params gracefully — this

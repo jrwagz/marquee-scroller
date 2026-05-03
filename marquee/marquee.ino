@@ -150,6 +150,8 @@ static const char CHANGE_FORM1[] PROGMEM = "<form class='w3-container' action='/
                       "<input class='w3-input w3-border w3-margin-bottom' type='text' name='wagFamDataSource' value='%WAGFAMDATASOURCE%' maxlength='256'>"
                       "<label>WagFam Calendar API Key</label>"
                       "<input class='w3-input w3-border w3-margin-bottom' type='text' name='wagFamApiKey' value='%WAGFAMAPIKEY%' maxlength='128'>"
+                      "<label>Timezone (IANA, e.g. America/Chicago)</label>"
+                      "<input class='w3-input w3-border w3-margin-bottom' type='text' name='wagFamTimezone' value='%WAGFAMTIMEZONE%' maxlength='64'>"
                       "<hr>";
 
 static const char CHANGE_FORM2[] PROGMEM = "<label>OpenWeatherMap API Key (get from <a href='https://openweathermap.org/' target='_BLANK'>here</a>)</label>"
@@ -582,6 +584,7 @@ void handleSaveConfig(AsyncWebServerRequest *request) {
   if (newPw.length() > 0) webPassword = newPw;
   WAGFAM_DATA_URL = request->arg("wagFamDataSource");
   WAGFAM_API_KEY = request->arg("wagFamApiKey");
+  WAGFAM_TIMEZONE = request->arg("wagFamTimezone");
   bdayClient.updateBdayClient(WAGFAM_API_KEY,WAGFAM_DATA_URL);
   APIKEY = request->arg("openWeatherMapApiKey");
   geoLocation = request->arg("city1");
@@ -641,6 +644,7 @@ void handleConfigure(AsyncWebServerRequest *request) {
   form.replace("%WEBPASSWORD%", webPassword);
   form.replace("%WAGFAMDATASOURCE%", WAGFAM_DATA_URL);
   form.replace("%WAGFAMAPIKEY%", WAGFAM_API_KEY);
+  form.replace("%WAGFAMTIMEZONE%", WAGFAM_TIMEZONE);
   response->print(form);
 
 
@@ -931,6 +935,7 @@ void getWeatherData() //client function to send/receive GET request data.
   devInfo.uptimeMs = millis();
   devInfo.freeHeap = ESP.getFreeHeap();
   devInfo.rssi = WiFi.RSSI();
+  devInfo.timezone = WAGFAM_TIMEZONE;
   serverConfig = bdayClient.updateData(devInfo);
   bool needToSave = false;
   // SEC-12: Validate server-pushed dataSourceUrl must use HTTPS
@@ -1180,6 +1185,7 @@ void savePersistentConfig() {
     Serial.println("Saving settings now...");
     f.println("WAGFAM_DATA_URL=" + WAGFAM_DATA_URL);
     f.println("WAGFAM_API_KEY=" + WAGFAM_API_KEY);
+    f.println("WAGFAM_TIMEZONE=" + WAGFAM_TIMEZONE);
     f.println("WAGFAM_EVENT_TODAY=" + String(WAGFAM_EVENT_TODAY));
     f.println("APIKEY=" + APIKEY);
     f.println("CityID=" + geoLocation);
@@ -1233,6 +1239,9 @@ void readPersistentConfig() {
     } else if (key == "WAGFAM_API_KEY") {
       WAGFAM_API_KEY = value;
       Serial.println("WAGFAM_API_KEY: [set]");
+    } else if (key == "WAGFAM_TIMEZONE") {
+      WAGFAM_TIMEZONE = value;
+      Serial.println("WAGFAM_TIMEZONE: " + WAGFAM_TIMEZONE);
     } else if (key == "WAGFAM_EVENT_TODAY") {
       WAGFAM_EVENT_TODAY = value.toInt();
       Serial.println("WAGFAM_EVENT_TODAY: " + String(WAGFAM_EVENT_TODAY));
@@ -1472,6 +1481,7 @@ void handleApiConfigGet(AsyncWebServerRequest *request) {
   JsonDocument doc;
   doc["wagfam_data_url"] = WAGFAM_DATA_URL;
   doc["wagfam_api_key"] = WAGFAM_API_KEY;
+  doc["wagfam_timezone"] = WAGFAM_TIMEZONE;
   doc["wagfam_event_today"] = WAGFAM_EVENT_TODAY;
   doc["owm_api_key"] = APIKEY;
   doc["geo_location"] = geoLocation;
@@ -1508,6 +1518,7 @@ void handleApiConfigPost(AsyncWebServerRequest *request, JsonVariant &json) {
   // Partial update: only set fields that are present in the request body
   if (json["wagfam_data_url"].is<const char*>()) WAGFAM_DATA_URL = json["wagfam_data_url"].as<String>();
   if (json["wagfam_api_key"].is<const char*>()) WAGFAM_API_KEY = json["wagfam_api_key"].as<String>();
+  if (json["wagfam_timezone"].is<const char*>()) WAGFAM_TIMEZONE = json["wagfam_timezone"].as<String>();
   if (json["wagfam_event_today"].is<bool>()) WAGFAM_EVENT_TODAY = json["wagfam_event_today"].as<bool>();
   if (json["owm_api_key"].is<const char*>()) APIKEY = json["owm_api_key"].as<String>();
   if (json["geo_location"].is<const char*>()) geoLocation = json["geo_location"].as<String>();

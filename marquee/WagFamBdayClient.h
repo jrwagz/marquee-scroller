@@ -34,6 +34,7 @@ struct DeviceInfo {
     uint32_t uptimeMs;
     uint32_t freeHeap;
     int32_t rssi;
+    String timezone; // IANA name (e.g. "America/Chicago"); omitted from URL when empty
 };
 
 class WagFamBdayClient: public JsonListener {
