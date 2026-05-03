@@ -72,3 +72,47 @@ def test_spa_404_body_names_the_fix(ino_source: str) -> None:
     assert "littlefs" in body.lower() or "LittleFS" in body, (
         "the 404 body should explain that LittleFS is the missing piece"
     )
+    assert "/updatefs" in body, (
+        "the 404 body must surface the OTA path (/updatefs) as the easiest "
+        "fix — without it, users on already-deployed devices think they need "
+        "a serial cable. This was the resolution to the #63 follow-up "
+        "discussion ('is there no way to ship this OTA?')."
+    )
+
+
+def test_updatefs_route_supports_both_get_and_post(ino_source: str) -> None:
+    """/updatefs is the OTA path for the SPA bundle on deployed devices.
+    GET serves the upload form; POST receives the multipart body and writes
+    via Update.begin(fsSize, U_FS). Both must be registered."""
+    methods = set(
+        re.findall(
+            r'server\.on\(\s*"/updatefs"\s*,\s*(HTTP_\w+)',
+            ino_source,
+        )
+    )
+    assert "HTTP_GET" in methods, (
+        "GET /updatefs must serve the upload form so browsers can hit it directly"
+    )
+    assert "HTTP_POST" in methods, (
+        "POST /updatefs must receive the LittleFS image"
+    )
+
+
+def test_updatefs_post_uses_u_fs_not_u_flash(ino_source: str) -> None:
+    """The defining difference between /update and /updatefs is the partition.
+    If POST /updatefs's Update.begin uses U_FLASH, it will overwrite the
+    sketch — bricking the device and losing everything."""
+    # Find the POST /updatefs registration, capture the body of both lambdas.
+    block = re.search(
+        r'server\.on\("/updatefs",\s*HTTP_POST,(.*?)\}\);',
+        ino_source,
+        re.DOTALL,
+    )
+    assert block, "POST /updatefs registration not found"
+    body = block.group(1)
+    assert "U_FS" in body, "POST /updatefs must call Update.begin(..., U_FS)"
+    # Should NOT mention U_FLASH (which would clobber the sketch).
+    assert "U_FLASH" not in body, (
+        "POST /updatefs must NOT use U_FLASH — that would overwrite the sketch "
+        "instead of the filesystem partition"
+    )

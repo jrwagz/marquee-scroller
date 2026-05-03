@@ -75,8 +75,8 @@ ships **three** flashable images, for three install scenarios:
 | File | What it contains | When to use |
 | --- | --- | --- |
 | `marquee-scroller-<v>-merged.bin` | Sketch + LittleFS in one image | **First-time install** on a fresh device — one esptool command, no offset arithmetic |
-| `marquee-scroller-<v>.bin` | Sketch only | **OTA firmware update** on a device that already has the SPA bundle flashed |
-| `marquee-scroller-<v>-littlefs.bin` | LittleFS only (SPA bundle + defaults) | **SPA refresh** on a device with already-current firmware |
+| `marquee-scroller-<v>.bin` | Sketch only | **OTA firmware update** via `/update` — preserves config and SPA bundle |
+| `marquee-scroller-<v>-littlefs.bin` | LittleFS only (SPA bundle + defaults) | **OTA SPA install or refresh** via `/updatefs` (≥3.09.3) — or manual serial flash |
 
 ### First-time install (recommended)
 
@@ -99,17 +99,33 @@ config and the SPA bundle.
 > visit `/spa/` after an OTA and see the "SPA bundle not installed" page, flash
 > `littlefs.bin` as below.
 
-### SPA bundle refresh
+### SPA bundle refresh / install (OTA — no serial cable required)
 
-Download `marquee-scroller-<version>-littlefs.bin` and flash at offset `0x300000`
+Once the device is running firmware ≥ 3.09.3-wagfam, the LittleFS image can be flashed
+over OTA via the web interface:
+
+1. Download `marquee-scroller-<version>-littlefs.bin`
+2. Open `http://<device-ip>/updatefs` in a browser
+3. Select the file and click **Upload & Flash FS** — the device reboots into the new FS
+
+This wipes `/conf.txt` (web password, calendar URL, API keys), so you'll need to reconfigure
+after flashing.
+
+> **Bootstrapping note:** OTA-flashing the LittleFS image requires firmware that
+> includes the `/updatefs` route (added in 3.09.3-wagfam). Devices on older firmware
+> need a one-time firmware OTA first via `/update`, after which subsequent SPA refreshes
+> are pure-browser.
+
+### SPA bundle refresh — serial alternative
+
+If OTA is unavailable, flash `littlefs.bin` over USB at offset `0x300000`
 (the LittleFS partition start for the d1_mini 4MB FS:1MB layout):
 
 ```bash
 esptool.py --port /dev/cu.usbserial-XXXX write_flash 0x300000 marquee-scroller-<version>-littlefs.bin
 ```
 
-This wipes `/conf.txt` (web password, calendar URL, API keys), so you'll need to reconfigure
-after flashing. From a source checkout, `make uploadfs` does the same in one step.
+From a source checkout, `make uploadfs` does the same in one step.
 
 ## Initial Setup
 
@@ -187,6 +203,7 @@ directly from a hosted `.bin` file. The device will restart automatically on suc
 | `/pull` | Forces immediate data refresh |
 | `/update` | OTA firmware upload (file) |
 | `/updateFromUrl` | OTA firmware update from URL |
+| `/updatefs` | OTA LittleFS image upload — for SPA bundle refresh without serial cable |
 | `/systemreset` | Resets settings to defaults |
 | `/forgetwifi` | Clears saved WiFi credentials |
 
