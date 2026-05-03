@@ -69,32 +69,47 @@ The following libraries are cached locally in `/lib` (no separate install needed
 
 ## Pre-built Binaries
 
-CI builds generate firmware artifacts on every tagged release.
+Every tagged release on the [Releases page](https://github.com/jrwagz/marquee-scroller/releases)
+ships **three** flashable images, for three install scenarios:
 
-### Updating an existing device (firmware only)
+| File | What it contains | When to use |
+| --- | --- | --- |
+| `marquee-scroller-<v>-merged.bin` | Sketch + LittleFS in one image | **First-time install** on a fresh device — one esptool command, no offset arithmetic |
+| `marquee-scroller-<v>.bin` | Sketch only | **OTA firmware update** on a device that already has the SPA bundle flashed |
+| `marquee-scroller-<v>-littlefs.bin` | LittleFS only (SPA bundle + defaults) | **SPA refresh** on a device with already-current firmware |
 
-Download `marquee-scroller-<version>.bin` from the
-[Releases page](https://github.com/jrwagz/marquee-scroller/releases) and upload via the web
-interface at `http://<device-ip>/update`. This is the fast path for shipping firmware fixes.
+### First-time install (recommended)
 
-> **Important:** OTA flashing the firmware does **not** touch the LittleFS partition where the
-> SPA bundle lives. If you visit `/spa/` and see "SPA bundle not installed", flash the
-> filesystem image as below.
-
-### Installing the SPA bundle (LittleFS image)
-
-The SPA at `/spa/` is served from LittleFS, which OTA cannot update. To install or update
-the SPA bundle on a device, download `littlefs.bin` from the release artifacts zip and
-flash it with `esptool.py`:
+Download `marquee-scroller-<version>-merged.bin` and flash it at offset `0x0` with esptool:
 
 ```bash
-unzip marquee-scroller-<version>-artifacts.zip
-esptool.py --port /dev/cu.usbserial-XXXX write_flash 0x300000 artifacts/littlefs.bin
+esptool.py --port /dev/cu.usbserial-XXXX write_flash 0x0 marquee-scroller-<version>-merged.bin
+```
+
+This wipes the entire flash and installs sketch + SPA bundle in one shot. After flashing,
+follow the "Initial Setup" section below for WiFi config.
+
+### OTA firmware update
+
+Download `marquee-scroller-<version>.bin` and upload via the web interface at
+`http://<device-ip>/update`. Fast path for shipping firmware fixes — preserves your
+config and the SPA bundle.
+
+> **Note:** OTA does **not** touch the LittleFS partition where the SPA lives. If you
+> visit `/spa/` after an OTA and see the "SPA bundle not installed" page, flash
+> `littlefs.bin` as below.
+
+### SPA bundle refresh
+
+Download `marquee-scroller-<version>-littlefs.bin` and flash at offset `0x300000`
+(the LittleFS partition start for the d1_mini 4MB FS:1MB layout):
+
+```bash
+esptool.py --port /dev/cu.usbserial-XXXX write_flash 0x300000 marquee-scroller-<version>-littlefs.bin
 ```
 
 This wipes `/conf.txt` (web password, calendar URL, API keys), so you'll need to reconfigure
-WiFi and settings after flashing. From a source checkout, `make uploadfs` does the same in
-one step.
+after flashing. From a source checkout, `make uploadfs` does the same in one step.
 
 ## Initial Setup
 
