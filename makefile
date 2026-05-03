@@ -179,6 +179,11 @@ buildfs: .passwd
 # real USB device access, which doesn't work cleanly through Docker on macOS).
 .PHONY: uploadfs
 uploadfs: webui
+	# Mirror buildfs: write data/spa/version.json so the LittleFS image
+	# carries the SPA version string. Without this, /api/status returns
+	# spa_version="unknown" after a uploadfs (the file isn't in the bundle
+	# and read_spa_version() in setup() falls back to the default).
+	python3 scripts/write_spa_version.py
 	pio run -e default --target uploadfs $(if $(UPLOAD_PORT),--upload-port $(UPLOAD_PORT))
 
 .PHONY: artifacts
