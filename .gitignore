@@ -9,3 +9,5 @@ artifacts/
 .ruff_cache/
 .pytest-image
 server/scripts/.env
+data/
+webui/node_modules/

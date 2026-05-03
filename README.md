@@ -140,8 +140,9 @@ directly from a hosted `.bin` file. The device will restart automatically on suc
 
 | Route | Description |
 | ----- | ----------- |
-| `/` | Home — shows upcoming events and current weather |
-| `/configure` | Settings form |
+| `/` | Home — shows upcoming events and current weather (legacy UI) |
+| `/spa/` | Preact SPA frontend (served from LittleFS, see [`docs/WEBUI.md`](docs/WEBUI.md)) |
+| `/configure` | Settings form (legacy UI) |
 | `/saveconfig` | Saves configuration (POST) |
 | `/pull` | Forces immediate data refresh |
 | `/update` | OTA firmware upload (file) |

@@ -30,6 +30,10 @@ All firmware source lives in [marquee/](marquee/):
 | [timeNTP.h/.cpp](marquee/timeNTP.h) | NTP time sync; exposes `timeNTPsetup()`, `getNtpTime()`, and `set_timeZoneSec()` |
 | [timeStr.h/.cpp](marquee/timeStr.h) | Time formatting helpers (zero-pad, day/month names, etc.) |
 
+The SPA frontend lives in [`webui/`](webui/) — Vite + Preact + signals + TypeScript.
+See [`docs/WEBUI.md`](docs/WEBUI.md) for the build pipeline and deploy story. Bundle is
+shipped to LittleFS under `/spa/` and served by AsyncWebServer's `serveStatic`.
+
 Local library copies (not managed by PlatformIO) are in [lib/](lib/):
 
 - `arduino-Max72xxPanel` — MAX7219 LED matrix driver
@@ -230,6 +234,19 @@ read [`docs/LIVE_DEVICE_TESTING.md`](docs/LIVE_DEVICE_TESTING.md) — saves
 significant trial-and-error.
 
 ---
+
+## WebUI development
+
+The Preact SPA in `webui/` is built with `make webui` (Dockerized
+`node:20-alpine`). Don't add CSS frameworks (Tailwind / MUI / Bootstrap) —
+flash + LittleFS budget is tight. Hand-rolled utility CSS only. Don't
+add hash-based filenames (Vite default) — stable filenames keep the
+deploy script and on-device debugging tractable; cache invalidation
+is handled server-side via `Cache-Control`.
+
+The full deploy story (serial flash for first install, API uploads for
+updates, the `/api/fs/upload` follow-up that's still TODO) is in
+[`docs/WEBUI.md`](docs/WEBUI.md).
 
 ## Markdown Style
 

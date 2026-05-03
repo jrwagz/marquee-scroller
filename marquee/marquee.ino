@@ -389,6 +389,16 @@ void setup() {
       }
     });
 
+  // SPA frontend — bundle is built into data/spa/ by `make webui` and flashed
+  // to LittleFS. AsyncWebServer's serveStatic auto-detects .gz siblings and
+  // serves them with Content-Encoding: gzip when the client advertises it.
+  // No auth on the static assets themselves; sensitive operations live in
+  // /api/* which is auth-gated. Cache for 10 min — short enough that a UI
+  // bugfix lands within a reasonable window after reflashing the FS.
+  server.serveStatic("/spa", SPIFFS, "/spa/")
+    .setDefaultFile("index.html")
+    .setCacheControl("public, max-age=600");
+
   server.onNotFound(redirectHome);
   // Start the server
   server.begin();
