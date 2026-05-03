@@ -50,7 +50,6 @@ import urllib.error
 import urllib.request
 from argparse import ArgumentParser, Namespace
 from pathlib import Path
-from typing import Optional
 
 __all__ = ["load_dotenv", "resolve_hosts", "build_payload", "apply_config"]
 
@@ -66,7 +65,7 @@ _ENV_KEY_TO_API_FIELD: dict[str, str] = {
 }
 
 
-def load_dotenv(path: Optional[Path] = None) -> dict[str, str]:
+def load_dotenv(path: Path | None = None) -> dict[str, str]:
     """Parse a .env file and return its contents as a dictionary.
 
     Lines are processed as ``KEY=value``.  Leading/trailing whitespace is
@@ -145,7 +144,7 @@ def build_payload(env_vars: dict[str, str], args: Namespace) -> dict[str, str]:
     for cli_attr, env_key in cli_to_env.items():
         api_field = _ENV_KEY_TO_API_FIELD[env_key]
         # CLI arg wins; fall back to .env; skip if neither is set.
-        cli_val: Optional[str] = getattr(args, cli_attr, None)
+        cli_val: str | None = getattr(args, cli_attr, None)
         if cli_val is not None:
             payload[api_field] = cli_val
         elif env_vars.get(env_key):
@@ -195,7 +194,7 @@ def apply_config(
         return False, f"Unexpected error: {exc}"
 
 
-def _parse_args(argv: Optional[list[str]] = None) -> Namespace:
+def _parse_args(argv: list[str] | None = None) -> Namespace:
     parser = ArgumentParser(
         prog="configure_clocks.py",
         description=(
@@ -290,7 +289,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> Namespace:
     return parser.parse_args(argv)
 
 
-def _cli_main(argv: Optional[list[str]] = None) -> int:
+def _cli_main(argv: list[str] | None = None) -> int:
     """Entry point for command-line use.
 
     Returns:
