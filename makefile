@@ -158,6 +158,7 @@ build: .passwd
 .PHONY: buildfs
 buildfs: .passwd
 	mkdir -p $(LOCAL_PIO_CACHE)
+	python3 scripts/write_spa_version.py
 	docker run \
 		--rm $(DOCKER_TTY_ARGS) \
 		-e CI \

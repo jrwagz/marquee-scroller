@@ -111,7 +111,8 @@ String displayTime;
 WagFamBdayClient bdayClient(WAGFAM_API_KEY, WAGFAM_DATA_URL);
 int bdayMessageIndex = 0;
 WagFamBdayClient::configValues serverConfig = {};
-String DEVICE_NAME = "";  // Human-friendly name assigned by server (not user-editable)
+String DEVICE_NAME = "";     // Human-friendly name assigned by server (not user-editable)
+String SPA_VERSION = "unknown"; // Read from /spa/version.json at boot; "unknown" if absent
 uint32_t todayDisplayMilliSecond = 0;
 uint32_t todayDisplayStartingLED = 0;
 
@@ -261,6 +262,18 @@ void setup() {
   Serial.println();
 
   readPersistentConfig();
+
+  {
+    File vf = LittleFS.open("/spa/version.json", "r");
+    if (vf) {
+      JsonDocument vdoc;
+      if (!deserializeJson(vdoc, vf) && vdoc["spa_version"].is<const char *>()) {
+        SPA_VERSION = vdoc["spa_version"].as<String>();
+      }
+      vf.close();
+    }
+    Serial.println(F("[SPA] version: ") + SPA_VERSION);
+  }
 
   Serial.println("Number of LED Displays: " + String(numberOfHorizontalDisplays));
   // initialize dispaly
@@ -1516,6 +1529,7 @@ static void sendJsonError(AsyncWebServerRequest *request, int code, const char *
 void handleApiStatus(AsyncWebServerRequest *request) {
   JsonDocument doc;
   doc["version"] = VERSION;
+  doc["spa_version"] = SPA_VERSION;
   doc["uptime_ms"] = millis();
   doc["free_heap"] = ESP.getFreeHeap();
   doc["heap_fragmentation"] = ESP.getHeapFragmentation();
