@@ -99,15 +99,34 @@ the legacy routes are removed.
 1. Status tab adds Next Update countdown.
 2. Settings tab shows resolved city next to the geo input.
 
-**Phase D** — decommission legacy
+**Phase D** — decommission legacy ✅ (PR #80, 2026-05-03)
 
-1. Remove `displayHomePage`, `handleConfigure`, `handleSaveConfig`,
+1. ✅ Removed `displayHomePage`, `handleConfigure`, `handleSaveConfig`,
    `handlePull`, `handleSystemReset`, `handleForgetWifi`,
-   `sendHeader`, `sendFooter`.
-2. Remove `CHANGE_FORM*` and `WEB_ACTIONS*` PROGMEM constants.
-3. Drop W3.CSS + Font Awesome CDN references.
-4. Make `/` redirect to `/spa/`.
-5. Verify flash savings; reclaim the ~5 KB the docs predicted.
+   `sendHeader`, `sendFooter`, `getTimeTillUpdate`, `redirectHome`.
+2. ✅ Removed `CHANGE_FORM1-4`, `UPDATE_FORM`, `UPLOAD_FORM`,
+   `UPDATEFS_FORM`, `WEB_ACTIONS1-3` PROGMEM constants.
+3. ✅ Dropped W3.CSS + Font Awesome CDN references — replaced
+   with two new `MINIMAL_PAGE_OPEN` / `MINIMAL_PAGE_CLOSE` PROGMEM
+   constants (~700 bytes total, self-contained CSS, no CDN).
+4. ✅ `/`, `/configure`, `/pull`, `/systemreset`, `/forgetwifi`,
+   `/saveconfig` all 302 → `/spa/` via `redirectToSpa()`. The `/pull`
+   redirect still sets `weatherRefreshRequested` so the legacy "force
+   refresh" semantics survive.
+5. ✅ Surviving `/update`, `/updatefs`, `/updateFromUrl` GET handlers
+   use the new minimal page chrome instead of `sendHeader/Footer`.
+
+**Observed savings** (vs. master HEAD before any of this work):
+
+| | Before | After Phase D | Δ |
+| --- | --- | --- | --- |
+| Flash | 565,225 B (53.5%) | 553,253 B (53.0%) | **−11,972 B** |
+| RAM (heap watermark) | 39,780 B (47.6%) | 36,388 B (44.4%) | **−3,392 B** |
+
+Predicted ~5 KB; actual −12 KB flash + −3 KB RAM. The RAM win comes
+from removing the dynamic `String` building in
+`sendHeader/Footer/displayHomePage/handleConfigure` — every request to
+those used to build ~3 KB of HTML on the heap.
 
 ## Verification
 

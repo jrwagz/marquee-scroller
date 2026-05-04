@@ -132,7 +132,9 @@ From a source checkout, `make uploadfs` does the same in one step.
 On first boot (or after "Forget WiFi"), the device creates a WiFi AP named `CLOCK-<chip-id>`.
 Connect to it with a phone or laptop to enter your WiFi credentials.
 
-Once connected to WiFi, the device displays its IP address. Open `http://<ip>/` in a browser to access the web interface.
+Once connected to WiFi, the device displays its IP address. Open
+`http://<ip>/spa/` in a browser to access the web interface (`http://<ip>/`
+also works — it 302-redirects to `/spa/`).
 
 ## Configuration
 
@@ -191,18 +193,17 @@ directly from a hosted `.bin` file. The device will restart automatically on suc
 
 ## Web Interface Routes
 
+The Preact SPA at `/spa/` is the primary UI. The legacy w3.css interface
+was removed; its routes 302-redirect to `/spa/` so existing bookmarks
+keep working.
+
 | Route | Description |
 | ----- | ----------- |
-| `/` | Home — shows upcoming events and current weather (legacy UI) |
-| `/spa/` | Preact SPA frontend (served from LittleFS, see [`docs/WEBUI.md`](docs/WEBUI.md)) |
-| `/configure` | Settings form (legacy UI) |
-| `/saveconfig` | Saves configuration (POST) |
-| `/pull` | Forces immediate data refresh |
-| `/update` | OTA firmware upload (file) |
-| `/updateFromUrl` | OTA firmware update from URL |
+| `/spa/` | Preact SPA — Home, Status, Settings, Actions tabs (see [`docs/WEBUI.md`](docs/WEBUI.md)) |
+| `/update` | OTA firmware upload form (sketch only — does not touch LittleFS) |
+| `/updateFromUrl` | OTA firmware update from URL (HTTP only — no TLS) |
 | `/updatefs` | OTA LittleFS image upload — for SPA bundle refresh without serial cable |
-| `/systemreset` | Resets settings to defaults |
-| `/forgetwifi` | Clears saved WiFi credentials |
+| `/`, `/configure`, `/pull`, `/systemreset`, `/forgetwifi`, `/saveconfig` | 302 → `/spa/` (legacy paths; SPA Settings/Actions tabs cover the equivalents) |
 
 ## REST API
 

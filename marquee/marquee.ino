@@ -28,7 +28,7 @@
 #include "Settings.h"
 #include "SecurityHelpers.h"
 
-#define BASE_VERSION "3.11.2-wagfam"
+#define BASE_VERSION "4.0.0-wagfam"
 #ifdef BUILD_SUFFIX
 #define VERSION BASE_VERSION BUILD_SUFFIX
 #else
@@ -47,24 +47,15 @@ void processEverySecond();
 void processEveryMinute();
 String hourMinutes(bool isRefresh);
 char secondsIndicator(bool isRefresh);
-void handlePull(AsyncWebServerRequest *request);
-void handleSaveConfig(AsyncWebServerRequest *request);
-void handleSystemReset(AsyncWebServerRequest *request);
-void handleForgetWifi(AsyncWebServerRequest *request);
-void handleConfigure(AsyncWebServerRequest *request);
 void getWeatherData();
-void redirectHome(AsyncWebServerRequest *request);
+void redirectToSpa(AsyncWebServerRequest *request);
 void handleNotFound(AsyncWebServerRequest *request);
-void sendHeader(AsyncResponseStream *response);
-void sendFooter(AsyncResponseStream *response);
-void displayHomePage(AsyncWebServerRequest *request);
 void configModeCallback (AsyncWiFiManager *myWiFiManager);
 void flashLED(int number, int delayTime);
 String getTempSymbol(bool forWeb = false);
 String getSpeedSymbol();
 String getPressureSymbol();
 int8_t getWifiQuality();
-String getTimeTillUpdate();
 int getMinutesFromLastRefresh();
 void savePersistentConfig();
 void readPersistentConfig();
@@ -140,77 +131,51 @@ boolean SHOW_HIGHLOW = false;
 AsyncWebServer server(WEBSERVER_PORT);
 DNSServer dnsServer;  // Used by ESPAsyncWiFiManager for captive-portal DNS during AP mode
 
-static const char WEB_ACTIONS1[] PROGMEM = "<a class='w3-bar-item w3-button' href='/'><i class='fas fa-home'></i> Home</a>"
-                        "<a class='w3-bar-item w3-button' href='/configure'><i class='fas fa-cog'></i> Configure</a>";
+// Minimal HTML wrapper for the surviving non-SPA pages (/update,
+// /updatefs, /updateFromUrl). These are file-upload forms / status
+// pages that can't reasonably live inside the SPA — the SPA can't host
+// a multipart firmware upload, and an inline OTA-by-URL form requires
+// a separate GET endpoint. Each page is < 1 KB and self-contained:
+// no W3.CSS / Font Awesome CDN dependency, no shared sendHeader chrome.
+//
+// Pages that USED to use sendHeader/sendFooter:
+//   /                  → removed (now redirects to /spa/)
+//   /configure         → removed (replaced by SPA Settings tab)
+//   /update     GET    → now uses MINIMAL_PAGE_OPEN (this constant)
+//   /updatefs   GET    → now uses MINIMAL_PAGE_OPEN
+//   /updateFromUrl GET → now uses MINIMAL_PAGE_OPEN
+static const char MINIMAL_PAGE_OPEN[] PROGMEM =
+  "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
+  "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+  "<title>WagFam CalClock</title>"
+  "<style>"
+  "body{font-family:system-ui,-apple-system,sans-serif;max-width:42rem;"
+  "margin:2rem auto;padding:0 1rem;line-height:1.55;color:#111}"
+  "h1,h2{font-weight:600}h1{font-size:1.4rem;margin-top:0}"
+  "h2{font-size:1.1rem}"
+  "input,button,a.btn{font:inherit}"
+  "input[type=file],input[type=url]{display:block;margin:.4em 0;width:100%;"
+  "padding:.45em .55em;border:1px solid #ccc;border-radius:4px;"
+  "box-sizing:border-box}"
+  "button,a.btn{display:inline-block;background:#2563eb;color:#fff;border:0;"
+  "border-radius:4px;cursor:pointer;padding:.55em 1.1em;text-decoration:none}"
+  "button:hover,a.btn:hover{opacity:.85}"
+  "code{background:#eee;padding:.1em .3em;border-radius:3px;font-size:.85em}"
+  "small{color:#666;font-size:.85em}"
+  ".back{margin-top:1.5rem;font-size:.85em}"
+  "</style></head><body>";
 
-static const char WEB_ACTIONS2[] PROGMEM = "<a class='w3-bar-item w3-button' href='/pull'><i class='fas fa-cloud-download-alt'></i> Refresh Data</a>";
-
-static const char WEB_ACTION3[] PROGMEM = "</a><a class='w3-bar-item w3-button' href='/systemreset' onclick='return confirm(\"Do you want to reset to default weather settings?\")'><i class='fas fa-undo'></i> Reset Settings</a>"
-                       "<a class='w3-bar-item w3-button' href='/forgetwifi' onclick='return confirm(\"Do you want to forget to WiFi connection?\")'><i class='fas fa-wifi'></i> Forget WiFi</a>"
-                       "<a class='w3-bar-item w3-button' href='/update'><i class='fas fa-wrench'></i> Firmware Update</a>";
-
-static const char CHANGE_FORM1[] PROGMEM = "<form class='w3-container' action='/saveconfig' method='post'><h2>Configure:</h2>"
-                      "<label>WagFam Calendar Data Source</label>"
-                      "<input class='w3-input w3-border w3-margin-bottom' type='text' name='wagFamDataSource' value='%WAGFAMDATASOURCE%' maxlength='256'>"
-                      "<label>WagFam Calendar API Key</label>"
-                      "<input class='w3-input w3-border w3-margin-bottom' type='text' name='wagFamApiKey' value='%WAGFAMAPIKEY%' maxlength='128'>"
-                      "<hr>";
-
-static const char CHANGE_FORM2[] PROGMEM = "<label>OpenWeatherMap API Key (get from <a href='https://openweathermap.org/' target='_BLANK'>here</a>)</label>"
-                      "<input class='w3-input w3-border w3-margin-bottom' type='text' name='openWeatherMapApiKey' value='%WEATHERKEY%' maxlength='70'>"
-                      "<p><label>%CITYNAME1% (<a href='https://openweathermap.org/find' target='_BLANK'><i class='fas fa-search'></i> Search for City ID</a>)</label>"
-                      "<input class='w3-input w3-border w3-margin-bottom' type='text' name='city1' value='%CITY1%' onkeypress='return isNumberKey(event)'></p>"
-                      "<p><input name='metric' class='w3-check w3-margin-top' type='checkbox' %CHECKED%> Use Metric (Celsius)</p>"
-                      "<p><input name='showdate' class='w3-check w3-margin-top' type='checkbox' %DATE_CHECKED%> Display Date</p>"
-                      "<p><input name='showcity' class='w3-check w3-margin-top' type='checkbox' %CITY_CHECKED%> Display City Name</p>"
-                      "<p><input name='showhighlow' class='w3-check w3-margin-top' type='checkbox' %HIGHLOW_CHECKED%> Display Current High/Low Temperatures</p>"
-                      "<p><input name='showcondition' class='w3-check w3-margin-top' type='checkbox' %CONDITION_CHECKED%> Display Weather Condition</p>"
-                      "<p><input name='showhumidity' class='w3-check w3-margin-top' type='checkbox' %HUMIDITY_CHECKED%> Display Humidity</p>"
-                      "<p><input name='showwind' class='w3-check w3-margin-top' type='checkbox' %WIND_CHECKED%> Display Wind</p>"
-                      "<p><input name='showpressure' class='w3-check w3-margin-top' type='checkbox' %PRESSURE_CHECKED%> Display Barometric Pressure</p>"
-                      "<p><input name='is24hour' class='w3-check w3-margin-top' type='checkbox' %IS_24HOUR_CHECKED%> Use 24 Hour Clock (military time)</p>";
-
-static const char CHANGE_FORM3[] PROGMEM = "<p><input name='isPM' class='w3-check w3-margin-top' type='checkbox' %IS_PM_CHECKED%> Show PM indicator (only 12h format)</p>"
-                      "<p>Display Brightness <input class='w3-border w3-margin-bottom' name='ledintensity' type='number' min='0' max='15' value='%INTENSITYOPTIONS%'></p>"
-                      "<p>Display Scroll Speed <select class='w3-option w3-padding' name='scrollspeed'>%SCROLLOPTIONS%</select></p>"
-                      "<p>Minutes Between Refresh Data <select class='w3-option w3-padding' name='refresh'>%OPTIONS%</select></p>"
-                      "<p>Minutes Between Scrolling Data <input class='w3-border w3-margin-bottom' name='refreshDisplay' type='number' min='1' max='10' value='%REFRESH_DISPLAY%'></p>";
-
-static const char CHANGE_FORM4[] PROGMEM = "<p><button class='w3-button w3-block w3-green w3-section w3-padding' type='submit'>Save</button></p></form>"
-                      "<script>function isNumberKey(e){var h=e.which?e.which:event.keyCode;return!(h>31&&(h<48||h>57))}</script>";
-
-static const char UPDATE_FORM[] PROGMEM = "<form class='w3-container' action='/updateFromUrl' method='get'><h2>Firmware Update Options:</h2>"
-                      "<p><label>Firmware Update URL (optional)</label><input class='w3-input w3-border w3-margin-bottom' type='url' name='firmwareUrl' placeholder='http://example.com/firmware.bin' maxlength='256' required></p>"
-                      "<p><button class='w3-button w3-block w3-blue w3-section w3-padding' type='submit'>Update from URL</button></p>"
-                      "<p><small>Note: You can also use the <a href='/update'>Firmware Update</a> page to upload a file directly.</small></p>"
-                      "<p><small>Need to push the SPA bundle (LittleFS image) to a deployed device? Use <a href='/updatefs'>LittleFS Upload</a>.</small></p></form>";
-
-// LittleFS-upload form rendered by GET /updatefs. This is the OTA path for the
-// SPA bundle on already-deployed devices — without it, /spa can only be
-// installed via serial flash. The Update library accepts U_FS images and writes
-// them directly to the LittleFS partition; /conf.txt is backed up beforehand
-// and restored to the new FS after flashing so settings survive the upgrade.
-static const char UPDATEFS_FORM[] PROGMEM = "<form class='w3-container' method='POST' action='/updatefs' enctype='multipart/form-data'><h2>LittleFS Upload (SPA bundle):</h2>"
-                      "<p><label>LittleFS Image (littlefs.bin)</label><input class='w3-input w3-border w3-margin-bottom' type='file' name='updatefs' accept='.bin' required></p>"
-                      "<p><button class='w3-button w3-block w3-blue w3-section w3-padding' type='submit'>Upload &amp; Flash FS</button></p>"
-                      "<p><small>Your settings (<code>/conf.txt</code>) are automatically backed up and restored — "
-                      "no need to reconfigure after the device reboots.</small></p>"
-                      "<p><small>Looking for the firmware sketch upload? Use <a href='/update'>Firmware Update</a>.</small></p></form>";
+// Footer fragment with a back-to-SPA link. Same pattern across every
+// non-SPA page so users always have a way back.
+static const char MINIMAL_PAGE_CLOSE[] PROGMEM =
+  "<p class='back'><a href='/spa/'>← Back to the dashboard</a></p>"
+  "</body></html>";
 
 // LittleFS partition bounds — defined by the linker for the configured flash
 // layout (4MB FS:1MB on d1_mini in this project; see platformio.ini). Used by
 // /updatefs to size the U_FS update so it spans the entire partition.
 extern "C" uint32_t _FS_start;
 extern "C" uint32_t _FS_end;
-
-// File-upload form rendered by GET /update. ESP8266HTTPUpdateServer used to register
-// both GET (form) and POST (upload) on /update; when we dropped that lib in the async
-// migration, only the POST half was reimplemented, so GET fell through to onNotFound
-// and redirected to "/". This form posts the firmware binary back to POST /update.
-static const char UPLOAD_FORM[] PROGMEM = "<form class='w3-container' method='POST' action='/update' enctype='multipart/form-data'><h2>Firmware Upload:</h2>"
-                      "<p><label>Firmware Binary (.bin)</label><input class='w3-input w3-border w3-margin-bottom' type='file' name='update' accept='.bin' required></p>"
-                      "<p><button class='w3-button w3-block w3-blue w3-section w3-padding' type='submit'>Upload &amp; Flash</button></p>"
-                      "<p><small>The device will reboot automatically when the upload completes.</small></p></form>";
 
 // OTA auto-update state
 String OTA_SAFE_URL = "";       // URL of last confirmed firmware; rollback target for next update
@@ -342,12 +307,21 @@ void setup() {
 
   // Web Server is always enabled.
   // (AsyncWebServer collects all request headers by default — no collectHeaders() call needed.)
-  server.on("/", HTTP_GET, displayHomePage);
-  server.on("/pull", HTTP_GET, handlePull);
-  server.on("/systemreset", HTTP_GET, handleSystemReset);
-  server.on("/forgetwifi", HTTP_GET, handleForgetWifi);
-  server.on("/configure", HTTP_GET, handleConfigure);
-  server.on("/saveconfig", HTTP_POST, handleSaveConfig);
+  // Legacy routes — redirect to the SPA. /pull and /saveconfig kept their
+  // POST/GET methods on the redirect side so existing scripts/bookmarks
+  // don't 405; the SPA Actions tab + Settings tab cover the actual
+  // behavior. handleNotFound() also catches arbitrary unknown paths.
+  server.on("/", HTTP_GET, redirectToSpa);
+  server.on("/configure", HTTP_GET, redirectToSpa);
+  server.on("/pull", HTTP_GET, [](AsyncWebServerRequest *request) {
+    // Preserve "force a refresh" behavior — set the deferred flag, then
+    // redirect to the SPA where the user can watch /api/status.
+    weatherRefreshRequested = true;
+    redirectToSpa(request);
+  });
+  server.on("/systemreset", HTTP_GET, redirectToSpa);
+  server.on("/forgetwifi", HTTP_GET, redirectToSpa);
+  server.on("/saveconfig", HTTP_POST, redirectToSpa);
   server.on("/updateFromUrl", HTTP_GET, handleUpdateFromUrl);
 
   // REST API endpoints
@@ -388,16 +362,21 @@ void setup() {
     server.addHandler(spaUpdatePost);
   }
 
-  // GET /update — render the file-upload form. This used to be served implicitly
-  // by ESP8266HTTPUpdateServer; the async migration only reimplemented POST.
+  // GET /update — file-upload form. Self-contained page (no SPA chrome,
+  // no W3.CSS CDN). Posts back to POST /update for the multipart flash.
   server.on("/update", HTTP_GET, [](AsyncWebServerRequest *request) {
     AsyncResponseStream *response = request->beginResponseStream(F("text/html"));
     response->addHeader(F("Cache-Control"), F("no-cache, no-store"));
-    response->addHeader(F("Pragma"), F("no-cache"));
-    response->addHeader(F("Expires"), F("-1"));
-    sendHeader(response);
-    response->print(FPSTR(UPLOAD_FORM));
-    sendFooter(response);
+    response->print(FPSTR(MINIMAL_PAGE_OPEN));
+    response->print(F(
+      "<h1>Firmware Upload</h1>"
+      "<form method='POST' action='/update' enctype='multipart/form-data'>"
+      "<input type='file' name='update' accept='.bin' required>"
+      "<button type='submit'>Upload &amp; Flash</button></form>"
+      "<p><small>The device will reboot automatically when the upload completes. "
+      "OTA does not touch LittleFS; for SPA-bundle updates use "
+      "<a href='/updatefs'>LittleFS Upload</a>.</small></p>"));
+    response->print(FPSTR(MINIMAL_PAGE_CLOSE));
     request->send(response);
   });
 
@@ -438,17 +417,22 @@ void setup() {
       }
     });
 
-  // GET /updatefs — render the LittleFS upload form. Pair to POST /updatefs;
-  // this is the OTA path for shipping the SPA bundle to deployed devices
-  // without serial flashing (issue #63 follow-up).
+  // GET /updatefs — LittleFS upload form. OTA path for the SPA bundle
+  // on already-deployed devices (issue #63 follow-up).
   server.on("/updatefs", HTTP_GET, [](AsyncWebServerRequest *request) {
     AsyncResponseStream *response = request->beginResponseStream(F("text/html"));
     response->addHeader(F("Cache-Control"), F("no-cache, no-store"));
-    response->addHeader(F("Pragma"), F("no-cache"));
-    response->addHeader(F("Expires"), F("-1"));
-    sendHeader(response);
-    response->print(FPSTR(UPDATEFS_FORM));
-    sendFooter(response);
+    response->print(FPSTR(MINIMAL_PAGE_OPEN));
+    response->print(F(
+      "<h1>LittleFS Upload (SPA bundle)</h1>"
+      "<form method='POST' action='/updatefs' enctype='multipart/form-data'>"
+      "<input type='file' name='updatefs' accept='.bin' required>"
+      "<button type='submit'>Upload &amp; Flash FS</button></form>"
+      "<p><small>Pushes a <code>littlefs.bin</code> image to the LittleFS "
+      "partition and reboots. <code>/conf.txt</code> is preserved. "
+      "Looking for the firmware sketch upload? Use "
+      "<a href='/update'>Firmware Update</a>.</small></p>"));
+    response->print(FPSTR(MINIMAL_PAGE_CLOSE));
     request->send(response);
   });
 
@@ -721,161 +705,21 @@ char secondsIndicator(bool isRefresh) {
   return rtnValue;
 }
 
-void handlePull(AsyncWebServerRequest *request) {
-  // Queue refresh for the main loop (async handlers can't block on HTTPS calls
-  // without tripping the watchdog). Home page renders with current data; the
-  // user can reload after ~30s to see the freshly fetched results.
-  weatherRefreshRequested = true;
-  displayHomePage(request);
-}
-
-void handleSaveConfig(AsyncWebServerRequest *request) {
-  WAGFAM_DATA_URL = request->arg("wagFamDataSource");
-  WAGFAM_API_KEY = request->arg("wagFamApiKey");
-  bdayClient.updateBdayClient(WAGFAM_API_KEY,WAGFAM_DATA_URL);
-  APIKEY = request->arg("openWeatherMapApiKey");
-  geoLocation = request->arg("city1");
-  IS_24HOUR = request->hasArg("is24hour");
-  IS_PM = request->hasArg("isPM");
-  SHOW_DATE = request->hasArg("showdate");
-  SHOW_CITY = request->hasArg("showcity");
-  SHOW_CONDITION = request->hasArg("showcondition");
-  SHOW_HUMIDITY = request->hasArg("showhumidity");
-  SHOW_WIND = request->hasArg("showwind");
-  SHOW_PRESSURE = request->hasArg("showpressure");
-  SHOW_HIGHLOW = request->hasArg("showhighlow");
-  IS_METRIC = request->hasArg("metric");
-  displayIntensity = constrain(request->arg("ledintensity").toInt(), 0, 15);
-  minutesBetweenDataRefresh = max(1, (int)request->arg("refresh").toInt());
-  minutesBetweenScrolling = max(1, (int)request->arg("refreshDisplay").toInt());
-  displayScrollSpeed = max(1, (int)request->arg("scrollspeed").toInt());
-  weatherClient.setMetric(IS_METRIC);
-  weatherClient.setGeoLocation(geoLocation);
-  matrix.fillScreen(LOW); // show black
-  savePersistentConfig();
-  weatherRefreshRequested = true; // deferred to main loop (see flag comment)
-  redirectHome(request);
-}
-
-void handleSystemReset(AsyncWebServerRequest *request) {
-  Serial.println("Reset System Configuration");
-  if (LittleFS.remove(CONFIG)) {
-    redirectHome(request);
-    ESP.restart();
-  }
-}
-
-void handleForgetWifi(AsyncWebServerRequest *request) {
-  //ESPAsyncWiFiManager — local instance only used to clear stored credentials
-  redirectHome(request);
-  AsyncWiFiManager wifiManager(&server, &dnsServer);
-  wifiManager.resetSettings();
-  ESP.restart();
-}
-
-void handleConfigure(AsyncWebServerRequest *request) {
-  digitalWrite(externalLight, LOW);
-
-  AsyncResponseStream *response = request->beginResponseStream(F("text/html"));
-  response->addHeader(F("Cache-Control"), F("no-cache, no-store"));
-  response->addHeader(F("Pragma"), F("no-cache"));
-  response->addHeader(F("Expires"), F("-1"));
-
-  sendHeader(response);
-
-  String form = FPSTR(CHANGE_FORM1);
-  form.replace("%WAGFAMDATASOURCE%", WAGFAM_DATA_URL);
-  form.replace("%WAGFAMAPIKEY%", WAGFAM_API_KEY);
-  response->print(form);
-
-
-  form = FPSTR(CHANGE_FORM2);
-  form.replace("%WEATHERKEY%", APIKEY);
-
-  String cityName = "";
-  if (weatherClient.getCity() != "") {
-    cityName = weatherClient.getCity() + ", " + weatherClient.getCountry();
-  }
-  form.replace("%CITYNAME1%", cityName);
-  form.replace("%CITY1%", geoLocation);
-  String isDateChecked = "";
-  if (SHOW_DATE) {
-    isDateChecked = "checked='checked'";
-  }
-  form.replace("%DATE_CHECKED%", isDateChecked);
-  String isCityChecked = "";
-  if (SHOW_CITY) {
-    isCityChecked = "checked='checked'";
-  }
-  form.replace("%CITY_CHECKED%", isCityChecked);
-  String isConditionChecked = "";
-  if (SHOW_CONDITION) {
-    isConditionChecked = "checked='checked'";
-  }
-  form.replace("%CONDITION_CHECKED%", isConditionChecked);
-  String isHumidityChecked = "";
-  if (SHOW_HUMIDITY) {
-    isHumidityChecked = "checked='checked'";
-  }
-  form.replace("%HUMIDITY_CHECKED%", isHumidityChecked);
-  String isWindChecked = "";
-  if (SHOW_WIND) {
-    isWindChecked = "checked='checked'";
-  }
-  form.replace("%WIND_CHECKED%", isWindChecked);
-  String isPressureChecked = "";
-  if (SHOW_PRESSURE) {
-    isPressureChecked = "checked='checked'";
-  }
-  form.replace("%PRESSURE_CHECKED%", isPressureChecked);
-
-  String isHighlowChecked = "";
-  if (SHOW_HIGHLOW) {
-    isHighlowChecked = "checked='checked'";
-  }
-  form.replace("%HIGHLOW_CHECKED%", isHighlowChecked);
-
-  String is24hourChecked = "";
-  if (IS_24HOUR) {
-    is24hourChecked = "checked='checked'";
-  }
-  form.replace("%IS_24HOUR_CHECKED%", is24hourChecked);
-  String checked = "";
-  if (IS_METRIC) {
-    checked = "checked='checked'";
-  }
-  form.replace("%CHECKED%", checked);
-  response->print(form);
-
-  form = FPSTR(CHANGE_FORM3);
-  String isPmChecked = "";
-  if (IS_PM) {
-    isPmChecked = "checked='checked'";
-  }
-  form.replace("%IS_PM_CHECKED%", isPmChecked);
-  form.replace("%INTENSITYOPTIONS%", String(displayIntensity));
-  String dSpeed = String(displayScrollSpeed);
-  String scrollOptions = "<option value='35'>Slow</option><option value='25'>Normal</option><option value='15'>Fast</option><option value='10'>Very Fast</option>";
-  scrollOptions.replace(dSpeed + "'", dSpeed + "' selected" );
-  form.replace("%SCROLLOPTIONS%", scrollOptions);
-  String minutes = String(minutesBetweenDataRefresh);
-  String options = "<option>5</option><option>10</option><option>15</option><option>20</option><option>30</option><option>60</option>";
-  options.replace(">" + minutes + "<", " selected>" + minutes + "<");
-  form.replace("%OPTIONS%", options);
-  form.replace("%REFRESH_DISPLAY%", String(minutesBetweenScrolling));
-
-  response->print(form);
-
-  response->print(FPSTR(CHANGE_FORM4));
-
-  // Firmware update form
-  response->print(FPSTR(UPDATE_FORM));
-
-  sendFooter(response);
-
-  request->send(response);
-  digitalWrite(externalLight, HIGH);
-}
+// Legacy handlers (handlePull, handleSaveConfig, handleSystemReset,
+// handleForgetWifi, handleConfigure) and the legacy chrome (sendHeader,
+// sendFooter, displayHomePage) were removed in Phase D of the
+// SPA-parity migration. The SPA at /spa/ covers every feature they
+// provided:
+//
+//   /pull          → POST /api/refresh + Home tab
+//   /saveconfig    → POST /api/config (Settings tab)
+//   /systemreset   → POST /api/system-reset (Actions tab)
+//   /forgetwifi    → POST /api/forget-wifi (Actions tab)
+//   /configure     → SPA Settings tab
+//   /              → SPA Home tab
+//
+// The legacy paths now redirect to /spa/ via redirectToSpa() — see
+// setup() and handleNotFound() below.
 
 // Shared OTA flash core used by both handleUpdateFromUrl() and performAutoUpdate().
 // Writes a rollback record to LittleFS, calls ESPhttpUpdate, then cleans up on failure.
@@ -896,47 +740,46 @@ static void doOtaFlash(const String &firmwareUrl) {
     ret, ESPhttpUpdate.getLastErrorString().c_str());
 }
 
+// GET /updateFromUrl — bare URL renders the form; with ?firmwareUrl=...
+// validates and queues the OTA flash for the main loop. Self-contained
+// page (no SPA chrome). Linked from the SPA Actions tab.
 void handleUpdateFromUrl(AsyncWebServerRequest *request) {
   String firmwareUrl = request->arg("firmwareUrl");
 
   AsyncResponseStream *response = request->beginResponseStream(F("text/html"));
   response->addHeader(F("Cache-Control"), F("no-cache, no-store"));
-  response->addHeader(F("Pragma"), F("no-cache"));
-  response->addHeader(F("Expires"), F("-1"));
-
-  sendHeader(response);
-
-  int has_error = 0;
-  String error_message = "";
+  response->print(FPSTR(MINIMAL_PAGE_OPEN));
 
   if (firmwareUrl == "") {
-    error_message = PSTR("Error: No firmware URL provided");
-    Serial.printf_P(PSTR("%s\n"),error_message);
-    has_error = 1;
+    response->print(F(
+      "<h1>Firmware Update from URL</h1>"
+      "<form method='get' action='/updateFromUrl'>"
+      "<input type='url' name='firmwareUrl' placeholder='http://example.com/firmware.bin' required>"
+      "<button type='submit'>Update from URL</button></form>"
+      "<p><small><strong>HTTP only</strong> — ESPhttpUpdate doesn't speak "
+      "TLS. Prefer <a href='/update'>direct file upload</a> for "
+      "TLS-protected sources.</small></p>"));
+  } else if (!firmwareUrl.startsWith("http://")) {
+    Serial.println(F("[OTA] /updateFromUrl: rejected non-HTTP URL"));
+    response->print(F(
+      "<h1>Firmware Update from URL</h1>"
+      "<p><strong>Error:</strong> URL must start with <code>http://</code>. "
+      "<code>https://</code> is not supported.</p>"
+      "<p><a class='btn' href='/updateFromUrl'>Try again</a></p>"));
+  } else {
+    response->print(F("<h1>Firmware Update from URL</h1><p>Starting update from <code>"));
+    response->print(firmwareUrl);
+    response->print(F(
+      "</code></p><p>The device will reboot when the update completes. "
+      "Watch <a href='/spa/'>/spa/</a> Status tab for the new version.</p>"));
+    // Defer the actual flash to the main loop — async handlers can't block on
+    // the 20–30s ESPhttpUpdate.update() call without crashing the event loop.
+    pendingOtaUrl = firmwareUrl;
+    otaFromUrlRequested = true;
   }
 
-  // Validate URL format (only HTTP is supported)
-  if (!firmwareUrl.startsWith("http://")) {
-    error_message = PSTR("Error: Invalid URL format. Must start with http:// HTTPS is NOT SUPPORTED\n");
-    Serial.printf_P(PSTR("%s\n"),error_message);
-    has_error = 1;
-  }
-
-  if (has_error != 0) {
-    response->print("<p>ERROR: "+error_message+"</p>");
-    sendFooter(response);
-    request->send(response);
-    return;
-  }
-
-  response->print("<p>STARTING UPDATE from "+firmwareUrl+"</p><p>The device will reboot when the update completes.</p>");
-  sendFooter(response);
+  response->print(FPSTR(MINIMAL_PAGE_CLOSE));
   request->send(response);
-
-  // Defer the actual flash to the main loop — async handlers can't block on
-  // the 20–30s ESPhttpUpdate.update() call without crashing the event loop.
-  pendingOtaUrl = firmwareUrl;
-  otaFromUrlRequested = true;
 }
 
 // Trigger an OTA update from the given HTTP URL (called from the auto-update path).
@@ -1239,13 +1082,14 @@ void getWeatherData() //client function to send/receive GET request data.
   digitalWrite(externalLight, HIGH);
 }
 
-void redirectHome(AsyncWebServerRequest *request) {
-  // Send them back to the Root Directory
+// 302 → /spa/. Used as the catch-all for legacy paths (`/`, `/configure`,
+// `/pull`, `/systemreset`, `/forgetwifi`, `/saveconfig`) and as the
+// default branch of handleNotFound() for non-/spa unknown URLs. Anyone
+// hitting a removed legacy route lands on the new SPA.
+void redirectToSpa(AsyncWebServerRequest *request) {
   AsyncWebServerResponse *response = request->beginResponse(302, F("text/plain"), F(""));
-  response->addHeader(F("Location"), F("/"));
+  response->addHeader(F("Location"), F("/spa/"));
   response->addHeader(F("Cache-Control"), F("no-cache, no-store"));
-  response->addHeader(F("Pragma"), F("no-cache"));
-  response->addHeader(F("Expires"), F("-1"));
   request->send(response);
 }
 
@@ -1293,121 +1137,7 @@ void handleNotFound(AsyncWebServerRequest *request) {
     request->send(response);
     return;
   }
-  redirectHome(request);
-}
-
-void sendHeader(AsyncResponseStream *response) {
-  String html = "<!DOCTYPE HTML>";
-  html += "<html><head><title>Marquee Scroller</title><link rel='icon' href='data:;base64,='>";
-  html += "<meta http-equiv='Content-Type' content='text/html; charset=UTF-8' />";
-  html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
-  html += "<link rel='stylesheet' href='https://www.w3schools.com/w3css/4/w3.css'>";
-  html += "<link rel='stylesheet' href='https://www.w3schools.com/lib/w3-theme-blue-grey.css'>";
-  html += "<link rel='stylesheet' href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.8.1/css/all.min.css'>";
-  html += "</head><body>";
-  response->print(html);
-  html = "<nav class='w3-sidebar w3-bar-block w3-card' style='margin-top:88px' id='mySidebar'>";
-  html += "<div class='w3-container w3-theme-d2'>";
-  html += "<span onclick='closeSidebar()' class='w3-button w3-display-topright w3-large'><i class='fas fa-times'></i></span>";
-  html += "<div class='w3-left'><img src='https://openweathermap.org/img/w/" + weatherClient.getIcon() + ".png' alt='" + weatherClient.getWeatherDescription() + "'></div>";
-  html += "<div class='w3-padding'>Menu</div></div>";
-  response->print(html);
-
-  response->print(FPSTR(WEB_ACTIONS1));
-  response->print(FPSTR(WEB_ACTIONS2));
-  response->print(FPSTR(WEB_ACTION3));
-
-  html = "</nav>";
-  html += "<header class='w3-top w3-bar w3-theme'><button class='w3-bar-item w3-button w3-xxxlarge w3-hover-theme' onclick='openSidebar()'><i class='fas fa-bars'></i></button><h2 class='w3-bar-item'>WagFam CalClock</h2></header>";
-  html += "<script>";
-  html += "function openSidebar(){document.getElementById('mySidebar').style.display='block'}function closeSidebar(){document.getElementById('mySidebar').style.display='none'}closeSidebar();";
-  html += "</script>";
-  html += "<br><div class='w3-container w3-large' style='margin-top:88px'>";
-  response->print(html);
-}
-
-void sendFooter(AsyncResponseStream *response) {
-  int8_t rssi = getWifiQuality();
-  String html = "<br><br><br>";
-  html += "</div>";
-  html += "<footer class='w3-container w3-bottom w3-theme w3-margin-top'>";
-  html += "<i class='far fa-paper-plane'></i> Version: " + String(VERSION) + "<br>";
-  html += "<i class='far fa-clock'></i> Next Update: " + getTimeTillUpdate() + "<br>";
-  html += "<i class='fas fa-rss'></i> Signal Strength: ";
-  html += String(rssi) + "%";
-  html += "</footer>";
-  html += "</body></html>";
-  response->print(html);
-}
-
-void displayHomePage(AsyncWebServerRequest *request) {
-  digitalWrite(externalLight, LOW);
-  String html = "";
-
-  AsyncResponseStream *response = request->beginResponseStream(F("text/html"));
-  response->addHeader(F("Cache-Control"), F("no-cache, no-store"));
-  response->addHeader(F("Pragma"), F("no-cache"));
-  response->addHeader(F("Expires"), F("-1"));
-  sendHeader(response);
-
-  // Send Over the Main Wagner Family Data Section first
-  if (WAGFAM_DATA_URL == "") {
-    html += "<div class='w3-cell-row' style='width:100%'><p>Please <a href='/configure'>Configure</a> WagFam Calendar Data Source</p></div>";
-  }
-  if (WAGFAM_API_KEY == "") {
-    html += "<div class='w3-cell-row' style='width:100%'><p>Please <a href='/configure'>Configure</a> WagFam Calendar API Key</p></div>";
-  }
-
-  if (bdayClient.getNumMessages() == 0) {
-    html += "<div class='w3-cell-row' style='width:100%'><h2>No Upcoming Events!</h2></div>";
-  } else {
-    html += "<div class='w3-cell-row' style='width:100%'><h2>Upcoming Events</h2></div>";
-    html += "<div class='w3-cell-row' style='width:100%'><ul>";
-    for (int i = 0; i < bdayClient.getNumMessages(); i++) {
-      html += "<li>" + bdayClient.getMessage(i) + "</li>";
-    }
-    html += "</ul></div>";
-  }
-  html += "<hr>";
-  response->print(html);
-  html = "";
-
-
-  // Next send over the Weather Data Section
-  String temperature = String(weatherClient.getTemperature(),0);
-
-  if ((temperature.indexOf(".") != -1) && (temperature.length() >= (temperature.indexOf(".") + 2))) {
-    temperature.remove(temperature.indexOf(".") + 2);
-  }
-
-  String time = getDayName(weekday()) + ", " + getMonthName(month()) + " " + day() + ", " + hourFormat12() + ":" + zeroPad(minute()) + " " + getAmPm(isPM());
-
-  if (weatherClient.getCity() == "") {
-    html += "<p>Please <a href='/configure'>Configure Weather</a> API</p>";
-    if (weatherClient.getErrorMessage() != "") {
-      html += "<p>Weather Error: <strong>" + weatherClient.getErrorMessage() + "</strong></p>";
-    }
-  } else {
-    html += "<div class='w3-cell-row' style='width:100%'><h2>Weather for " + weatherClient.getCity() + ", " + weatherClient.getCountry() + "</h2></div><div class='w3-cell-row'>";
-    html += "<div class='w3-cell w3-left w3-medium' style='width:120px'>";
-    html += "<img src='https://openweathermap.org/img/w/" + weatherClient.getIcon() + ".png' alt='" + weatherClient.getWeatherDescription() + "'><br>";
-    html += String(weatherClient.getHumidity(),0) + "% Humidity<br>";
-    html += weatherClient.getWindDirectionText() + " / " + String(weatherClient.getWindSpeed(),0) + " <span class='w3-tiny'>" + getSpeedSymbol() + "</span> Wind<br>";
-    html += String(weatherClient.getPressure()) + " Pressure<br>";
-    html += "</div>";
-    html += "<div class='w3-cell w3-container' style='width:100%'><p>";
-    html += weatherClient.getWeatherCondition() + " (" + weatherClient.getWeatherDescription() + ")<br>";
-    html += temperature + " " + getTempSymbol(true) + "<br>";
-    html += String(weatherClient.getTemperatureHigh(),0) + "/" + String(weatherClient.getTemperatureLow(),0) + " " + getTempSymbol(true) + "<br>";
-    html += time + "<br>";
-    html += "</p></div></div><hr>";
-  }
-
-
-  response->print(html);
-  sendFooter(response);
-  request->send(response);
-  digitalWrite(externalLight, HIGH);
+  redirectToSpa(request);
 }
 
 void configModeCallback (AsyncWiFiManager *myWiFiManager) {
@@ -1456,17 +1186,9 @@ int8_t getWifiQuality() {
   }
 }
 
-String getTimeTillUpdate() {
-  char hms[10];
-  long timeToUpdate = (((minutesBetweenDataRefresh * 60) + lastRefreshDataTimestamp) - now());
-
-  int hours = numberOfHours(timeToUpdate);
-  int minutes = numberOfMinutes(timeToUpdate);
-  int seconds = numberOfSeconds(timeToUpdate);
-  sprintf_P(hms, PSTR("%d:%02d:%02d"), hours, minutes, seconds);
-
-  return String(hms);
-}
+// getTimeTillUpdate() removed in Phase D. The legacy footer was the only
+// caller; /api/status now exposes next_refresh_in_sec (computed inline)
+// and the SPA Status tab formats it client-side.
 
 int getMinutesFromLastRefresh() {
   int minutes = (now() - lastRefreshDataTimestamp) / 60;
