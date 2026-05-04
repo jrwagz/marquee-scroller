@@ -86,6 +86,10 @@ void handleApiConfigPost(AsyncWebServerRequest *request, JsonVariant &json);
 void handleApiRestart(AsyncWebServerRequest *request);
 void handleApiRefresh(AsyncWebServerRequest *request);
 void handleApiOtaStatus(AsyncWebServerRequest *request);
+void handleApiWeather(AsyncWebServerRequest *request);
+void handleApiEvents(AsyncWebServerRequest *request);
+void handleApiSystemReset(AsyncWebServerRequest *request);
+void handleApiForgetWifi(AsyncWebServerRequest *request);
 void handleApiFsRead(AsyncWebServerRequest *request);
 void handleApiFsWrite(AsyncWebServerRequest *request, JsonVariant &json);
 void handleApiFsDelete(AsyncWebServerRequest *request);
@@ -113,6 +117,8 @@ int bdayMessageIndex = 0;
 WagFamBdayClient::configValues serverConfig = {};
 String DEVICE_NAME = "";     // Human-friendly name assigned by server (not user-editable)
 String SPA_VERSION = "unknown"; // Read from /spa/version.json at boot; "unknown" if absent
+bool spaUpdateAvailable = false;
+String pendingSpaFsUrl = "";
 uint32_t todayDisplayMilliSecond = 0;
 uint32_t todayDisplayStartingLED = 0;
 
@@ -346,6 +352,12 @@ void setup() {
   server.on("/api/restart", HTTP_POST, handleApiRestart);
   server.on("/api/refresh", HTTP_POST, handleApiRefresh);
   server.on("/api/ota/status", HTTP_GET, handleApiOtaStatus);
+  // SPA-parity routes — feed the new Home tab + Actions cards. See
+  // docs/SPA_PARITY.md for the parity matrix this closes.
+  server.on("/api/weather", HTTP_GET, handleApiWeather);
+  server.on("/api/events", HTTP_GET, handleApiEvents);
+  server.on("/api/system-reset", HTTP_POST, handleApiSystemReset);
+  server.on("/api/forget-wifi", HTTP_POST, handleApiForgetWifi);
   server.on("/api/fs/read", HTTP_GET, handleApiFsRead);
   server.on("/api/fs/delete", HTTP_DELETE, handleApiFsDelete);
   server.on("/api/fs/list", HTTP_GET, handleApiFsList);
@@ -1082,6 +1094,18 @@ void getWeatherData() //client function to send/receive GET request data.
     }
   }
 
+  // Check for a remote SPA update pushed via the calendar config
+  if (serverConfig.latestSpaVersionValid && serverConfig.spaFsUrlValid
+      && serverConfig.latestSpaVersion != SPA_VERSION
+      && serverConfig.spaFsUrl.startsWith("http://")) {
+    spaUpdateAvailable = true;
+    pendingSpaFsUrl = serverConfig.spaFsUrl;
+    Serial.println("[SPA] Update available: server=" + serverConfig.latestSpaVersion + ", current=" + SPA_VERSION);
+  } else {
+    spaUpdateAvailable = false;
+    pendingSpaFsUrl = "";
+  }
+
   Serial.println("Version: " + String(VERSION));
   Serial.println();
   digitalWrite(externalLight, HIGH);
@@ -1540,6 +1564,13 @@ void handleApiStatus(AsyncWebServerRequest *request) {
   doc["free_sketch_space"] = ESP.getFreeSketchSpace();
   doc["reset_reason"] = ESP.getResetReason();
 
+  // Refresh schedule, mirroring the legacy footer "Next Update" countdown.
+  // last_refresh_unix is 0 before the first successful fetch — clients should
+  // treat both fields as advisory and not assume a non-zero countdown.
+  doc["last_refresh_unix"] = (uint32_t)lastRefreshDataTimestamp;
+  long timeToUpdate = (((minutesBetweenDataRefresh * 60) + lastRefreshDataTimestamp) - now());
+  doc["next_refresh_in_sec"] = timeToUpdate;
+
   JsonObject wifi = doc["wifi"].to<JsonObject>();
   wifi["ssid"] = WiFi.SSID();
   wifi["ip"] = WiFi.localIP().toString();
@@ -1551,6 +1582,9 @@ void handleApiStatus(AsyncWebServerRequest *request) {
   ota["pending_url"] = otaPendingNewUrl;
   ota["safe_url"] = OTA_SAFE_URL;
   ota["pending_file_exists"] = LittleFS.exists(OTA_PENDING_FILE);
+
+  doc["spa_update_available"] = spaUpdateAvailable;
+  doc["spa_fs_url"] = pendingSpaFsUrl;
 
   sendJsonResponse(request, 200, doc);
 }
@@ -1654,6 +1688,81 @@ void handleApiOtaStatus(AsyncWebServerRequest *request) {
   }
 
   sendJsonResponse(request, 200, doc);
+}
+
+// Mirror of the legacy home page weather card. Pulled from the
+// WeatherClient cache (refreshed every minutesBetweenDataRefresh from
+// the main loop). `data_valid=false` means the SPA should render the
+// "Weather not configured / fetch failed" card and surface error_message.
+void handleApiWeather(AsyncWebServerRequest *request) {
+  JsonDocument doc;
+  doc["data_valid"] = weatherClient.getWeatherDataValid();
+  doc["city"] = weatherClient.getCity();
+  doc["country"] = weatherClient.getCountry();
+  doc["temperature"] = weatherClient.getTemperature();
+  doc["temp_high"] = weatherClient.getTemperatureHigh();
+  doc["temp_low"] = weatherClient.getTemperatureLow();
+  doc["humidity"] = weatherClient.getHumidity();
+  doc["pressure"] = weatherClient.getPressure();
+  doc["wind_speed"] = weatherClient.getWindSpeed();
+  doc["wind_direction_deg"] = weatherClient.getWindDirection();
+  doc["wind_direction_text"] = weatherClient.getWindDirectionText();
+  doc["condition"] = weatherClient.getWeatherCondition();
+  doc["description"] = weatherClient.getWeatherDescription();
+  doc["icon"] = weatherClient.getIcon();
+  doc["weather_id"] = weatherClient.getWeatherId();
+  doc["is_metric"] = IS_METRIC;
+  doc["temp_symbol"] = IS_METRIC ? "C" : "F";
+  doc["speed_symbol"] = IS_METRIC ? "kmh" : "mph";
+  doc["pressure_symbol"] = IS_METRIC ? "mb" : "inHg";
+  doc["error_message"] = weatherClient.getErrorMessage();
+  sendJsonResponse(request, 200, doc);
+}
+
+// Mirror of the legacy home page upcoming-events list. Returns the
+// messages array sourced from the WagFamBdayClient cache. SPA renders
+// the "No upcoming events" placeholder when count == 0.
+void handleApiEvents(AsyncWebServerRequest *request) {
+  JsonDocument doc;
+  doc["count"] = bdayClient.getNumMessages();
+  JsonArray messages = doc["messages"].to<JsonArray>();
+  for (int i = 0; i < bdayClient.getNumMessages(); i++) {
+    messages.add(bdayClient.getMessage(i));
+  }
+  doc["calendar_url_configured"] = WAGFAM_DATA_URL != "";
+  doc["calendar_key_configured"] = WAGFAM_API_KEY != "";
+  sendJsonResponse(request, 200, doc);
+}
+
+// Replaces the legacy GET /systemreset. Delete /conf.txt and reboot
+// into compile-time defaults from Settings.h. Restart is deferred via
+// the existing restartRequested flag so the response (and the TCP FIN)
+// reach the client before the network stack tears down.
+void handleApiSystemReset(AsyncWebServerRequest *request) {
+  Serial.println(F("[API] System reset requested — clearing /conf.txt"));
+  bool ok = LittleFS.remove(CONFIG);
+  JsonDocument doc;
+  doc["status"] = ok ? "ok" : "config_already_absent";
+  doc["restart_in_ms"] = 1000;
+  sendJsonResponse(request, 200, doc);
+  restartAtMs = millis() + 1000;
+  restartRequested = true;
+}
+
+// Replaces the legacy GET /forgetwifi. Use a local AsyncWiFiManager
+// instance to clear the stored credentials (same pattern as the legacy
+// route — we don't carry a long-lived instance because the captive
+// portal only runs at boot when no creds are stored).
+void handleApiForgetWifi(AsyncWebServerRequest *request) {
+  Serial.println(F("[API] Forget WiFi requested"));
+  JsonDocument doc;
+  doc["status"] = "ok";
+  doc["restart_in_ms"] = 1000;
+  sendJsonResponse(request, 200, doc);
+  AsyncWiFiManager wifiManager(&server, &dnsServer);
+  wifiManager.resetSettings();
+  restartAtMs = millis() + 1000;
+  restartRequested = true;
 }
 
 void handleApiFsRead(AsyncWebServerRequest *request) {
