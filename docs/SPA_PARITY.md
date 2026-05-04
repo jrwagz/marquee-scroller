@@ -22,16 +22,16 @@ the legacy routes are removed.
 
 | Feature | Legacy | SPA | Status |
 | --- | --- | --- | --- |
-| Upcoming events list (from calendar) | ✅ | ❌ | **gap — needs `/api/events` + Home tab** |
-| "Configure WagFam URL/key" warning when empty | ✅ | ❌ | **gap — Home tab conditional render** |
-| Weather city + country header | ✅ | ❌ | **gap — needs `/api/weather`** |
-| Weather icon image | ✅ | ❌ | **gap** |
-| Humidity / wind / pressure | ✅ | ❌ | **gap** |
-| Weather condition + description | ✅ | ❌ | **gap** |
-| Current temperature | ✅ | ❌ | **gap** |
-| High / Low temperature | ✅ | ❌ | **gap** |
-| Date + time | ✅ | ❌ | **gap** |
-| Weather error message (when API fails) | ✅ | ❌ | **gap — surface from `/api/weather`** |
+| Upcoming events list (from calendar) | ✅ | ✅ Home tab | ✅ Phase B |
+| "Configure WagFam URL/key" warning when empty | ✅ | ✅ Home tab `ConfigWarnings` | ✅ Phase B |
+| Weather city + country header | ✅ | ✅ Home tab `WeatherCard` | ✅ Phase B |
+| Weather icon image | ✅ | ✅ Home tab (openweathermap.org/img/w/) | ✅ Phase B |
+| Humidity / wind / pressure | ✅ | ✅ Home tab | ✅ Phase B |
+| Weather condition + description | ✅ | ✅ Home tab | ✅ Phase B |
+| Current temperature | ✅ | ✅ Home tab | ✅ Phase B |
+| High / Low temperature | ✅ | ✅ Home tab | ✅ Phase B |
+| Date + time | ✅ | ⚠️ implicit (browser shows current time) | acceptable — legacy showed device time which is just clock-formatted now |
+| Weather error message (when API fails) | ✅ | ✅ Home tab `WeatherCard` error branch | ✅ Phase B |
 
 ### Configure page (`/configure`)
 
@@ -41,7 +41,7 @@ the legacy routes are removed.
 | WagFam Calendar API Key | ✅ | ✅ Settings | ✅ |
 | OpenWeatherMap API Key | ✅ | ✅ Settings | ✅ |
 | Geo location (city ID) | ✅ | ✅ Settings | ✅ |
-| Live resolved city name display ("Midvale, US") | ✅ | ❌ | gap — pull from `/api/weather` |
+| Live resolved city name display ("Midvale, US") | ✅ | ❌ | minor gap — Phase C polish |
 | Metric units toggle | ✅ | ✅ Settings | ✅ |
 | Show Date / City / High-Low / Condition / Humidity / Wind / Pressure | ✅ | ✅ Settings | ✅ |
 | 24-hour clock toggle | ✅ | ✅ Settings | ✅ |
@@ -53,25 +53,25 @@ the legacy routes are removed.
 | Save | ✅ | ✅ | ✅ |
 | Firmware Update URL form | ✅ inline | ⚠️ link out to /updateFromUrl | acceptable — full URL flow lives outside SPA |
 | Link to /update | ✅ | ✅ Actions | ✅ |
-| Link to /updatefs | ✅ | ❌ | **gap — add to Actions firmware-update card** |
+| Link to /updatefs | ✅ | ✅ Actions → LittleFS (firmware-update card) | ✅ Phase B |
 
 ### Sidebar actions (every legacy page)
 
 | Feature | Legacy | SPA | Status |
 | --- | --- | --- | --- |
 | Refresh Data | ✅ /pull | ✅ Actions → Force Refresh | ✅ |
-| Reset Settings (delete /conf.txt + restart) | ✅ /systemreset (confirm dialog) | ❌ | **gap — POST /api/system-reset + Actions card** |
-| Forget WiFi (clear creds + restart) | ✅ /forgetwifi (confirm dialog) | ❌ | **gap — POST /api/forget-wifi + Actions card** |
+| Reset Settings (delete /conf.txt + restart) | ✅ /systemreset (confirm dialog) | ✅ Actions → Reset Settings (window.confirm + POST `/api/system-reset`) | ✅ Phase B |
+| Forget WiFi (clear creds + restart) | ✅ /forgetwifi (confirm dialog) | ✅ Actions → Forget WiFi (window.confirm + POST `/api/forget-wifi`) | ✅ Phase B |
 | Firmware Update (sketch) | ✅ /update | ✅ Actions → Upload .bin | ✅ |
 | Firmware Update from URL | ✅ /updateFromUrl | ✅ Actions → From URL | ✅ |
-| LittleFS Upload | ✅ /updatefs | ❌ | gap — see Configure section |
+| LittleFS Upload | ✅ /updatefs | ✅ Actions → LittleFS | ✅ Phase B |
 
 ### Footer (every legacy page)
 
 | Feature | Legacy | SPA | Status |
 | --- | --- | --- | --- |
 | Version | ✅ | ✅ Status | ✅ |
-| Next Update countdown | ✅ "0:07:33" | ❌ | **gap — derive from `/api/status`** |
+| Next Update countdown | ✅ "0:07:33" | ✅ Status (`Next data refresh` row) | ✅ Phase B |
 | Signal strength | ✅ "100%" | ✅ Status (WiFi card) | ✅ |
 
 ## Plan

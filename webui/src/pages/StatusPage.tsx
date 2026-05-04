@@ -92,6 +92,13 @@ export function StatusPage() {
             </div>
           )}
 
+          {d.next_refresh_in_sec !== undefined && (
+            <div class="stat-card wide sketch-row">
+              <span class="stat-label">Next data refresh</span>
+              <span class="muted">{formatNextRefresh(d.next_refresh_in_sec)}</span>
+            </div>
+          )}
+
           <div class="stat-card wide sketch-row">
             <span class="stat-label">Flash</span>
             <span class="muted">
@@ -107,6 +114,16 @@ export function StatusPage() {
       </p>
     </div>
   );
+}
+
+// Format a "seconds until next refresh" integer the way the legacy footer
+// did — h:mm:ss for any positive value, "now / overdue" when ≤ 0.
+function formatNextRefresh(seconds: number): string {
+  if (seconds <= 0) return "due now";
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
 function StatCard({ label, value }: { label: string; value: string }) {
