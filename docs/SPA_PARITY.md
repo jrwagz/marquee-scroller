@@ -77,6 +77,7 @@ the legacy routes are removed.
 ## Plan
 
 **Phase A** — firmware: expose missing data
+
 1. Extend `/api/status` with `next_refresh_in_sec` + (optional)
    `time_now_iso` so the SPA can render the countdown without an extra
    round-trip.
@@ -86,6 +87,7 @@ the legacy routes are removed.
 5. Add `POST /api/forget-wifi` (resets WiFi creds, schedules restart).
 
 **Phase B** — SPA: add a Home tab + extend Actions
+
 1. New `Home` tab as default (events + weather + config-needed warnings).
 2. Actions tab gets two new cards: Reset Settings, Forget WiFi (both
    with confirm steps; both wired to the new POST routes).
@@ -93,10 +95,12 @@ the legacy routes are removed.
    `/updatefs`).
 
 **Phase C** — minor polish
+
 1. Status tab adds Next Update countdown.
 2. Settings tab shows resolved city next to the geo input.
 
 **Phase D** — decommission legacy
+
 1. Remove `displayHomePage`, `handleConfigure`, `handleSaveConfig`,
    `handlePull`, `handleSystemReset`, `handleForgetWifi`,
    `sendHeader`, `sendFooter`.
