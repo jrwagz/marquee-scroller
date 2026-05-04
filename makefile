@@ -29,6 +29,7 @@ help:
 	@echo "  test-native       - Run native C++ unit tests (no device required)"
 	@echo "  test-scripts      - Run Python tests for scripts/ with 100% coverage check"
 	@echo "  test-integration  - Run integration tests against a live device (requires HOST=<ip>)"
+	@echo "  test-e2e          - Browser-driven SPA smoke test (Playwright, requires HOST=<ip>)"
 	@echo "  test              - Run test-native + test-scripts"
 	@echo "  webui             - Build the SPA frontend (Vite/Preact) into data/spa/"
 	@echo "  webui-typecheck   - TypeScript-typecheck the SPA without emitting"
@@ -137,6 +138,23 @@ ifndef HOST
 	$(error HOST is required. Usage: make test-integration HOST=192.168.1.100 [PASSWORD=mypass])
 endif
 	pytest tests/integration/ -v --host $(HOST) $(if $(PASSWORD),--password $(PASSWORD),) $(if $(PORT),--port $(PORT),)
+
+# Browser-driven SPA smoke test against a live device. Requires HOST.
+# Lazily creates a venv at tests/e2e/.venv/ on first run and downloads
+# Chromium (~100MB cached at ~/Library/Caches/ms-playwright/). Not run
+# in CI — there's no live device in CI.
+tests/e2e/.venv/.installed: tests/e2e/requirements.txt
+	python3 -m venv tests/e2e/.venv
+	tests/e2e/.venv/bin/pip install --quiet -r tests/e2e/requirements.txt
+	tests/e2e/.venv/bin/playwright install chromium
+	touch tests/e2e/.venv/.installed
+
+.PHONY: test-e2e
+test-e2e: tests/e2e/.venv/.installed
+ifndef HOST
+	$(error HOST is required. Usage: make test-e2e HOST=192.168.8.161)
+endif
+	tests/e2e/.venv/bin/python tests/e2e/scripts/smoke.py http://$(HOST)/spa/
 
 .PHONY: build
 build: .passwd
