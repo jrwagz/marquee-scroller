@@ -113,6 +113,8 @@ int bdayMessageIndex = 0;
 WagFamBdayClient::configValues serverConfig = {};
 String DEVICE_NAME = "";     // Human-friendly name assigned by server (not user-editable)
 String SPA_VERSION = "unknown"; // Read from /spa/version.json at boot; "unknown" if absent
+bool spaUpdateAvailable = false;
+String pendingSpaFsUrl = "";
 uint32_t todayDisplayMilliSecond = 0;
 uint32_t todayDisplayStartingLED = 0;
 
@@ -1082,6 +1084,18 @@ void getWeatherData() //client function to send/receive GET request data.
     }
   }
 
+  // Check for a remote SPA update pushed via the calendar config
+  if (serverConfig.latestSpaVersionValid && serverConfig.spaFsUrlValid
+      && serverConfig.latestSpaVersion != SPA_VERSION
+      && serverConfig.spaFsUrl.startsWith("http://")) {
+    spaUpdateAvailable = true;
+    pendingSpaFsUrl = serverConfig.spaFsUrl;
+    Serial.println("[SPA] Update available: server=" + serverConfig.latestSpaVersion + ", current=" + SPA_VERSION);
+  } else {
+    spaUpdateAvailable = false;
+    pendingSpaFsUrl = "";
+  }
+
   Serial.println("Version: " + String(VERSION));
   Serial.println();
   digitalWrite(externalLight, HIGH);
@@ -1551,6 +1565,9 @@ void handleApiStatus(AsyncWebServerRequest *request) {
   ota["pending_url"] = otaPendingNewUrl;
   ota["safe_url"] = OTA_SAFE_URL;
   ota["pending_file_exists"] = LittleFS.exists(OTA_PENDING_FILE);
+
+  doc["spa_update_available"] = spaUpdateAvailable;
+  doc["spa_fs_url"] = pendingSpaFsUrl;
 
   sendJsonResponse(request, 200, doc);
 }

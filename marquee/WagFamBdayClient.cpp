@@ -150,7 +150,9 @@ void WagFamBdayClient::whitespace(char c) {
 //       "eventToday": "",
 //       "latestVersion": "3.08.0-wagfam",
 //       "firmwareUrl": "http://example.com/marquee-v3.08.0.bin",
-//       "deviceName": "Kitchen Clock"
+//       "deviceName": "Kitchen Clock",
+//       "latestSpaVersion": "3.10.0-wagfam-abc1234",
+//       "spaFsUrl": "http://example.com/marquee-v3.10.0-littlefs.bin"
 //     }
 //   },
 //   {
@@ -191,6 +193,12 @@ void WagFamBdayClient::value(String value) {
     } else if (currentKey == "deviceName") {
       currentConfig.deviceNameValid = true;
       currentConfig.deviceName = value;
+    } else if (currentKey == "latestSpaVersion") {
+      currentConfig.latestSpaVersionValid = true;
+      currentConfig.latestSpaVersion = value;
+    } else if (currentKey == "spaFsUrl") {
+      currentConfig.spaFsUrlValid = true;
+      currentConfig.spaFsUrl = value;
     }
   } else if (currentKey == "message") {
     if (messageCounter >= 10) {
