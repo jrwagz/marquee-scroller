@@ -215,6 +215,7 @@ All `/api/*` endpoints return JSON.
 | `/api/restart` | POST | Reboot device |
 | `/api/refresh` | POST | Force weather + calendar data refresh |
 | `/api/ota/status` | GET | OTA rollback file state |
+| `/api/spa/update-from-url` | POST | Flash SPA (LittleFS) image from URL; preserves config (`{"url":"http://..."}`) |
 | `/api/fs/read` | GET | Read file (`?path=/conf.txt`) |
 | `/api/fs/write` | POST | Write file (`{"path":"/x","content":"y"}`) |
 | `/api/fs/delete` | DELETE | Delete file (`?path=/x`) |
