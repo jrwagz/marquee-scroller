@@ -1192,7 +1192,17 @@ void getWeatherData() //client function to send/receive GET request data.
     savePersistentConfig();
   }
 
-  // Check for a remote firmware update pushed via the calendar config
+  // Check for a remote firmware update pushed via the calendar config.
+  //
+  // Build with `-DWAGFAM_AUTO_UPDATE_DISABLED=1` to skip this branch. Useful
+  // when running a locally-built firmware that the calendar server doesn't
+  // know about yet (the server's published latestVersion would otherwise
+  // not match VERSION, and the device would auto-revert to the server's
+  // build at the next calendar refresh — losing local work). Default
+  // behavior is unchanged: the flag must be set explicitly to disable.
+#ifdef WAGFAM_AUTO_UPDATE_DISABLED
+  Serial.println(F("[OTA] Auto-update disabled at build time (WAGFAM_AUTO_UPDATE_DISABLED)"));
+#else
   if (serverConfig.latestVersionValid && serverConfig.firmwareUrlValid
       && serverConfig.latestVersion != String(VERSION)
       && serverConfig.firmwareUrl.startsWith("http://")
@@ -1208,6 +1218,7 @@ void getWeatherData() //client function to send/receive GET request data.
     // If we return here the update failed; continue normal operation
     }
   }
+#endif // WAGFAM_AUTO_UPDATE_DISABLED
 
   // Check for a remote SPA update pushed via the calendar config
   if (serverConfig.latestSpaVersionValid && serverConfig.spaFsUrlValid
