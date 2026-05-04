@@ -121,6 +121,9 @@ export function StatusPage() {
             <span class="badge">SPA Update Available</span>
             <span class="muted" style={{ marginLeft: "0.5rem" }}>
               Current: {d.spa_version || "unknown"}
+              {d.spa_latest_version && (
+                <> {"→ Available: "}{d.spa_latest_version}</>
+              )}
             </span>
           </div>
           <button class="btn" onClick={() => doSpaUpdate(d.spa_fs_url!)}>

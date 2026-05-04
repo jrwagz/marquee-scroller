@@ -28,7 +28,7 @@
 #include "Settings.h"
 #include "SecurityHelpers.h"
 
-#define BASE_VERSION "4.0.0-wagfam"
+#define BASE_VERSION "4.0.1-wagfam"
 #ifdef BUILD_SUFFIX
 #define VERSION BASE_VERSION BUILD_SUFFIX
 #else
@@ -112,6 +112,7 @@ String DEVICE_NAME = "";     // Human-friendly name assigned by server (not user
 String SPA_VERSION = "unknown"; // Read from /spa/version.json at boot; "unknown" if absent
 bool spaUpdateAvailable = false;
 String pendingSpaFsUrl = "";
+String pendingSpaVersion = ""; // Server-published latest SPA version when an update is pending
 bool otaFsFromUrlRequested = false;
 String pendingOtaFsUrl = "";
 uint32_t todayDisplayMilliSecond = 0;
@@ -1071,10 +1072,12 @@ void getWeatherData() //client function to send/receive GET request data.
       && serverConfig.spaFsUrl.startsWith("http://")) {
     spaUpdateAvailable = true;
     pendingSpaFsUrl = serverConfig.spaFsUrl;
+    pendingSpaVersion = serverConfig.latestSpaVersion;
     Serial.println("[SPA] Update available: server=" + serverConfig.latestSpaVersion + ", current=" + SPA_VERSION);
   } else {
     spaUpdateAvailable = false;
     pendingSpaFsUrl = "";
+    pendingSpaVersion = "";
   }
 
   Serial.println("Version: " + String(VERSION));
@@ -1442,6 +1445,7 @@ void handleApiStatus(AsyncWebServerRequest *request) {
 
   doc["spa_update_available"] = spaUpdateAvailable;
   doc["spa_fs_url"] = pendingSpaFsUrl;
+  doc["spa_latest_version"] = pendingSpaVersion;
 
   sendJsonResponse(request, 200, doc);
 }
