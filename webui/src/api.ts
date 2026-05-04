@@ -63,3 +63,10 @@ export const postForgetWifi = (): Promise<ActionAck> =>
     method: "POST",
     headers: POST_HEADERS,
   });
+
+export const postSpaUpdateFromUrl = (url: string): Promise<ActionAck> =>
+  apiFetch<ActionAck>("/api/spa/update-from-url", {
+    method: "POST",
+    headers: POST_HEADERS,
+    body: JSON.stringify({ url }),
+  });

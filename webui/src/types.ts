@@ -30,6 +30,10 @@ export interface StatusData {
   next_refresh_in_sec?: number;
   wifi: WifiStatus;
   ota: OtaStatus;
+  // Set by issue #72 parts 2-3 (firmware ≥ 3.10.3-wagfam).
+  spa_version?: string;
+  spa_update_available?: boolean;
+  spa_fs_url?: string;
 }
 
 export interface WeatherData {

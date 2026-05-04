@@ -1,11 +1,16 @@
 import { useEffect } from "preact/hooks";
 import { signal, computed } from "@preact/signals";
-import { getStatus } from "../api";
+import { getStatus, getConfig, patchConfig, postSpaUpdateFromUrl } from "../api";
 import type { StatusData } from "../types";
 
 const status = signal<StatusData | null>(null);
 const loading = signal(false);
 const error = signal<string | null>(null);
+
+type SpaUpdateState = "idle" | "updating" | "error";
+const spaUpdateState = signal<SpaUpdateState>("idle");
+const spaUpdateStep = signal("");
+const spaUpdateError = signal("");
 
 const uptimeStr = computed(() => {
   if (!status.value) return "—";
@@ -23,9 +28,68 @@ const heapColor = computed(() => {
   return "var(--red)";
 });
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function pollUntilBack(): Promise<void> {
+  // Give the device time to start the flash and initiate reboot.
+  await delay(8_000);
+  const deadline = Date.now() + 120_000;
+  while (Date.now() < deadline) {
+    try {
+      await getStatus();
+      return;
+    } catch {
+      // device still offline — keep polling
+    }
+    await delay(3_000);
+  }
+  throw new Error("Device did not come back online within 2 minutes.");
+}
+
+async function doSpaUpdate(fsUrl: string) {
+  if (!fsUrl) {
+    spaUpdateState.value = "error";
+    spaUpdateError.value = "No SPA update URL — try forcing a data refresh first.";
+    return;
+  }
+  spaUpdateState.value = "updating";
+  spaUpdateError.value = "";
+  try {
+    // Step 1 — snapshot current config (belt-and-suspenders; Part 4 already
+    // preserves /conf.txt during the FS flash, but re-POST ensures parity).
+    spaUpdateStep.value = "Saving current config…";
+    const savedConfig = await getConfig();
+
+    // Step 2 — queue the FS flash on the device
+    spaUpdateStep.value = "Requesting SPA flash…";
+    await postSpaUpdateFromUrl(fsUrl);
+
+    // Step 3 — wait for the device to reboot with the new FS image
+    spaUpdateStep.value = "Flashing SPA bundle — device will reboot shortly…";
+    await pollUntilBack();
+
+    // Step 4 — re-apply config in case the restore in Part 4 had any issues
+    spaUpdateStep.value = "Restoring config…";
+    await patchConfig(savedConfig);
+
+    // Step 5 — reload into the freshly-flashed SPA
+    spaUpdateStep.value = "Done — reloading…";
+    await delay(1_500);
+    window.location.reload();
+  } catch (e) {
+    spaUpdateState.value = "error";
+    spaUpdateError.value = String(e);
+  }
+}
+
 export function StatusPage() {
   useEffect(() => {
     async function load() {
+      // Don't poll while an update is in flight — the device is intentionally
+      // offline during the flash, and we reload on completion anyway.
+      if (spaUpdateState.value !== "idle") return;
       loading.value = true;
       try {
         status.value = await getStatus();
@@ -46,11 +110,53 @@ export function StatusPage() {
   return (
     <div>
       {loading.value && !d && <p class="muted">Loading…</p>}
-      {error.value && <p class="error-msg">{error.value}</p>}
+      {error.value && spaUpdateState.value === "idle" && (
+        <p class="error-msg">{error.value}</p>
+      )}
+
+      {/* SPA update available banner */}
+      {d?.spa_update_available && d?.spa_fs_url && spaUpdateState.value === "idle" && (
+        <div class="update-banner">
+          <div style={{ flex: 1 }}>
+            <span class="badge">SPA Update Available</span>
+            <span class="muted" style={{ marginLeft: "0.5rem" }}>
+              Current: {d.spa_version || "unknown"}
+            </span>
+          </div>
+          <button class="btn" onClick={() => doSpaUpdate(d.spa_fs_url!)}>
+            Update SPA
+          </button>
+        </div>
+      )}
+
+      {/* SPA update in progress */}
+      {spaUpdateState.value === "updating" && (
+        <div class="update-banner">
+          <span class="spinner" />
+          <span style={{ flex: 1 }}>{spaUpdateStep.value}</span>
+        </div>
+      )}
+
+      {/* SPA update error */}
+      {spaUpdateState.value === "error" && (
+        <div class="update-banner update-banner-error">
+          <span class="error-msg" style={{ flex: 1 }}>{spaUpdateError.value}</span>
+          <button
+            class="btn btn-danger"
+            onClick={() => (spaUpdateState.value = "idle")}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {d && (
         <div class="stat-grid">
           <StatCard label="Device" value={d.device_name || d.chip_id} />
           <StatCard label="Version" value={d.version} />
+          {d.spa_version && (
+            <StatCard label="SPA Version" value={d.spa_version} />
+          )}
           <StatCard label="Uptime" value={uptimeStr.value} />
           <StatCard label="Reset reason" value={d.reset_reason} />
 
