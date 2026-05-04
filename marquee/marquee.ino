@@ -28,7 +28,7 @@
 #include "Settings.h"
 #include "SecurityHelpers.h"
 
-#define BASE_VERSION "3.11.1-wagfam"
+#define BASE_VERSION "3.11.2-wagfam"
 #ifdef BUILD_SUFFIX
 #define VERSION BASE_VERSION BUILD_SUFFIX
 #else
@@ -526,21 +526,12 @@ void setup() {
       }
     });
 
-  // Redirect bare /spa and /spa/ to /spa/index.html. ESPAsyncWebServer's
-  // serveStatic default-file resolution does not fire reliably for bare
-  // directory requests on ESP8266/LittleFS — the handler's canHandle() returns
-  // false and the request falls through to onNotFound. These explicit routes
-  // take priority over serveStatic and ensure both /spa and /spa/ load the SPA.
-  server.on("/spa", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->redirect("/spa/index.html");
-  });
-  server.on("/spa/", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->redirect("/spa/index.html");
-  });
-
   // SPA frontend — bundle is built into data/spa/ by `make webui` and flashed
   // to LittleFS. AsyncWebServer's serveStatic auto-detects .gz siblings and
   // serves them with Content-Encoding: gzip when the client advertises it.
+  // setDefaultFile serves /spa/index.html for bare /spa and /spa/ requests
+  // via the _isDir path in AsyncStaticWebHandler::_getFile() — no explicit
+  // redirect routes needed for those.
   // Cache for 10 min — short enough that a UI bugfix lands within a reasonable
   // window after reflashing the FS.
   server.serveStatic("/spa", LittleFS, "/spa/")
@@ -1265,10 +1256,11 @@ void redirectHome(AsyncWebServerRequest *request) {
 // falls through to the legacy redirect-home behavior.
 void handleNotFound(AsyncWebServerRequest *request) {
   if (request->url().startsWith("/spa")) {
-    if (LittleFS.exists(F("/spa/index.html"))) {
-      // SPA is installed — a specific sub-path wasn't found, or this is a
-      // client-side route. Redirect to the SPA root and let the JS router
-      // handle it.
+    if (LittleFS.exists(F("/spa/index.html")) && request->url() != "/spa/index.html") {
+      // SPA is installed — a client-side route that doesn't exist as a real
+      // file fell through. Redirect to the SPA root and let the JS router
+      // handle it. Guard against /spa/index.html itself to avoid a redirect
+      // loop (AsyncCallbackWebHandler prefix-matches /spa against /spa/*).
       request->redirect("/spa/index.html");
       return;
     }

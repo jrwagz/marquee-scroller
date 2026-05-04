@@ -127,12 +127,14 @@ the LittleFS partition was empty. Two implications:
    runtime fallback: if the file is missing, render a clear error page
    that names the deploy step the user is missing, not a 302 to `/`.
    The pattern is `handleNotFound()` in `marquee.ino` — it first checks
-   whether `/spa/index.html` exists on LittleFS. If the SPA is installed,
-   it redirects to `/spa/index.html` (handles client-side routes and the
-   ESPAsyncWebServer serveStatic default-file bug for bare `/spa/` URLs).
-   If the SPA is absent, it returns a "SPA bundle not installed" page
-   that explicitly links `/updatefs` as the easiest fix, instead of
-   falling through to the legacy redirect-home behavior.
+   whether `/spa/index.html` exists on LittleFS. If the SPA is installed
+   and the request is not already `/spa/index.html`, it redirects to
+   `/spa/index.html` so the JS router can handle client-side routes (e.g.
+   `/spa/settings`). If the SPA is absent, it returns a "SPA bundle not
+   installed" page that explicitly links `/updatefs` as the easiest fix,
+   instead of falling through to the legacy redirect-home behavior.
+   `serveStatic` with `.setDefaultFile("index.html")` handles bare `/spa`
+   and `/spa/` directly — no explicit redirect routes are needed for those.
 **When dropping a third-party route registrar, audit every HTTP method it
 registered.** Libraries that "set up" an endpoint often register more than
 one method on it. The canonical example: ESP8266HTTPUpdateServer used to
