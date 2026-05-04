@@ -219,6 +219,44 @@ void test_config_absent_fields_not_valid() {
     TEST_ASSERT_FALSE(cfg.dataSourceUrlValid);
     TEST_ASSERT_FALSE(cfg.apiKeyValid);
     TEST_ASSERT_FALSE(cfg.deviceNameValid);
+    TEST_ASSERT_FALSE(cfg.latestSpaVersionValid);
+    TEST_ASSERT_FALSE(cfg.spaFsUrlValid);
+}
+
+void test_config_latest_spa_version_parsed() {
+    WagFamBdayClient client("", "");
+    feed_json(client, "[{\"config\":{\"latestSpaVersion\":\"3.10.0-wagfam-abc1234\"}}]");
+    auto cfg = client.getLastConfig();
+    TEST_ASSERT_TRUE(cfg.latestSpaVersionValid);
+    TEST_ASSERT_EQUAL_STRING("3.10.0-wagfam-abc1234", cfg.latestSpaVersion.c_str());
+}
+
+void test_config_spa_fs_url_parsed() {
+    WagFamBdayClient client("", "");
+    feed_json(client, "[{\"config\":{\"spaFsUrl\":\"http://example.com/marquee-v3.10.0-littlefs.bin\"}}]");
+    auto cfg = client.getLastConfig();
+    TEST_ASSERT_TRUE(cfg.spaFsUrlValid);
+    TEST_ASSERT_EQUAL_STRING("http://example.com/marquee-v3.10.0-littlefs.bin", cfg.spaFsUrl.c_str());
+}
+
+void test_config_spa_fields_with_firmware_fields() {
+    WagFamBdayClient client("", "");
+    feed_json(client,
+        "[{\"config\":{"
+        "\"latestVersion\":\"3.10.0-wagfam\","
+        "\"firmwareUrl\":\"http://example.com/fw.bin\","
+        "\"latestSpaVersion\":\"3.10.0-wagfam-abc1234\","
+        "\"spaFsUrl\":\"http://example.com/littlefs.bin\""
+        "}}]");
+    auto cfg = client.getLastConfig();
+    TEST_ASSERT_TRUE(cfg.latestVersionValid);
+    TEST_ASSERT_EQUAL_STRING("3.10.0-wagfam", cfg.latestVersion.c_str());
+    TEST_ASSERT_TRUE(cfg.firmwareUrlValid);
+    TEST_ASSERT_EQUAL_STRING("http://example.com/fw.bin", cfg.firmwareUrl.c_str());
+    TEST_ASSERT_TRUE(cfg.latestSpaVersionValid);
+    TEST_ASSERT_EQUAL_STRING("3.10.0-wagfam-abc1234", cfg.latestSpaVersion.c_str());
+    TEST_ASSERT_TRUE(cfg.spaFsUrlValid);
+    TEST_ASSERT_EQUAL_STRING("http://example.com/littlefs.bin", cfg.spaFsUrl.c_str());
 }
 
 void test_config_device_name_parsed() {
@@ -307,6 +345,9 @@ int main() {
     RUN_TEST(test_config_firmware_url_parsed);
     RUN_TEST(test_config_multiple_fields_in_one_block);
     RUN_TEST(test_config_absent_fields_not_valid);
+    RUN_TEST(test_config_latest_spa_version_parsed);
+    RUN_TEST(test_config_spa_fs_url_parsed);
+    RUN_TEST(test_config_spa_fields_with_firmware_fields);
     RUN_TEST(test_config_device_name_parsed);
     RUN_TEST(test_config_device_name_with_other_fields);
     RUN_TEST(test_config_with_messages_both_parsed);

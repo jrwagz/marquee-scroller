@@ -53,6 +53,10 @@ class WagFamBdayClient: public JsonListener {
       String firmwareUrl;
       boolean deviceNameValid;
       String deviceName;
+      boolean latestSpaVersionValid;
+      String latestSpaVersion;
+      boolean spaFsUrlValid;
+      String spaFsUrl;
     } configValues;
 
     WagFamBdayClient(String ApiKey, String JsonDataSourceUrl);
