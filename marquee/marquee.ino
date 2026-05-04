@@ -94,6 +94,8 @@ void handleApiFsRead(AsyncWebServerRequest *request);
 void handleApiFsWrite(AsyncWebServerRequest *request, JsonVariant &json);
 void handleApiFsDelete(AsyncWebServerRequest *request);
 void handleApiFsList(AsyncWebServerRequest *request);
+void handleApiSpaUpdateFromUrl(AsyncWebServerRequest *request, JsonVariant &json);
+static void doOtaFsFlash(const String &fsUrl);
 
 // LED Settings
 int spacer = 1;  // dots between letters
@@ -119,6 +121,8 @@ String DEVICE_NAME = "";     // Human-friendly name assigned by server (not user
 String SPA_VERSION = "unknown"; // Read from /spa/version.json at boot; "unknown" if absent
 bool spaUpdateAvailable = false;
 String pendingSpaFsUrl = "";
+bool otaFsFromUrlRequested = false;
+String pendingOtaFsUrl = "";
 uint32_t todayDisplayMilliSecond = 0;
 uint32_t todayDisplayStartingLED = 0;
 
@@ -377,6 +381,12 @@ void setup() {
     fsWritePost->setMaxContentLength(8192);
     server.addHandler(fsWritePost);
   }
+  {
+    auto *spaUpdatePost = new AsyncCallbackJsonWebHandler("/api/spa/update-from-url", handleApiSpaUpdateFromUrl);
+    spaUpdatePost->setMethod(HTTP_POST);
+    spaUpdatePost->setMaxContentLength(512);
+    server.addHandler(spaUpdatePost);
+  }
 
   // GET /update — render the file-upload form. This used to be served implicitly
   // by ESP8266HTTPUpdateServer; the async migration only reimplemented POST.
@@ -614,6 +624,23 @@ void processEverySecond() {
     Serial.printf_P(PSTR("[OTA] Starting deferred update from URL: %s\n"), url.c_str());
     doOtaFlash(url);
     // Only reached on failure — doOtaFlash reboots the device on success.
+    digitalWrite(externalLight, HIGH);
+  }
+
+  // Honor a deferred SPA FS update from /api/spa/update-from-url.
+  // Uses manual streaming + Update.begin(U_FS) so /conf.txt can be preserved
+  // (ESPhttpUpdate.updateSpiffs() reboots internally before we can restore it).
+  if (otaFsFromUrlRequested && pendingOtaFsUrl.length() > 0) {
+    String url = pendingOtaFsUrl;
+    otaFsFromUrlRequested = false;
+    pendingOtaFsUrl = "";
+    digitalWrite(externalLight, LOW);
+    matrix.fillScreen(LOW);
+    scrollMessageWait(F("   ...Updating SPA..."));
+    centerPrint(F("..."));
+    Serial.printf_P(PSTR("[OTAFS] Starting deferred FS update from URL: %s\n"), url.c_str());
+    doOtaFsFlash(url);
+    // Only reached on failure — doOtaFsFlash reboots the device on success.
     digitalWrite(externalLight, HIGH);
   }
 }
@@ -924,6 +951,94 @@ void performAutoUpdate(const String &firmwareUrl) {
 
   // Only reached on failure
   Serial.printf_P(PSTR("[OTA] Auto-update failed.\n"));
+}
+
+// Streams a LittleFS image from fsUrl, writes it to the FS partition via
+// Update.begin(U_FS), then restores /conf.txt on the new FS before rebooting.
+// Call only from the main loop — the HTTP download blocks for several seconds.
+// Never returns on success — the device reboots after a successful flash.
+static void doOtaFsFlash(const String &fsUrl) {
+  // Back up /conf.txt before unmounting LittleFS.
+  String confBackup = "";
+  {
+    File cf = LittleFS.open("/conf.txt", "r");
+    if (cf) {
+      confBackup = cf.readString();
+      cf.close();
+      Serial.printf_P(PSTR("[OTAFS] Saved /conf.txt (%u bytes)\n"),
+                      (unsigned)confBackup.length());
+    }
+  }
+
+  // Open the HTTP connection and validate the response.
+  WiFiClient httpClient;
+  HTTPClient http;
+  http.begin(httpClient, fsUrl);
+  int code = http.GET();
+  if (code != HTTP_CODE_OK) {
+    Serial.printf_P(PSTR("[OTAFS] HTTP %d — aborting\n"), code);
+    http.end();
+    return;
+  }
+  int contentLength = http.getSize();
+  Serial.printf_P(PSTR("[OTAFS] Content-Length: %d\n"), contentLength);
+
+  // Unmount LittleFS before writing raw bytes to the partition.
+  LittleFS.end();
+  uint32_t fsPartSize = (uint32_t)((size_t)&_FS_end - (size_t)&_FS_start);
+  uint32_t updateSize = (contentLength > 0) ? (uint32_t)contentLength : fsPartSize;
+  if (!Update.begin(updateSize, U_FS)) {
+    Update.printError(Serial);
+    http.end();
+    LittleFS.begin();
+    return;
+  }
+
+  // Stream the HTTP body into the Update writer.
+  WiFiClient *stream = http.getStreamPtr();
+  uint8_t buf[512];
+  uint32_t written = 0;
+  while (http.connected() && (contentLength < 0 || (int)written < contentLength)) {
+    size_t avail = stream->available();
+    if (avail) {
+      size_t toRead = min(avail, sizeof(buf));
+      size_t got = stream->readBytes(buf, toRead);
+      if (Update.write(buf, got) != got) {
+        Update.printError(Serial);
+        http.end();
+        LittleFS.begin();
+        return;
+      }
+      written += got;
+    }
+    yield();
+  }
+  http.end();
+  Serial.printf_P(PSTR("[OTAFS] Streamed %u bytes\n"), written);
+
+  if (!Update.end(true)) {
+    Update.printError(Serial);
+    LittleFS.begin();
+    return;
+  }
+
+  // Remount the new FS and restore /conf.txt.
+  LittleFS.begin();
+  if (!confBackup.isEmpty()) {
+    File cf = LittleFS.open("/conf.txt", "w");
+    if (cf) {
+      cf.print(confBackup);
+      cf.close();
+      Serial.printf_P(PSTR("[OTAFS] Restored /conf.txt (%u bytes)\n"),
+                      (unsigned)confBackup.length());
+    } else {
+      Serial.println(F("[OTAFS] WARN: could not write /conf.txt to new FS"));
+    }
+  }
+  LittleFS.end();
+
+  Serial.println(F("[OTAFS] Flash complete — rebooting"));
+  ESP.restart();
 }
 
 // Called once in setup() after WiFi connects.
@@ -1688,6 +1803,39 @@ void handleApiOtaStatus(AsyncWebServerRequest *request) {
   }
 
   sendJsonResponse(request, 200, doc);
+}
+
+// POST /api/spa/update-from-url — queue a SPA (LittleFS image) OTA from a URL.
+// Accepts {"url": "http://..."} and defers the flash to the main loop so the
+// async handler can return before the multi-second download begins.
+// /conf.txt is preserved: doOtaFsFlash() reads it before unmounting and writes
+// it back to the new FS before rebooting (Part 4 of issue #72).
+void handleApiSpaUpdateFromUrl(AsyncWebServerRequest *request, JsonVariant &json) {
+  if (!json.is<JsonObject>()) {
+    sendJsonError(request, 400, "expected JSON object");
+    return;
+  }
+  String url = json["url"] | "";
+  if (url.isEmpty()) {
+    sendJsonError(request, 400, "missing 'url' field");
+    return;
+  }
+  if (!url.startsWith("http://")) {
+    sendJsonError(request, 400, "url must start with http:// — HTTPS not supported");
+    return;
+  }
+  if (otaFsFromUrlRequested) {
+    sendJsonError(request, 409, "SPA update already in progress");
+    return;
+  }
+
+  pendingOtaFsUrl = url;
+  otaFsFromUrlRequested = true;
+
+  JsonDocument doc;
+  doc["status"] = "update queued";
+  doc["url"] = url;
+  sendJsonResponse(request, 202, doc);
 }
 
 // Mirror of the legacy home page weather card. Pulled from the
