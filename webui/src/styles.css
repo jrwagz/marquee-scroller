@@ -339,6 +339,77 @@ input[type="checkbox"].toggle:checked::after {
   text-align: right;
 }
 
+/* ── Home tab ── */
+
+.home-section { margin-bottom: 1.5rem; }
+
+.home-section h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+}
+
+.event-list {
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: 0.95rem;
+}
+
+.event-list li { margin-bottom: 0.2rem; }
+
+.config-warnings {
+  background: color-mix(in srgb, var(--yellow) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--yellow) 30%, transparent);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.85rem;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+
+.config-warnings p { margin: 0.15rem 0; }
+
+.weather-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.85rem 1rem;
+  background: var(--surface);
+}
+
+.weather-grid {
+  display: flex;
+  gap: 1.25rem;
+  align-items: center;
+}
+
+.weather-icon-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--muted);
+  min-width: 90px;
+}
+
+.weather-icon-col img { margin-bottom: 0.3rem; }
+.weather-meta { text-align: center; }
+.weather-meta div { white-space: nowrap; }
+
+.weather-main { flex: 1; min-width: 0; }
+
+.weather-condition { font-size: 0.95rem; margin-bottom: 0.2rem; }
+
+.weather-temp {
+  font-size: 1.6rem;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.weather-highlow {
+  font-size: 0.85rem;
+  margin-top: 0.1rem;
+}
+
 /* ── Spinner ── */
 
 @keyframes spin { to { transform: rotate(360deg); } }

@@ -23,8 +23,48 @@ export interface StatusData {
   sketch_size: number;
   free_sketch_space: number;
   reset_reason: string;
+  // Set by Phase A (firmware ≥ 3.10.1-wagfam). Optional so the SPA still
+  // renders against an older firmware that lacks them — UI just hides
+  // the "Next Update" countdown row in that case.
+  last_refresh_unix?: number;
+  next_refresh_in_sec?: number;
   wifi: WifiStatus;
   ota: OtaStatus;
+}
+
+export interface WeatherData {
+  data_valid: boolean;
+  city: string;
+  country: string;
+  temperature: number;
+  temp_high: number;
+  temp_low: number;
+  humidity: number;
+  pressure: number;
+  wind_speed: number;
+  wind_direction_deg: number;
+  wind_direction_text: string;
+  condition: string;
+  description: string;
+  icon: string;
+  weather_id: number;
+  is_metric: boolean;
+  temp_symbol: string;
+  speed_symbol: string;
+  pressure_symbol: string;
+  error_message: string;
+}
+
+export interface EventsData {
+  count: number;
+  messages: string[];
+  calendar_url_configured: boolean;
+  calendar_key_configured: boolean;
+}
+
+export interface ActionAck {
+  status: string;
+  restart_in_ms?: number;
 }
 
 export interface ConfigData {
