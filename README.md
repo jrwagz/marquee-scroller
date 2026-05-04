@@ -108,7 +108,8 @@ over OTA via the web interface:
 2. Open `http://<device-ip>/updatefs` in a browser
 3. Select the file and click **Upload & Flash FS** — the device reboots into the new FS
 
-This wipes `/conf.txt` (calendar URL, API keys), so you'll need to reconfigure after flashing.
+Your settings (`/conf.txt` — calendar URL, API keys, display config) are automatically backed
+up and restored, so no reconfiguration is needed after the device reboots.
 
 > **Bootstrapping note:** OTA-flashing the LittleFS image requires firmware that
 > includes the `/updatefs` route (added in 3.09.3-wagfam). Devices on older firmware

@@ -28,7 +28,7 @@
 #include "Settings.h"
 #include "SecurityHelpers.h"
 
-#define BASE_VERSION "3.11.0-wagfam"
+#define BASE_VERSION "3.11.1-wagfam"
 #ifdef BUILD_SUFFIX
 #define VERSION BASE_VERSION BUILD_SUFFIX
 #else
@@ -188,13 +188,13 @@ static const char UPDATE_FORM[] PROGMEM = "<form class='w3-container' action='/u
 // LittleFS-upload form rendered by GET /updatefs. This is the OTA path for the
 // SPA bundle on already-deployed devices — without it, /spa can only be
 // installed via serial flash. The Update library accepts U_FS images and writes
-// them directly to the LittleFS partition; on success the device reboots and
-// remounts the new FS. Wipes /conf.txt — same caveat as `make uploadfs`.
+// them directly to the LittleFS partition; /conf.txt is backed up beforehand
+// and restored to the new FS after flashing so settings survive the upgrade.
 static const char UPDATEFS_FORM[] PROGMEM = "<form class='w3-container' method='POST' action='/updatefs' enctype='multipart/form-data'><h2>LittleFS Upload (SPA bundle):</h2>"
                       "<p><label>LittleFS Image (littlefs.bin)</label><input class='w3-input w3-border w3-margin-bottom' type='file' name='updatefs' accept='.bin' required></p>"
                       "<p><button class='w3-button w3-block w3-blue w3-section w3-padding' type='submit'>Upload &amp; Flash FS</button></p>"
-                      "<p><small><strong>Warning:</strong> this wipes the entire LittleFS partition, including <code>/conf.txt</code> "
-                      "(web password, calendar URL, API keys). You'll need to reconfigure WiFi and settings after the device reboots.</small></p>"
+                      "<p><small>Your settings (<code>/conf.txt</code>) are automatically backed up and restored — "
+                      "no need to reconfigure after the device reboots.</small></p>"
                       "<p><small>Looking for the firmware sketch upload? Use <a href='/update'>Firmware Update</a>.</small></p></form>";
 
 // LittleFS partition bounds — defined by the linker for the configured flash
@@ -526,6 +526,18 @@ void setup() {
       }
     });
 
+  // Redirect bare /spa and /spa/ to /spa/index.html. ESPAsyncWebServer's
+  // serveStatic default-file resolution does not fire reliably for bare
+  // directory requests on ESP8266/LittleFS — the handler's canHandle() returns
+  // false and the request falls through to onNotFound. These explicit routes
+  // take priority over serveStatic and ensure both /spa and /spa/ load the SPA.
+  server.on("/spa", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->redirect("/spa/index.html");
+  });
+  server.on("/spa/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->redirect("/spa/index.html");
+  });
+
   // SPA frontend — bundle is built into data/spa/ by `make webui` and flashed
   // to LittleFS. AsyncWebServer's serveStatic auto-detects .gz siblings and
   // serves them with Content-Encoding: gzip when the client advertises it.
@@ -535,11 +547,10 @@ void setup() {
     .setDefaultFile("index.html")
     .setCacheControl("public, max-age=600");
 
-  // notFound dispatch — a request for /spa/* that didn't match serveStatic
-  // means the LittleFS doesn't have the bundle (the most common cause:
-  // user OTA-flashed firmware but never flashed LittleFS). Render an
-  // explanatory page rather than silently redirecting to /, which makes it
-  // look like the SPA is broken instead of just absent (issue #63).
+  // notFound dispatch — any /spa/* request that didn't match serveStatic
+  // (specific file not found or SPA not installed). handleNotFound checks
+  // LittleFS for /spa/index.html: if present it redirects there (client-side
+  // routing); if absent it renders the "SPA not installed" error page.
   server.onNotFound(handleNotFound);
   // Start the server
   server.begin();
@@ -1254,6 +1265,13 @@ void redirectHome(AsyncWebServerRequest *request) {
 // falls through to the legacy redirect-home behavior.
 void handleNotFound(AsyncWebServerRequest *request) {
   if (request->url().startsWith("/spa")) {
+    if (LittleFS.exists(F("/spa/index.html"))) {
+      // SPA is installed — a specific sub-path wasn't found, or this is a
+      // client-side route. Redirect to the SPA root and let the JS router
+      // handle it.
+      request->redirect("/spa/index.html");
+      return;
+    }
     AsyncResponseStream *response = request->beginResponseStream(F("text/html"));
     response->setCode(404);
     response->addHeader(F("Cache-Control"), F("no-store"));
@@ -1270,9 +1288,8 @@ void handleNotFound(AsyncWebServerRequest *request) {
       "firmware sketch — it does not touch the LittleFS partition where the SPA lives.</p>"
       "<p><strong>To install the SPA bundle</strong>, do one of:</p>"
       "<ul>"
-      "<li><strong>Easiest (no serial cable):</strong> <a href='/updatefs'>upload <code>littlefs.bin</code> via OTA</a> — "
-      "browser-only, but wipes <code>/conf.txt</code></li>"
-      "<li>From a checkout: <code>make uploadfs</code> (serial flash, also wipes <code>/conf.txt</code>)</li>"
+      "<li><strong>Easiest (no serial cable):</strong> <a href='/updatefs'>upload <code>littlefs.bin</code> via OTA</a></li>"
+      "<li>From a checkout: <code>make uploadfs</code> (serial flash)</li>"
       "<li>From a release, manual serial flash: download <code>littlefs.bin</code> and run "
       "<code>esptool.py write_flash 0x300000 littlefs.bin</code></li>"
       "<li>From a release, fresh install: use <code>merged.bin</code> "
