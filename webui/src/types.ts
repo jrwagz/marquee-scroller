@@ -34,6 +34,7 @@ export interface StatusData {
   spa_version?: string;
   spa_update_available?: boolean;
   spa_fs_url?: string;
+  spa_latest_version?: string;
 }
 
 export interface WeatherData {
