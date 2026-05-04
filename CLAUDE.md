@@ -139,10 +139,8 @@ so GET fell through to `onNotFound → redirectHome` and the firmware-upload
 page silently 302'd to `/` (issue #60, fixed in PR #61). Before deleting
 any `server.something()` line, grep the lib's source for every
 `on()`/`addHandler()`/`serveStatic()` call it makes and reimplement each.
-The static regression test
-[`tests/scripts/test_firmware_routes.py`](tests/scripts/test_firmware_routes.py)
-pins `/update`'s GET+POST pair so this specific regression can't recur — add
-similar pins for any other multi-method endpoint you migrate.
+Add a functional regression test that exercises both methods against a live
+or mocked server — do not use a source-reading test (see below) to pin this.
 
 **Don't duplicate logic when a shared helper exists or is obvious.**
 When writing a second code path that does the same core operation as an existing one,
@@ -160,6 +158,20 @@ of thumb: any new branch in a `JsonListener` callback needs a test.
 production code that has stubs in `tests/native/stubs/`, update the stub in the same
 change. If production code calls `client->setBufferSizes(2048, 512)`, the
 `WiFiClientSecureBearSSL.h` stub needs `void setBufferSizes(int, int) {}`.
+
+**Never write source-reading tests.** A source-reading test opens a source file
+(`.ino`, `.py`, `.ts`, makefile, etc.) and asserts on its text content — using
+`re.search`, `str.find`, or similar — rather than executing the code and observing
+its output. These tests are brittle: a behavior-preserving refactor (renaming a
+variable, extracting a helper, moving a block) breaks them with no real regression
+caught. They also give false confidence — a string can be present in source while the
+surrounding logic is wrong. `test_uploadfs_writes_spa_version.py` (PR #76, removed
+in PR #85) and `test_spa_not_found_fallback.py` / `test_webui_settings_coverage.py`
+(removed in PR #85) are the canonical negative examples. If you want to pin a contract:
+write a functional test that invokes the real command or function and asserts on its
+observable side effects (files written, HTTP responses, stdout, exit code). If the
+behavior truly cannot be tested functionally in the test environment, document the
+constraint with a `pytest.mark.skip` and a reason — do not substitute source text matching.
 
 **Update docs in the same commit as the code change.** If a change makes a statement
 in `CLAUDE.md` or `docs/` inaccurate, fix the doc in the same commit — not later.
