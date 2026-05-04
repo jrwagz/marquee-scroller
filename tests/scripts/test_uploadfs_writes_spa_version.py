@@ -19,6 +19,7 @@ Why this exists:
 """
 
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -26,6 +27,13 @@ import pytest
 
 ROOT = Path(__file__).parent.parent.parent
 MAKEFILE = ROOT / "makefile"
+
+# `make` is a host tool, not a test dependency we control. The pytest container
+# (Dockerfile.pytest) ships python+pytest only, so the dry-run end-to-end test
+# below has nothing to invoke. Local devs always have `make` and get the full
+# coverage; CI runs the static-string checks (which catch the same regression
+# in a different way) and skips the dry-run.
+HAS_MAKE = shutil.which("make") is not None
 
 
 @pytest.fixture(scope="module")
@@ -67,10 +75,15 @@ def test_uploadfs_runs_version_script_before_pio(uploadfs_recipe: str) -> None:
     )
 
 
+@pytest.mark.skipif(not HAS_MAKE, reason="`make` not on PATH (e.g. CI's pytest container)")
 def test_uploadfs_dry_run_includes_version_script() -> None:
     """End-to-end: `make -n uploadfs` should print the script invocation.
     Catches makefile-syntax issues that the source-string match above
-    can't (e.g. the line is conditional, in a sub-make, or commented out)."""
+    can't (e.g. the line is conditional, in a sub-make, or commented out).
+
+    Skipped in environments without `make` on PATH — see HAS_MAKE comment
+    above. The two source-string tests above provide complementary
+    coverage that does run everywhere."""
     result = subprocess.run(
         ["make", "-n", "uploadfs"],
         cwd=ROOT,
