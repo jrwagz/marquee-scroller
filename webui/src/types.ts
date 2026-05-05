@@ -35,6 +35,16 @@ export interface StatusData {
   spa_update_available?: boolean;
   spa_fs_url?: string;
   spa_latest_version?: string;
+  // SPA-FS OTA progress for the deferred /api/spa/update-from-url flash.
+  // Optional so the SPA still renders against firmware that predates the
+  // tracking; in that case the StatusPage falls back to legacy polling.
+  spa_ota?: SpaOtaState;
+}
+
+export interface SpaOtaState {
+  // "idle" | "queued" | "downloading" | "flashing" | "restoring-conf" | "failed"
+  status: string;
+  error: string;
 }
 
 export interface WeatherData {

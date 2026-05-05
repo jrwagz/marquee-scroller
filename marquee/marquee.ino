@@ -28,7 +28,7 @@
 #include "Settings.h"
 #include "SecurityHelpers.h"
 
-#define BASE_VERSION "4.0.1-wagfam"
+#define BASE_VERSION "4.0.2-wagfam"
 #ifdef BUILD_SUFFIX
 #define VERSION BASE_VERSION BUILD_SUFFIX
 #else
@@ -115,6 +115,14 @@ String pendingSpaFsUrl = "";
 String pendingSpaVersion = ""; // Server-published latest SPA version when an update is pending
 bool otaFsFromUrlRequested = false;
 String pendingOtaFsUrl = "";
+
+// SPA-FS OTA status, surfaced via /api/status so the SPA UI can detect
+// silent failures of the deferred flash run by doOtaFsFlash(). Value
+// progresses idle → queued → downloading → flashing → restoring-conf,
+// then reset to idle on the post-reboot setup() (RAM-only state). On
+// any failure point, set to "failed" with a diagnostic in spaOtaError.
+String spaOtaStatus = "idle";
+String spaOtaError = "";
 uint32_t todayDisplayMilliSecond = 0;
 uint32_t todayDisplayStartingLED = 0;
 
@@ -799,11 +807,34 @@ void performAutoUpdate(const String &firmwareUrl) {
   Serial.printf_P(PSTR("[OTA] Auto-update failed.\n"));
 }
 
+// Helper: record a SPA OTA failure, log it to serial, and reset HTTP/FS
+// state. The caller still returns afterwards — keep this side-effect-only
+// so the failure path stays straight-line and easy to audit.
+static void spaOtaFail(const __FlashStringHelper *stage, const String &detail,
+                       HTTPClient *http) {
+  String stageStr = String(stage);
+  spaOtaStatus = "failed";
+  spaOtaError = stageStr + (detail.length() ? ": " + detail : String());
+  Serial.print(F("[OTAFS] FAIL ("));
+  Serial.print(stageStr);
+  Serial.print(F("): "));
+  Serial.println(detail);
+  if (http) http->end();
+  // Always remount the (still-old) FS so the device stays usable; a no-op
+  // if it's already mounted.
+  LittleFS.begin();
+}
+
 // Streams a LittleFS image from fsUrl, writes it to the FS partition via
 // Update.begin(U_FS), then restores /conf.txt on the new FS before rebooting.
 // Call only from the main loop — the HTTP download blocks for several seconds.
 // Never returns on success — the device reboots after a successful flash.
+// On any failure, sets spaOtaStatus="failed" + spaOtaError so the SPA poll
+// loop in StatusPage can surface it instead of silently returning success.
 static void doOtaFsFlash(const String &fsUrl) {
+  spaOtaStatus = "downloading";
+  spaOtaError = "";
+
   // Back up /conf.txt before unmounting LittleFS.
   String confBackup = "";
   {
@@ -816,43 +847,56 @@ static void doOtaFsFlash(const String &fsUrl) {
     }
   }
 
-  // Open the HTTP connection and validate the response.
+  // Open the HTTP connection and validate the response. Follow redirects so
+  // mirrors that 30x to a different path (e.g. Azure App Service HTTPS-only
+  // mode, host moves) don't manifest as a silent 302 != 200 abort.
   WiFiClient httpClient;
   HTTPClient http;
   http.begin(httpClient, fsUrl);
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
   int code = http.GET();
   if (code != HTTP_CODE_OK) {
-    Serial.printf_P(PSTR("[OTAFS] HTTP %d — aborting\n"), code);
-    http.end();
+    spaOtaFail(F("http"), "HTTP " + String(code) + " from " + fsUrl, &http);
     return;
   }
   int contentLength = http.getSize();
   Serial.printf_P(PSTR("[OTAFS] Content-Length: %d\n"), contentLength);
+  if (contentLength <= 0) {
+    spaOtaFail(F("http"),
+               "missing or invalid Content-Length (" + String(contentLength) + ")",
+               &http);
+    return;
+  }
 
   // Unmount LittleFS before writing raw bytes to the partition.
   LittleFS.end();
   uint32_t fsPartSize = (uint32_t)((size_t)&_FS_end - (size_t)&_FS_start);
-  uint32_t updateSize = (contentLength > 0) ? (uint32_t)contentLength : fsPartSize;
-  if (!Update.begin(updateSize, U_FS)) {
-    Update.printError(Serial);
-    http.end();
-    LittleFS.begin();
+  if ((uint32_t)contentLength > fsPartSize) {
+    String detail = "image " + String(contentLength) +
+                    " > FS partition " + String(fsPartSize);
+    spaOtaFail(F("size"), detail, &http);
     return;
   }
+  // Mirror /updatefs upload handler: enable async writes so the inner write
+  // loop doesn't stall while the prior sector finishes erasing.
+  Update.runAsync(true);
+  if (!Update.begin((uint32_t)contentLength, U_FS)) {
+    spaOtaFail(F("Update.begin"), Update.getErrorString(), &http);
+    return;
+  }
+  spaOtaStatus = "flashing";
 
   // Stream the HTTP body into the Update writer.
   WiFiClient *stream = http.getStreamPtr();
   uint8_t buf[512];
   uint32_t written = 0;
-  while (http.connected() && (contentLength < 0 || (int)written < contentLength)) {
+  while (http.connected() && (int)written < contentLength) {
     size_t avail = stream->available();
     if (avail) {
       size_t toRead = min(avail, sizeof(buf));
       size_t got = stream->readBytes(buf, toRead);
       if (Update.write(buf, got) != got) {
-        Update.printError(Serial);
-        http.end();
-        LittleFS.begin();
+        spaOtaFail(F("Update.write"), Update.getErrorString(), &http);
         return;
       }
       written += got;
@@ -862,13 +906,23 @@ static void doOtaFsFlash(const String &fsUrl) {
   http.end();
   Serial.printf_P(PSTR("[OTAFS] Streamed %u bytes\n"), written);
 
+  // Premature disconnect: loop exited because http.connected() went false
+  // before we received the whole body. Update.end() would fail anyway, but
+  // surfacing a more specific message helps debug flaky upstream hosts.
+  if ((int)written < contentLength) {
+    spaOtaFail(F("download"),
+               "truncated at " + String(written) + "/" + String(contentLength) + " bytes",
+               nullptr);
+    return;
+  }
+
   if (!Update.end(true)) {
-    Update.printError(Serial);
-    LittleFS.begin();
+    spaOtaFail(F("Update.end"), Update.getErrorString(), nullptr);
     return;
   }
 
   // Remount the new FS and restore /conf.txt.
+  spaOtaStatus = "restoring-conf";
   LittleFS.begin();
   if (!confBackup.isEmpty()) {
     File cf = LittleFS.open("/conf.txt", "w");
@@ -878,6 +932,8 @@ static void doOtaFsFlash(const String &fsUrl) {
       Serial.printf_P(PSTR("[OTAFS] Restored /conf.txt (%u bytes)\n"),
                       (unsigned)confBackup.length());
     } else {
+      // Don't fail the whole update — the SPA's post-reboot patchConfig step
+      // re-applies settings — but log it loudly so it's visible.
       Serial.println(F("[OTAFS] WARN: could not write /conf.txt to new FS"));
     }
   }
@@ -1447,6 +1503,13 @@ void handleApiStatus(AsyncWebServerRequest *request) {
   doc["spa_fs_url"] = pendingSpaFsUrl;
   doc["spa_latest_version"] = pendingSpaVersion;
 
+  // SPA-FS OTA progress, so the SPA's update flow can detect a silent
+  // failure instead of treating "device responded to /api/status" as proof
+  // the flash worked. RAM-only; resets to "idle" on every boot.
+  JsonObject spaOta = doc["spa_ota"].to<JsonObject>();
+  spaOta["status"] = spaOtaStatus;
+  spaOta["error"] = spaOtaError;
+
   sendJsonResponse(request, 200, doc);
 }
 
@@ -1577,6 +1640,8 @@ void handleApiSpaUpdateFromUrl(AsyncWebServerRequest *request, JsonVariant &json
 
   pendingOtaFsUrl = url;
   otaFsFromUrlRequested = true;
+  spaOtaStatus = "queued";
+  spaOtaError = "";
 
   JsonDocument doc;
   doc["status"] = "update queued";

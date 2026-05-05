@@ -32,20 +32,48 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function pollUntilBack(): Promise<void> {
-  // Give the device time to start the flash and initiate reboot.
-  await delay(8_000);
-  const deadline = Date.now() + 120_000;
+// Wait for the deferred SPA flash to either succeed (device reboots back
+// to spa_ota.status === "idle") or fail (spa_ota.status === "failed").
+// Older firmware that pre-dates spa_ota tracking falls back to the legacy
+// "first successful poll wins" behavior so this remains backward-compatible.
+async function waitForUpdateOutcome(): Promise<void> {
+  // Give the device time to enter the flash path before we start polling.
+  await delay(5_000);
+  const deadline = Date.now() + 180_000;
+  let observedActivity = false;
   while (Date.now() < deadline) {
     try {
-      await getStatus();
-      return;
-    } catch {
-      // device still offline — keep polling
+      const s = await getStatus();
+      const ota = s.spa_ota?.status;
+
+      if (ota === "failed") {
+        throw new Error(
+          `SPA update failed during ${s.spa_ota?.error || "unknown stage"}.`,
+        );
+      }
+
+      if (ota === undefined) {
+        // Firmware predates spa_ota — restore legacy behavior.
+        return;
+      }
+
+      if (ota !== "idle") {
+        observedActivity = true;
+      } else if (observedActivity) {
+        // Returned to idle after activity → device rebooted into new FS.
+        return;
+      }
+    } catch (e) {
+      // Throws from "failed" branch propagate as real errors.
+      if (e instanceof Error && e.message.startsWith("SPA update failed")) {
+        throw e;
+      }
+      // Otherwise: device offline (rebooting) — record + keep polling.
+      observedActivity = true;
     }
-    await delay(3_000);
+    await delay(2_000);
   }
-  throw new Error("Device did not come back online within 2 minutes.");
+  throw new Error("Timed out waiting for SPA update outcome (3 min).");
 }
 
 async function doSpaUpdate(fsUrl: string) {
@@ -66,9 +94,12 @@ async function doSpaUpdate(fsUrl: string) {
     spaUpdateStep.value = "Requesting SPA flash…";
     await postSpaUpdateFromUrl(fsUrl);
 
-    // Step 3 — wait for the device to reboot with the new FS image
+    // Step 3 — wait for the device to reboot with the new FS image, OR
+    // surface a failure from the deferred flash (silent failures used to
+    // pass through here as apparent success — see issue: SPA update apply
+    // path silent failure).
     spaUpdateStep.value = "Flashing SPA bundle — device will reboot shortly…";
-    await pollUntilBack();
+    await waitForUpdateOutcome();
 
     // Step 4 — re-apply config in case the restore in Part 4 had any issues
     spaUpdateStep.value = "Restoring config…";
