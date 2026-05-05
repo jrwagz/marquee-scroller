@@ -11,7 +11,7 @@
 > `handleConfigure`, `handlePull`, `handleSystemReset`, `handleForgetWifi`,
 > `displayHomePage`, `sendHeader`, `sendFooter`) and removed auth machinery
 > (CSRF token generation, web password generation, `setAuthentication`,
-> `requireApiAuth`). See `docs/SPA_PARITY.md` for the migration map.
+> `requireApiAuth`). See `docs/archive/SPA_PARITY.md` for the migration map.
 
 ---
 

@@ -332,7 +332,7 @@ void setup() {
   server.on("/api/refresh", HTTP_POST, handleApiRefresh);
   server.on("/api/ota/status", HTTP_GET, handleApiOtaStatus);
   // SPA-parity routes — feed the new Home tab + Actions cards. See
-  // docs/SPA_PARITY.md for the parity matrix this closes.
+  // docs/archive/SPA_PARITY.md for the parity matrix this closes.
   server.on("/api/weather", HTTP_GET, handleApiWeather);
   server.on("/api/events", HTTP_GET, handleApiEvents);
   server.on("/api/system-reset", HTTP_POST, handleApiSystemReset);
