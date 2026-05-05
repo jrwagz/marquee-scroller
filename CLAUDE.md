@@ -54,30 +54,33 @@ instance.
 
 ### Key Line Numbers in `marquee.ino`
 
-These are approximate — search for the symbol if the line is off by a few. The file is ~1600 lines.
+These are approximate — search for the symbol if the line is off by a few. The file is ~1800 lines.
 
 | Function | Line |
 | --- | --- |
-| Global variables (settings) | ~95–189 |
-| PROGMEM HTML constants | ~133–179 |
-| `setup()` | 194 |
-| `loop()` | 375 |
-| `processEverySecond()` | 401 |
-| `processEveryMinute()` | 418 |
-| `handleSaveConfig()` | 498 |
-| `handleConfigure()` | 553 |
-| `doOtaFlash()` | 663 |
-| `handleUpdateFromUrl()` | 679 |
-| `performAutoUpdate()` | 732 |
-| `checkOtaRollback()` | 748 |
-| `getWeatherData()` | 802 |
-| `sendHeader()` / `sendFooter()` | 927 / 957 |
-| `displayHomePage()` | 971 |
-| `savePersistentConfig()` | 1105 |
-| `readPersistentConfig()` | 1146 |
-| `scrollMessageWait()` | 1240 |
-| `centerPrint()` | 1263 |
-| REST API handlers | ~1351–1583 |
+| Global variables (settings) | ~95–195 |
+| `setup()` | 220 |
+| `loop()` | 548 |
+| `processEverySecond()` | 574 |
+| `processEveryMinute()` | 635 |
+| `doOtaFlash()` | 728 |
+| `handleUpdateFromUrl()` | 747 |
+| `performAutoUpdate()` | 789 |
+| `checkOtaRollback()` | 893 |
+| `getWeatherData()` | 947 |
+| `redirectToSpa()` / `handleNotFound()` | 1092 / 1104 |
+| `savePersistentConfig()` | 1201 |
+| `readPersistentConfig()` | 1241 |
+| `scrollMessageWait()` | 1332 |
+| `centerPrint()` | 1355 |
+| REST API handlers | ~1413–1700 |
+
+The legacy server-rendered handlers (`handleSaveConfig`, `handleConfigure`,
+`displayHomePage`, `handlePull`, `handleSystemReset`, `handleForgetWifi`,
+`sendHeader`, `sendFooter`) were removed in Phase D (PR #80), along with the
+`CHANGE_FORM*` / `WEB_ACTIONS*` / `UPDATE_FORM` / `UPLOAD_FORM` PROGMEM constants.
+The legacy paths (`/`, `/configure`, `/pull`, `/systemreset`, `/forgetwifi`,
+`/saveconfig`) now 302-redirect to `/spa/` via `redirectToSpa()`.
 
 ## Configuration Storage
 
@@ -93,10 +96,16 @@ JSON response and persisted across reboots via `/conf.txt`.
 ### Adding a New Config Key
 
 1. Declare a global variable in `marquee.ino` (near line 95)
-2. Add `f.println("KEY=" + String(value))` in `savePersistentConfig()` (~line 1067)
-3. Add an `if (line.indexOf("KEY=") >= 0)` block in `readPersistentConfig()` (~line 1146)
-4. Add a form field in one of the `CHANGE_FORM*` PROGMEM constants (~line 142)
-5. Read from `request->arg("fieldName")` in `handleSaveConfig()` (~line 498)
+2. Add `f.println("KEY=" + String(value))` in `savePersistentConfig()` (~line 1201)
+3. Add an `else if (key == "KEY")` block in `readPersistentConfig()` (~line 1241).
+   The parser splits each line on the first `=` and dispatches via an `if/else if`
+   chain — see existing entries for the pattern.
+4. Surface the key in `handleApiConfigGet()` (so the SPA can read it) and
+   `handleApiConfigPost()` (so the SPA can write it). Both live in `marquee.ino`
+   in the REST API handlers block. The SPA pulls and pushes via
+   [`POST /api/config`](README.md#rest-api).
+5. Wire the SPA-side input in [`webui/src/`](webui/src/) — add the field to the
+   Settings form and to the `Config` TypeScript type used for fetch/save.
 
 ## Development Practices
 
@@ -442,14 +451,21 @@ are wired through `AsyncCallbackJsonWebHandler` because `AsyncWebServer` does no
 
 ## Known Issues
 
-See `docs/CODE_REVIEW.md` for the full open-issues list. Top items by impact:
+See `docs/CODE_REVIEW.md` for the full open-issues list. Top remaining item:
 
-- `getWindDirectionText()` allocates 16 `String` objects on the stack every call — use `PROGMEM` array
 - `cleanText()` does 35+ sequential `replace()` calls — heap fragmentation risk on long strings
-- `savePersistentConfig()` always tail-calls `readPersistentConfig()` — fragile mutual recursion
-- Config parser uses `indexOf("KEY=")` without `else if` — key collision risk if a URL contains
-  another key name
-- HTML page builders use `html +=` — replace static fragments with `server.sendContent(F("..."))`
+
+Several earlier items have been resolved in master (current as of v4.0.1-wagfam):
+
+- `getWindDirectionText()` now uses a `PROGMEM` array (no per-call `String` allocations)
+- `savePersistentConfig()` no longer tail-calls `readPersistentConfig()`
+- Config parser splits each line on the first `=` and dispatches via `if/else if` — no
+  more key-collision risk
+- The legacy `html +=` page builders (`sendHeader`, `displayHomePage`, `handleConfigure`)
+  were removed entirely in Phase D (PR #80) — the SPA replaced them
+- `displayDirty` short-circuit in `loop()` skips `matrix.write()` on idle frames
+- `matrix.shutdown(false)` no longer called from `processEveryMinute()`
+- `WagFamBdayClient::getMessage()` now bounds-checks the index
 
 ## SecurityHelpers Module
 

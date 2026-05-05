@@ -93,9 +93,19 @@ This firmware is a fork of [Qrome/marquee-scroller](https://github.com/Qrome/mar
 - Remote config push — the calendar server can remotely update `dataSourceUrl`, `apiKey`,
   `eventToday`, and `deviceName` by embedding a `config` block in the JSON response
 - OTA firmware update from URL (HTTP only) with boot-confirmation rollback
-- Security hardening: configurable web password, CSRF protection, firmware domain allowlist
+- LittleFS OTA flash via `/updatefs` with `/conf.txt` backup/restore (so the SPA bundle
+  can be refreshed without losing settings)
+- SPA frontend served from LittleFS at `/spa/` (Preact + Vite + signals + TypeScript)
+- Compile-time firmware-domain allowlist (`WAGFAM_TRUSTED_FIRMWARE_DOMAINS`) so the
+  device only auto-flashes from approved hosts
 - Reworked `OpenWeatherMapClient` using raw HTTP (no external weather library)
 - Reworked `timeNTP` module with explicit sync control
+
+> **Note on web auth.** A previous iteration of this fork shipped per-device HTTP Basic
+> Auth + CSRF tokens. Both were intentionally removed; the device is assumed to be on a
+> trusted home network. See [`SECURITY_AUDIT.md`](SECURITY_AUDIT.md) for the historical
+> findings — note that several items it lists as **FIXED** were undone by the auth
+> removal and need re-evaluation under the current threat model.
 
 ---
 
@@ -132,14 +142,18 @@ marquee-scroller/
 
 ### `marquee.ino` — The Main Sketch
 
-The largest file (~1585 lines). Owns:
+The largest file (~1800 lines). Owns:
 
 - All **global mutable state** (settings variables, display state, timing counters)
 - **`setup()`** — hardware init, WiFi, web server, OTA, first time sync
-- **`loop()`** — per-frame display update + web/OTA service
+- **`loop()`** — per-frame display update (the async web server runs in TCP callbacks)
 - **`processEverySecond()`** / **`processEveryMinute()`** — timed data refresh and scroll
 - **`getWeatherData()`** — orchestrates weather + calendar fetch + NTP sync
-- All **web request handlers** (`handleConfigure`, `handleSaveConfig`, `handlePull`, etc.)
+- All **REST API handlers** (`handleApi*` functions backing `/api/*` endpoints) plus the
+  legacy-path redirects to `/spa/` (`redirectToSpa`) and the SPA-aware 404 fallback
+  (`handleNotFound`)
+- The OTA paths: `/update` (file upload), `/updateFromUrl` (URL fetch + flash), and
+  `/updatefs` (LittleFS image upload with `/conf.txt` backup/restore)
 - **`savePersistentConfig()`** / **`readPersistentConfig()`** — LittleFS I/O
 - **`scrollMessageWait()`** / **`centerPrint()`** — display rendering
 
@@ -385,15 +399,13 @@ portal during AP mode is served by `ESPAsyncWiFiManager` sharing the same instan
 
 | Route | Handler | Description |
 | ------- | --------- | ------------- |
-| `/` | `displayHomePage` | Shows events, weather, version |
-| `/configure` | `handleConfigure` | Renders config form |
-| `/saveconfig` | `handleSaveConfig` | Saves form data, triggers refresh |
-| `/pull` | `handlePull` | Forces immediate data refresh |
+| `/spa/...` | `serveStatic` (LittleFS) | Preact SPA bundle — Home / Status / Settings / Actions tabs |
+| `/`, `/configure`, `/systemreset`, `/forgetwifi`, `/saveconfig` | `redirectToSpa` | 302 → `/spa/` (legacy paths preserved as redirects) |
+| `/pull` | inline lambda | Sets `weatherRefreshRequested` then 302 → `/spa/` |
 | `/update` | inline `setup()` lambda | Firmware upload (POST + file body, manually wired since `ESP8266HTTPUpdateServer` is sync-only) |
 | `/updateFromUrl` | `handleUpdateFromUrl` | Firmware update from HTTP URL |
-| `/systemreset` | `handleSystemReset` | Deletes /conf.txt and reboots |
-| `/forgetwifi` | `handleForgetWifi` | Clears WiFi credentials and reboots |
-| `*` | `redirectHome` | Catch-all redirect to `/` |
+| `/updatefs` | inline `setup()` lambda | LittleFS image upload — refreshes the SPA bundle without serial flash; `/conf.txt` is backed up and restored across the flash |
+| `*` | `handleNotFound` | If `/spa/index.html` exists on LittleFS, redirect to `/spa/index.html` so the SPA router handles client-side routes; otherwise render a "SPA bundle not installed" page that links `/updatefs` |
 
 ### REST API (`/api/*`)
 
@@ -401,21 +413,24 @@ See [README.md — REST API](../README.md#rest-api) for the full endpoint table 
 
 Handler functions follow the naming convention `handleApi<Resource>[Action]`
 (e.g., `handleApiConfigGet`, `handleApiFsWrite`). They are registered in `setup()` alongside
-the web UI routes. The API enables automated testing of config operations, OTA rollback
-workflows, and filesystem state inspection without a browser.
+the page routes. The API enables automated testing of config operations, OTA rollback
+workflows, and filesystem state inspection without a browser. JSON-body POST endpoints
+(`/api/config`, `/api/fs/write`, `/api/spa/update-from-url`) are wired through
+`AsyncCallbackJsonWebHandler` because `AsyncWebServer` does not populate
+`request->arg("plain")`.
 
-The web UI uses W3.CSS (loaded from CDN) and Font Awesome 5.8 icons (from cdnjs CDN).
-Both require internet access to display correctly.
+The SPA is built with Vite + Preact + signals + TypeScript and deployed to LittleFS
+under `/spa/`. The bundle is shipped both raw and gzipped; `serveStatic` returns the
+gzipped sibling when the client advertises `Accept-Encoding: gzip`. There are no CDN
+dependencies — the legacy W3.CSS + Font Awesome links were removed in Phase D (PR #80)
+along with the server-side HTML rendering.
 
-HTML is generated by string concatenation and streamed via `AsyncResponseStream`
-(`request->beginResponseStream("text/html")` → `response->print(...)` → `request->send(response)`).
-The `CHANGE_FORM*` and `WEB_ACTIONS*` constants are stored in `PROGMEM` to save DRAM.
-
-**Security:** The configure form uses `method='post'` with CSRF token protection.
-Web UI routes require HTTP Basic Auth with a per-device password (generated on first boot,
-configurable from the settings page). REST API routes additionally require an
-`X-Requested-With` header for CSRF protection. See `docs/SECURITY_AUDIT.md` for the
-full audit.
+**Security:** All web and REST API routes are currently open (no authentication). The
+device is assumed to be on a trusted home network. See `docs/SECURITY_AUDIT.md` for
+the historical audit — note that several items it lists as **FIXED** were undone by
+the auth removal and need re-evaluation under the current threat model. Compile-time
+firmware-domain allowlisting (`WAGFAM_TRUSTED_FIRMWARE_DOMAINS`) and protected-path
+checks for `/api/fs/write` + `/api/fs/delete` are still in effect.
 
 ---
 
@@ -443,11 +458,10 @@ adjusts for DST automatically after each weather refresh.
 ArduinoOTA was removed in v3.08.0-wagfam (see `docs/OTA_STRATEGY.md`). Three update paths
 remain:
 
-1. **HTTP upload** at `/update` — upload a `.bin` file via browser form. Implemented
+1. **HTTP upload** at `/update` — upload a sketch `.bin` via browser form. Implemented
    inline in `setup()` as an `AsyncWebServer` POST handler with an upload-chunk callback
-   that drives `Update.begin/write/end` (with `Update.runAsync(true)`). Auth-gated via
-   `setAuthentication("admin", webPassword)` so the upload short-circuits with 401 before
-   the body is read.
+   that drives `Update.begin/write/end` (with `Update.runAsync(true)`). No
+   authentication is enforced.
 
 2. **HTTP URL update** (`handleUpdateFromUrl`) at `/updateFromUrl` — device downloads
    and flashes a `.bin` from a given HTTP URL. **HTTPS is not supported** for this path
@@ -458,6 +472,12 @@ remain:
    from the compiled `VERSION`, `performAutoUpdate()` triggers an OTA flash with
    boot-confirmation rollback. See `docs/OTA_STRATEGY.md` for the full rollback
    architecture.
+
+4. **LittleFS update** at `/updatefs` — upload a LittleFS image to refresh the SPA
+   bundle without a serial cable. Before the flash, `/conf.txt` is backed up; after
+   the device reboots into the new filesystem, the backup is restored so settings
+   survive the SPA refresh. There is also a JSON-body `POST /api/spa/update-from-url`
+   variant that fetches the image from a URL.
 
 ---
 

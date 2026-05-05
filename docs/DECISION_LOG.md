@@ -25,17 +25,16 @@ Update or remove entries as they resolve.
   want richer entities, push notifications, or instant-offline detection,
   the firmware MQTT path (`AsyncMqttClient` + HA Discovery topics + LWT) is
   ~1–2 days of work and fits the existing async stack.
-- **`/api/fs/upload` (multipart, streaming, binary-capable)** — needed
-  before SPA bundle deploys can avoid the serial-flash-wipes-`/conf.txt`
-  caveat. Foundation PR ([#55](https://github.com/jrwagz/marquee-scroller/pull/55))
-  documents the workaround; this endpoint is the proper fix.
-- **Status SSE endpoint + dashboard page** — first feature PR planned on
-  top of the SPA foundation. `AsyncEventSource` is built into the lib;
-  pushes free heap / RSSI / next-event countdown.
-- **Drop legacy `/` and `/configure` PROGMEM HTML** — once the SPA covers
-  all UI features, the `CHANGE_FORM*` / `WEB_ACTIONS*` constants and the
-  `displayHomePage` / `handleConfigure` chunked-render handlers can go,
-  reclaiming ~5 KB of flash.
+- **`/api/fs/upload` (multipart, streaming, binary-capable)** — partly
+  superseded by `/updatefs` + `POST /api/spa/update-from-url` (added in
+  3.09.3-wagfam, PR #87/PR #86), which handle the SPA-refresh case via a
+  full LittleFS image with `/conf.txt` backup/restore. A streaming
+  per-file upload would still be useful for ad-hoc files but is no
+  longer the critical path for SPA deploys.
+- **Status SSE endpoint + dashboard page** — `AsyncEventSource` is built
+  into the lib; pushes free heap / RSSI / next-event countdown.
+  Status dashboard landed via PR #59 (polling); the SSE upgrade is
+  still open.
 - **Boot-confirmation rollback distinguishing user-restarts from crashes**
   — known edge case: `/api/restart` within 5 min of a fresh OTA flash
   triggers rollback because the rollback design counts the user-requested

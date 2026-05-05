@@ -1,6 +1,8 @@
 # RAM & Heap Resource Analysis
 
-> **Platform:** Wemos D1 Mini (ESP8266) — v3.08.0-wagfam
+> **Platform:** Wemos D1 Mini (ESP8266) — analysis originally captured against
+> v3.08.0-wagfam. The "Done" items below have been carried into every version since
+> (current: v4.0.1-wagfam).
 >
 > This document identifies the most RAM-intensive features and flows in the firmware,
 > ranks them by impact, and recommends specific reductions to open headroom for new features.
@@ -101,9 +103,13 @@ The three OTA paths that replaced it:
 
 ---
 
-### #3 — Web Server HTML Generation (Per-Request Peaks)
+### #3 — Web Server HTML Generation (Per-Request Peaks) — RESOLVED in PR #80
 
-**Location:** `sendHeader()`, `displayHomePage()`, `handleConfigure()`.
+> **Status:** Resolved. The `sendHeader()` / `displayHomePage()` / `handleConfigure()`
+> chunked-render handlers and their `CHANGE_FORM*` / `WEB_ACTIONS*` / `UPDATE_FORM`
+> PROGMEM constants were all deleted in Phase D (PR #80) when the SPA reached parity.
+> The legacy paths now 302-redirect to `/spa/`. The numbers below are kept as a
+> historical record of what those handlers used to cost.
 
 47 `html +=` operations across those three functions create repeated heap reallocations as
 each `String` grows. The per-function breakdown:
@@ -193,16 +199,10 @@ in the web UI. Trade-off: you lose the convenient AP-based WiFi setup workflow.
 
 These are not significant wins individually but are straightforward to clean up.
 
-| Issue | Location | Waste |
-| --- | --- | --- |
-| `TIMEOUT` declared, never read | `marquee.ino:150` | 4 bytes BSS |
-| `timeoutCount` declared, never read | `marquee.ino:151` | 4 bytes BSS |
-| `#include <ESP8266mDNS.h>` — `MDNS.begin()` never called | `Settings.h:43` | ~2–4 KB flash code |
-| Duplicate `getWifiQuality()` prototype | `marquee.ino:57 and 65` | Compiler warning |
-
-`ESP8266mDNS` is the most meaningful: the library is linked into the binary (costing flash code
-space) for a service that was never started. Removing the `#include` will slim the firmware
-binary without any functional change.
+All four items in the original analysis (`TIMEOUT` / `timeoutCount` unused globals,
+`ESP8266mDNS` include-with-no-call, duplicate `getWifiQuality()` prototype) have been
+fixed. The current build no longer pulls in `ESP8266mDNS` and the unused globals are
+gone — see git history if you need the original diffs.
 
 ---
 
@@ -212,7 +212,7 @@ binary without any functional change.
 | --- | --- | --- | --- | --- |
 | 🔴 **Do immediately** | BearSSL buffer reduction (`setBufferSizes`) | 12–19 KB per fetch | 1 line | **Done** |
 | 🟠 **High value** | Remove ArduinoOTA | 4–8 KB persistent | ~10 line removal | **Done** |
-| 🟡 **Opportunistic** | HTML `+=` → direct `sendContent(F(...))` | 1–2 KB per page request | Medium refactor | Open |
+| 🟡 **Opportunistic** | HTML `+=` → direct `sendContent(F(...))` | 1–2 KB per page request | Medium refactor | **Done (PR #80 — handlers removed entirely)** |
 | 🟡 **Easy win** | Reduce `BUFFER_MAX_LENGTH` from 512 → 256 | 256 bytes stack | 1 number change | Open |
 | 🟢 **Trivial cleanup** | Remove `#include <ESP8266mDNS.h>` | ~2–4 KB flash | 1 line removal | **Done** |
 | 🟢 **Trivial cleanup** | Remove `TIMEOUT` and `timeoutCount` | 8 bytes BSS | 2 line removal | **Done** |

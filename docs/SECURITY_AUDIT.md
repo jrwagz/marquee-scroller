@@ -5,7 +5,32 @@
 > **Scope:** All source in `marquee/`, config persistence, OTA update paths, web UI,
 > REST API, and external network communications.
 >
-> **Date:** 2026-04-26
+> **Date:** 2026-04-26 (original audit). Status table updated 2026-05-04 for the
+> auth-removal drift — see the addendum below.
+
+## 2026-05-04 addendum: auth-removal status drift
+
+After this audit landed, HTTP Basic Auth and CSRF token machinery were
+intentionally removed from the device. Per
+[`CLAUDE.md`](../CLAUDE.md#authentication): "Authentication has been intentionally
+removed from the web UI and REST API. All routes are currently open (no
+credentials required). The device is assumed to be on a trusted home network. A
+proper authentication system should be designed and implemented in the future —
+the prior HTTP Basic Auth implementation was removed because it was friction
+without meaningful security on a LAN-only device."
+
+That removal undoes the fix recorded for several findings in this audit. They
+have been re-classified as **Re-introduced (accepted)** in the table below —
+not because the underlying issue went away, but because under the current
+trusted-LAN threat model the project has accepted the exposure as a deliberate
+trade-off. If the threat model ever shifts (device exposed to a wider network,
+deployed in an untrusted environment, etc.), every "Re-introduced (accepted)"
+row needs to be revisited against a real auth design — the prior Basic Auth
+implementation should not simply be restored.
+
+The findings unaffected by the auth removal (SEC-02, SEC-03, SEC-06, SEC-07,
+SEC-08, SEC-09, SEC-10, SEC-11, SEC-12, SEC-14, SEC-15) retain their original
+status.
 
 ---
 
@@ -24,28 +49,35 @@
 
 | ID | Severity | Title | Status |
 | --- | --- | --- | --- |
-| SEC-01 | CRITICAL | Unauthenticated firmware upload via `/update` | **FIXED** |
+| SEC-01 | CRITICAL | Unauthenticated firmware upload via `/update` | **Re-introduced (accepted)** — see addendum |
 | SEC-02 | CRITICAL | OTA firmware fetched over plain HTTP — no transport security | Mitigated (SEC-03 fix) |
 | SEC-03 | CRITICAL | Remote firmware URL injection via calendar JSON | **FIXED** |
-| SEC-04 | HIGH | Web UI has zero authentication — all config routes are open | **FIXED** |
-| SEC-05 | HIGH | Hardcoded, non-configurable credentials | **FIXED** |
+| SEC-04 | HIGH | Web UI has zero authentication — all config routes are open | **Re-introduced (accepted)** — see addendum |
+| SEC-05 | HIGH | Hardcoded, non-configurable credentials | **Re-introduced (accepted)** — see addendum |
 | SEC-06 | HIGH | REST API filesystem endpoints allow unrestricted path access | **FIXED** |
 | SEC-07 | HIGH | OpenWeatherMap API key sent over plain HTTP | **FIXED** |
 | SEC-08 | MEDIUM | Calendar HTTPS uses `setInsecure()` — no certificate validation | Accepted risk |
 | SEC-09 | MEDIUM | Config form uses GET — API keys leaked in URLs and logs | **FIXED** |
-| SEC-10 | MEDIUM | No CSRF protection on any state-changing route | **FIXED** |
+| SEC-10 | MEDIUM | No CSRF protection on any state-changing route | **Re-introduced (accepted)** — see addendum |
 | SEC-11 | MEDIUM | API keys and sensitive URLs printed to Serial output | **FIXED** |
 | SEC-12 | MEDIUM | No input validation on server-pushed config values | **FIXED** |
-| SEC-13 | LOW | REST API Basic Auth transmitted in cleartext over HTTP | Accepted risk |
+| SEC-13 | LOW | REST API Basic Auth transmitted in cleartext over HTTP | **Re-introduced (accepted)** — see addendum (no auth at all today) |
 | SEC-14 | LOW | `getMessage()` has no bounds check on index parameter | **FIXED** |
 | SEC-15 | LOW | NTP responses are unauthenticated — time can be spoofed | Accepted risk |
-| SEC-16 | LOW | No rate limiting on authentication or state-changing endpoints | **FIXED** |
+| SEC-16 | LOW | No rate limiting on authentication or state-changing endpoints | **Re-introduced (accepted)** — see addendum |
 
 ---
 
 ## SEC-01 — Unauthenticated Firmware Upload via `/update`
 
 **Severity:** CRITICAL
+
+**Current status:** **Re-introduced (accepted under trusted-LAN threat model).**
+The fix described below was applied at the time of this audit, but Basic Auth was
+later removed device-wide. Today `/update` accepts any uploader on the network. The
+project accepts this exposure under the assumption that the device sits on a trusted
+home LAN. If the threat model changes, design a real auth system rather than
+restoring the prior Basic Auth scheme.
 
 **What:** The ESP8266HTTPUpdateServer firmware upload endpoint at `/update` requires no
 authentication. Any device on the same network can POST a `.bin` file and replace
@@ -206,6 +238,14 @@ expect_with_fix: "device rejects firmwareUrl from untrusted domain"
 
 **Severity:** HIGH
 
+**Current status:** **Re-introduced (accepted under trusted-LAN threat model).**
+Basic Auth was added during the original fix for this finding, then removed
+device-wide. Today the SPA, the legacy redirects, and every state-changing
+endpoint are open to anyone who can reach port 80. The exposure is identical to
+the original finding (now via SPA + REST API rather than `/configure` + `/saveconfig`),
+accepted on the trusted-LAN assumption. Reopen if/when the device is exposed to
+a wider network.
+
 **What:** The web UI routes `/configure`, `/saveconfig`, `/systemreset`, `/forgetwifi`,
 and `/pull` require no authentication. Anyone who can reach port 80 can read all config
 (including API keys), change any setting, factory-reset the device, or wipe WiFi
@@ -283,6 +323,14 @@ expect_with_fix: 401 (unauthorized)
 ## SEC-05 — Hardcoded, Non-configurable Credentials
 
 **Severity:** HIGH
+
+**Current status:** **Re-introduced (accepted under trusted-LAN threat model).**
+The original fix added a per-device random password configurable from the web UI;
+that scheme was removed along with the rest of the auth system. Today there are
+no credentials at all — every endpoint is open. This is materially different from
+the original finding (no shared compiled-in default to leak), but the practical
+exposure is the same: full API access without authentication. Accepted on the
+trusted-LAN assumption.
 
 **What:** The REST API uses hardcoded credentials `admin` / `password` that cannot be
 changed by the user. These credentials are compiled into the firmware.
@@ -533,6 +581,15 @@ expect_with_fix: "no match — uses method='post'"
 
 **Severity:** MEDIUM
 
+**Current status:** **Re-introduced (accepted under trusted-LAN threat model).**
+The CSRF token machinery + `X-Requested-With` header check were removed along
+with the rest of the auth system. State-changing endpoints can again be triggered
+by drive-by requests from another origin if the user visits a malicious page on
+the same network. Accepted on the trusted-LAN assumption; revisit when the auth
+story is redesigned. (Not in the original list of items the maintainer flagged
+for re-opening — included here for accuracy because the original FIXED status
+no longer holds.)
+
 **What:** None of the state-changing endpoints (`/saveconfig`, `/systemreset`,
 `/forgetwifi`, `/updateFromUrl`, `/api/*` POST endpoints) use CSRF tokens. A malicious
 web page visited by a user on the same network can trigger these actions.
@@ -692,6 +749,15 @@ expect_with_fix: "firmware URL rejected — untrusted domain"
 
 **Severity:** LOW
 
+**Current status:** **Re-introduced (accepted under trusted-LAN threat model).**
+The original "Accepted risk" disposition was based on Basic Auth being in use over
+plain HTTP — a known limitation of the platform. Today there is no auth at all,
+which makes the original cleartext-credentials concern moot but introduces the
+broader "no auth on any endpoint" exposure (see SEC-04 / SEC-05). Net practical
+risk is unchanged: no client-supplied secret is being exfiltrated, but every
+endpoint is still open to anyone on the LAN. Revisit alongside SEC-04 if/when
+auth is reintroduced.
+
 **What:** The REST API uses HTTP Basic Auth over plain HTTP (port 80). The
 base64-encoded `admin:password` header is trivially decoded by any network observer.
 
@@ -821,6 +887,13 @@ expect_with_fix: "accepted risk — document in threat model"
 
 **Severity:** LOW
 
+**Current status:** **Re-introduced (accepted under trusted-LAN threat model).**
+The original FIXED disposition referenced rate limiting added alongside the auth
+work; that infrastructure was removed with the auth removal. There is again no
+rate limiting on any endpoint — `/api/restart` (now unauthenticated) can be
+hammered to keep the device in a reboot loop. Accepted on the trusted-LAN
+assumption.
+
 **What:** There is no rate limiting on any endpoint. The REST API auth can be
 brute-forced at network speed. State-changing endpoints (`/systemreset`, `/api/restart`)
 can be called repeatedly to keep the device in a reboot loop.
@@ -881,6 +954,12 @@ SEC-04 (no web auth) + SEC-09 (GET form)
 ---
 
 ## Recommended Fix Priority
+
+The priority table below is the original audit's recommendation. With the 2026-05-04
+auth removal, SEC-01, SEC-04, SEC-05, SEC-10, SEC-13, and SEC-16 are again live
+exposures — the project has accepted them under a trusted-LAN threat model rather
+than re-prioritised them for fixing. Treat the priorities below as the correct
+priorities **if** the threat model shifts.
 
 | Priority | Findings | Rationale |
 | --- | --- | --- |
