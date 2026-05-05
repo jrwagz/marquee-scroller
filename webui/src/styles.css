@@ -442,3 +442,44 @@ input[type="checkbox"].toggle:checked::after {
   animation: spin 0.6s linear infinite;
   vertical-align: -0.1em;
 }
+
+/* ── Update modal (full-page overlay during SPA flash) ── */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, var(--bg) 85%, black);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.modal-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  max-width: 28rem;
+  width: 100%;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+.modal-title {
+  font-size: 1.15rem;
+  margin: 0 0 0.5rem 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.modal-step {
+  margin: 0.75rem 0;
+}
+
+.modal-hint {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-top: 0.5rem;
+}

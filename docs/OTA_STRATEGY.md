@@ -153,6 +153,36 @@ Auto-update is skipped if any of these conditions are true:
 | `firmwareUrl` does not start with `http://` | HTTPS not supported |
 | `otaConfirmAt != 0` | A previous update is still pending confirmation |
 | `millis() < OTA_CONFIRM_MS` | Device booted too recently; let it stabilize first |
+| `WAGFAM_AUTO_UPDATE_DISABLED` defined | Compile-time opt-out |
+
+### SPA Auto-Update
+
+The same calendar-JSON channel also delivers SPA (LittleFS) updates. The
+`config` block can include `latestSpaVersion` and `spaFsUrl`; when they differ
+from the device's compiled `SPA_VERSION` and a `littlefs.bin` URL is provided,
+`getWeatherData()` queues an SPA flash via the same deferred-flash mechanism
+the manual "Update SPA" button uses (`otaFsFromUrlRequested = true`), which
+the main loop picks up and runs through `doOtaFsFlash()`.
+
+Differences from sketch auto-update:
+
+- **Same compile flag.** `WAGFAM_AUTO_UPDATE_DISABLED` gates both. There is no
+  separate SPA flag.
+- **Detection always runs.** Even when `WAGFAM_AUTO_UPDATE_DISABLED` is set,
+  `spa_update_available` and `spa_latest_version` in `/api/status` are still
+  populated, so the SPA banner / manual "Update SPA" button keep working.
+  Only the *automatic trigger* is gated.
+- **No rollback.** SPA flashes don't write `/ota_pending.txt` and don't
+  participate in `checkOtaRollback()`. A bad SPA bundle is a soft failure: the
+  sketch still boots, `/api/*` still works, and the user can re-flash via the
+  banner or `POST /api/spa/update-from-url`.
+- **Shared OTA gates.** The auto-trigger reuses `otaConfirmAt == 0` and
+  `millis() > OTA_CONFIRM_MS`, so a SPA flash never fires inside the
+  firmware-flash boot-confirmation window — at most one auto-flash per cycle
+  across firmware + SPA.
+- **Same trusted-domain check.** `isTrustedFirmwareDomain()` validates the
+  `spaFsUrl` against `WAGFAM_TRUSTED_FIRMWARE_DOMAINS` plus the calendar source
+  domain, identical to firmware.
 
 ---
 

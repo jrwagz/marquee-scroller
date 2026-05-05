@@ -28,7 +28,7 @@
 #include "Settings.h"
 #include "SecurityHelpers.h"
 
-#define BASE_VERSION "4.0.2-wagfam"
+#define BASE_VERSION "4.1.0-wagfam"
 #ifdef BUILD_SUFFIX
 #define VERSION BASE_VERSION BUILD_SUFFIX
 #else
@@ -1122,7 +1122,12 @@ void getWeatherData() //client function to send/receive GET request data.
   }
 #endif // WAGFAM_AUTO_UPDATE_DISABLED
 
-  // Check for a remote SPA update pushed via the calendar config
+  // Check for a remote SPA update pushed via the calendar config. Detection
+  // (setting spaUpdateAvailable / pendingSpaFsUrl / pendingSpaVersion) is
+  // *always* performed regardless of WAGFAM_AUTO_UPDATE_DISABLED — those
+  // flags drive the manual "Update SPA" button in the SPA banner, which must
+  // remain functional in every build configuration. Only the *automatic*
+  // trigger below is gated by the compile flag.
   if (serverConfig.latestSpaVersionValid && serverConfig.spaFsUrlValid
       && serverConfig.latestSpaVersion != SPA_VERSION
       && serverConfig.spaFsUrl.startsWith("http://")) {
@@ -1135,6 +1140,32 @@ void getWeatherData() //client function to send/receive GET request data.
     pendingSpaFsUrl = "";
     pendingSpaVersion = "";
   }
+
+  // Auto-apply the SPA update if one was just detected. Mirrors the firmware
+  // auto-update branch above: same compile-time flag, same OTA confirmation
+  // gates (so a SPA flash never fires inside the firmware-flash confirmation
+  // window), same trusted-domain check. Defers the actual flash to the main
+  // loop's existing handler at processEverySecond() (which calls
+  // doOtaFsFlash()) by setting otaFsFromUrlRequested — same path the manual
+  // /api/spa/update-from-url endpoint uses.
+#ifndef WAGFAM_AUTO_UPDATE_DISABLED
+  if (spaUpdateAvailable && pendingSpaFsUrl.length() > 0
+      && otaConfirmAt == 0 && millis() > OTA_CONFIRM_MS
+      && !otaFsFromUrlRequested) {
+    if (!isTrustedFirmwareDomain(pendingSpaFsUrl, WAGFAM_DATA_URL, WAGFAM_TRUSTED_FIRMWARE_DOMAINS)) {
+      Serial.println(F("[SEC] Rejected SPA FS URL — domain not allowlisted and does not match calendar source"));
+    } else {
+      Serial.println("[SPA] Auto-applying SPA update: " + pendingSpaVersion);
+      pendingOtaFsUrl = pendingSpaFsUrl;
+      otaFsFromUrlRequested = true;
+      // Mirror handleApiSpaUpdateFromUrl: surface progress via /api/status
+      // spa_ota.{status,error} so the SPA waitForUpdateOutcome() poll picks
+      // up auto-applied flashes the same way it does manual ones.
+      spaOtaStatus = "queued";
+      spaOtaError = "";
+    }
+  }
+#endif // WAGFAM_AUTO_UPDATE_DISABLED
 
   Serial.println("Version: " + String(VERSION));
   Serial.println();
