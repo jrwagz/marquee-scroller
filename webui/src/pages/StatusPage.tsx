@@ -36,6 +36,7 @@ function delay(ms: number): Promise<void> {
 // to spa_ota.status === "idle") or fail (spa_ota.status === "failed").
 // Older firmware that pre-dates spa_ota tracking falls back to the legacy
 // "first successful poll wins" behavior so this remains backward-compatible.
+// Polls every 2 s per the agreed cadence in PR #92 decision #6.
 async function waitForUpdateOutcome(): Promise<void> {
   // Give the device time to enter the flash path before we start polling.
   await delay(5_000);
@@ -85,27 +86,27 @@ async function doSpaUpdate(fsUrl: string) {
   spaUpdateState.value = "updating";
   spaUpdateError.value = "";
   try {
-    // Step 1 — snapshot current config (belt-and-suspenders; Part 4 already
-    // preserves /conf.txt during the FS flash, but re-POST ensures parity).
+    // Step 1 — snapshot current config (belt-and-suspenders; doOtaFsFlash
+    // already preserves /conf.txt during the FS flash, but re-POST ensures
+    // parity).
     spaUpdateStep.value = "Saving current config…";
     const savedConfig = await getConfig();
 
-    // Step 2 — queue the FS flash on the device
+    // Step 2 — queue the FS flash on the device.
     spaUpdateStep.value = "Requesting SPA flash…";
     await postSpaUpdateFromUrl(fsUrl);
 
     // Step 3 — wait for the device to reboot with the new FS image, OR
     // surface a failure from the deferred flash (silent failures used to
-    // pass through here as apparent success — see issue: SPA update apply
-    // path silent failure).
+    // pass through here as apparent success — see PR #94).
     spaUpdateStep.value = "Flashing SPA bundle — device will reboot shortly…";
     await waitForUpdateOutcome();
 
-    // Step 4 — re-apply config in case the restore in Part 4 had any issues
+    // Step 4 — re-apply config in case the restore had any issues.
     spaUpdateStep.value = "Restoring config…";
     await patchConfig(savedConfig);
 
-    // Step 5 — reload into the freshly-flashed SPA
+    // Step 5 — reload into the freshly-flashed SPA.
     spaUpdateStep.value = "Done — reloading…";
     await delay(1_500);
     window.location.reload();
@@ -163,11 +164,20 @@ export function StatusPage() {
         </div>
       )}
 
-      {/* SPA update in progress */}
+      {/* SPA update in progress — full-page modal blocks interaction
+          while the device flashes LittleFS and reboots. */}
       {spaUpdateState.value === "updating" && (
-        <div class="update-banner">
-          <span class="spinner" />
-          <span style={{ flex: 1 }}>{spaUpdateStep.value}</span>
+        <div class="modal-overlay" role="dialog" aria-modal="true">
+          <div class="modal-card">
+            <h2 class="modal-title">
+              <span class="spinner" /> Updating SPA…
+            </h2>
+            <p class="modal-step">{spaUpdateStep.value}</p>
+            <p class="modal-hint">
+              The device will reboot. This page will reload automatically once
+              the new SPA version is reported. Do not close this tab.
+            </p>
+          </div>
         </div>
       )}
 

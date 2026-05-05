@@ -399,17 +399,35 @@ returned race-flaky results when the target file was being updated; see the
 
 ## OTA Update Architecture
 
-ArduinoOTA was removed in v3.08.0-wagfam. Updates are now delivered three ways:
+ArduinoOTA was removed in v3.08.0-wagfam. Updates are now delivered six ways
+(three for the firmware sketch, three for the SPA / LittleFS image):
 
-| Method | Trigger | Rollback |
-| --- | --- | --- |
-| Web upload (`/update`) | Manual via browser | No (use `/updateFromUrl` to revert) |
-| URL update (`/updateFromUrl`) | Manual via web form | Boot-confirmation rollback |
-| Auto-update (calendar JSON) | `latestVersion` != `VERSION` | Boot-confirmation rollback |
+| Target | Method | Trigger | Rollback |
+| --- | --- | --- | --- |
+| Sketch | Web upload (`/update`) | Manual via browser | No (use `/updateFromUrl` to revert) |
+| Sketch | URL update (`/updateFromUrl`) | Manual via web form | Boot-confirmation rollback |
+| Sketch | Auto-update (calendar JSON) | `latestVersion` != `VERSION`, gated by `WAGFAM_AUTO_UPDATE_DISABLED` | Boot-confirmation rollback |
+| LittleFS / SPA | Web upload (`/updatefs`) | Manual via browser | No |
+| LittleFS / SPA | URL update (`POST /api/spa/update-from-url`) | SPA "Update SPA" button | No |
+| LittleFS / SPA | Auto-update (calendar JSON) | `latestSpaVersion` != `SPA_VERSION`, gated by `WAGFAM_AUTO_UPDATE_DISABLED` | No |
 
-**Boot-confirmation rollback:** Before every flash, a `/ota_pending.txt` record is written to LittleFS
-with the current safe URL. If the device reboots twice without confirming (5 min stable uptime),
-`checkOtaRollback()` re-flashes the previous firmware. See `docs/OTA_STRATEGY.md` for full details.
+**Compile-time gate.** A single flag, `WAGFAM_AUTO_UPDATE_DISABLED`, gates *both*
+the sketch auto-update branch and the SPA auto-apply branch in `getWeatherData()`.
+Set via PlatformIO `-DWAGFAM_AUTO_UPDATE_DISABLED=1` (enabled in `[env:dev]` for
+local builds). The flag controls only the *automatic trigger* — SPA detection
+(`spa_update_available` in `/api/status`) and the manual "Update SPA" button in
+the SPA banner remain functional in every build configuration. The auto-apply
+SPA path also shares the same `OTA_CONFIRM_MS` / `otaConfirmAt` gates as
+firmware auto-update, so a SPA flash never fires inside the firmware-flash
+boot-confirmation window.
+
+**Boot-confirmation rollback** applies to sketch flashes only. Before every
+sketch flash, a `/ota_pending.txt` record is written to LittleFS with the
+current safe URL. If the device reboots twice without confirming (5 min stable
+uptime), `checkOtaRollback()` re-flashes the previous firmware. SPA flashes
+intentionally do not participate (a bad SPA bundle is a soft failure: the
+sketch still boots, the API works, and `/api/spa/update-from-url` can re-flash
+a known-good URL). See `docs/OTA_STRATEGY.md` for full details.
 
 ## Authentication
 
