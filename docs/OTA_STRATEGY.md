@@ -1,6 +1,7 @@
 # OTA Update Strategy
 
-> **Platform:** Wemos D1 Mini (ESP8266) — v3.08.0-wagfam
+> **Platform:** Wemos D1 Mini (ESP8266) — strategy adopted in v3.08.0-wagfam and still
+> in effect (current: v4.0.1-wagfam).
 >
 > This document explains why ArduinoOTA was removed, how the boot-confirmation rollback
 > system works, and how the calendar JSON channel drives remote auto-updates across
@@ -23,13 +24,19 @@ country, it provides zero value — you cannot reach it remotely.
 | Rollback support | None | Firmware-level (this document) |
 
 Removing ArduinoOTA recovers **4–8 KB of persistent heap** available for the entire
-uptime of the device. The two web-based update paths that remain cover all real use cases:
+uptime of the device. The web-based update paths that remain cover all real use cases:
 
 | Route | Method | Notes |
 | --- | --- | --- |
-| `/update` | Browser file upload | Reliable; works from any network via VPN/SSH tunnel |
-| `/updateFromUrl` | HTTP URL download | Triggers ESPhttpUpdate; supports remote auto-update |
+| `/update` | Browser file upload | Sketch only — does NOT touch LittleFS |
+| `/updateFromUrl` | HTTP URL download | Triggers ESPhttpUpdate; sketch only |
 | Auto (calendar config) | HTTP URL from JSON server | Version-checked; triggers `performAutoUpdate()` |
+| `/updatefs` | Browser file upload (LittleFS image) | Refreshes SPA bundle; backs up + restores `/conf.txt` |
+| `POST /api/spa/update-from-url` | JSON body with URL | Same backup/restore as `/updatefs`, fetches from URL |
+
+> The `/update*` paths only flash the sketch partition. The SPA bundle and `/conf.txt`
+> live on LittleFS and are unaffected. Use `/updatefs` (or its API equivalent) when
+> you need to push a new SPA bundle.
 
 ---
 

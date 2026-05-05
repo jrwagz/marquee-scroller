@@ -64,10 +64,10 @@ These exist as working, tested code that future features can imitate:
 
 | Pattern | Used by | Why it matters |
 | ------- | ------- | -------------- |
-| **Deferred-work flag** (`weatherRefreshRequested`, `otaFromUrlRequested`, `restartRequested`) | `/pull`, `/api/refresh`, `/saveconfig`, `/updateFromUrl`, `/api/restart`, `/update` reboot | Async handlers must not block. This pattern is how you do anything >100 ms safely. Copy it for any future endpoint that needs HTTPS, OTA, file IO, or anything that touches the network. |
-| **`AsyncResponseStream`** | `displayHomePage`, `handleConfigure`, `handleUpdateFromUrl` | Chunked HTML rendering without `String += "..."` allocation explosions. Lets you incrementally build a page without buffering it all in heap. |
-| **`AsyncCallbackJsonWebHandler`** | `POST /api/config`, `POST /api/fs/write` | Body-bearing JSON endpoints with parsing handled by the framework, not by reading `server.arg("plain")`. ArduinoJson v7 is built in. |
-| **Manual Basic-auth verifier** | `requireWebAuth`, `requireApiAuth`, `/update` upload | Workaround for a lib bug; will keep working even if upstream fixes its check. |
+| **Deferred-work flag** (`weatherRefreshRequested`, `otaFromUrlRequested`, `restartRequested`, `spaUpdateFromUrlRequested`) | `/pull`, `/api/refresh`, `/updateFromUrl`, `/api/restart`, `/update` reboot, `/api/spa/update-from-url` | Async handlers must not block. This pattern is how you do anything >100 ms safely. Copy it for any future endpoint that needs HTTPS, OTA, file IO, or anything that touches the network. |
+| **`AsyncResponseStream`** | `handleUpdateFromUrl`, `/update` + `/updatefs` upload responses | Chunked rendering without `String += "..."` allocation explosions. Lets you incrementally build a page without buffering it all in heap. (The legacy `displayHomePage` / `handleConfigure` users of this pattern were removed in PR #80; the SPA replaced them.) |
+| **`AsyncCallbackJsonWebHandler`** | `POST /api/config`, `POST /api/fs/write`, `POST /api/spa/update-from-url` | Body-bearing JSON endpoints with parsing handled by the framework, not by reading `server.arg("plain")`. ArduinoJson v7 is built in. |
+| **`serveStatic` from LittleFS with gzip-sibling negotiation** | `/spa/...` | Ships the SPA bundle as static assets — gzip variant served when the client supports it, raw fallback otherwise. No bespoke handler needed. |
 
 ---
 
@@ -77,6 +77,12 @@ These are things that would have ranged from awkward to actively painful
 on the sync stack, and are now within reach.
 
 ### A real frontend (the original "option 2" from the planning conversation)
+
+> **Status:** Shipped. Foundation in PR #55, status + settings in PR #59 / PR #62,
+> Home tab plus extended actions in PR #79 (Phase B), and Phase D (PR #80) removed
+> the legacy `/` and `/configure` server-rendered routes entirely. SPA bundle OTA
+> refresh landed in 3.09.3-wagfam (PR #87 + PR #86). The notes below stay as the
+> design rationale.
 
 The hardest part of replacing the W3.CSS-from-CDN page with a proper SPA
 was the *backend* shape: chunked sends were fragile, JSON POST was
@@ -172,9 +178,10 @@ and back onto the main loop, where it can take its time.
 ### HTTPS server is still not happening
 
 `ESPAsyncWebServer` on ESP8266 does not do TLS termination. BearSSL is
-client-only in this stack. Anything we expose stays HTTP, LAN-only, with
-HTTP Basic Auth. That's fine for a kitchen device behind a home router;
-it's a non-starter if we ever wanted to expose a clock to the public
+client-only in this stack. Anything we expose stays plain HTTP, LAN-only.
+The device has no web auth at all today (see `docs/SECURITY_AUDIT.md`
+for context), which is intentional for a trusted-home-network deploy
+but a non-starter if we ever wanted to expose a clock to the public
 internet.
 
 ### The deferred-work pattern is mandatory, not optional
@@ -195,23 +202,21 @@ in the codebase is deferred. New code has to follow suit. There is no
 Things we could realistically build now, ranked by effort vs. user value
 on this device:
 
-1. **SPA shell + REST-driven UI** (option 2). Highest value, ~1–2 weeks
-   work, foundation already in place.
-2. **Status SSE** — push free heap, last-refresh, RSSI to a dashboard
-   page. Small isolated win, half a day of work, useful on its own and a
-   building block for the SPA.
-3. **`/api/logs` ring buffer** with a streaming endpoint. Useful for
+1. ~~**SPA shell + REST-driven UI**~~ — shipped via PRs #55 → #80 (Phase D).
+2. ~~**Drop the W3.CSS / Font Awesome CDN dependencies**~~ — shipped as
+   the side-effect of Phase D (PR #80) when the legacy routes were
+   removed.
+3. **Status SSE** — push free heap, last-refresh, RSSI to a dashboard
+   page. Status dashboard exists (PR #59, polling-based); the SSE
+   upgrade is still open.
+4. **`/api/logs` ring buffer** with a streaming endpoint. Useful for
    debugging without a serial connection, easy to build with
    `AsyncResponseStream`.
-4. **mDNS responder** (`marquee.local` resolution). Trivial code, large
+5. **mDNS responder** (`marquee.local` resolution). Trivial code, large
    UX improvement on a multi-device LAN. Already compatible with the
    async stack.
-5. **CORS headers on `/api/*`** so an off-device dashboard can hit
+6. **CORS headers on `/api/*`** so an off-device dashboard can hit
    multiple clocks without a proxy. Three lines of code.
-6. **Drop the W3.CSS / Font Awesome CDN dependencies** — bundle the
-   minimum CSS into LittleFS, serve it gzipped. Removes the requirement
-   for clients to have internet access just to see the configure page.
-   Probably a side-effect of the SPA work.
 
 The async migration was the boring infrastructure work that makes any
 of these tractable. The next push, when there's appetite, should be a

@@ -2,6 +2,16 @@
 
 > **Audience:** Developers who want to understand exactly how the firmware runs from
 > power-on through normal operation. Code references use `file:line` format.
+>
+> **Note on line numbers:** marquee.ino has been heavily refactored since this doc
+> was written (Phase D removed the legacy server-rendered routes; auth + CSRF were
+> stripped). The cited line numbers are approximate — search for the function name
+> if the exact line is off. The control-flow descriptions are still accurate, with
+> the exception of any references to removed handlers (`handleSaveConfig`,
+> `handleConfigure`, `handlePull`, `handleSystemReset`, `handleForgetWifi`,
+> `displayHomePage`, `sendHeader`, `sendFooter`) and removed auth machinery
+> (CSRF token generation, web password generation, `setAuthentication`,
+> `requireApiAuth`). See `docs/SPA_PARITY.md` for the migration map.
 
 ---
 
@@ -24,17 +34,19 @@
 
 ## Boot Sequence (`setup()`)
 
-**File:** `marquee/marquee.ino:194`
+**File:** `marquee/marquee.ino:220`
 
 ```text
 setup()
 │
 ├── Serial.begin(115200)              // 115200 baud serial debug output
-├── SPIFFS.begin()                    // Mount LittleFS filesystem
+├── LittleFS.begin()                  // Mount LittleFS filesystem
 ├── pinMode(LED_BUILTIN, OUTPUT)      // Setup status LED
 │
 ├── readPersistentConfig()            // Load /conf.txt into global variables
 │   └── (If file missing: calls savePersistentConfig() to create it with defaults)
+│
+├── Read /spa/version.json           // Populate SPA_VERSION (or "unknown" if absent)
 │
 ├── matrix.setIntensity(0)            // Start display off (intensity 0)
 ├── matrix.setRotation/setPosition   // Set up panel physical layout (4 panels, rotated CCW)
@@ -44,20 +56,17 @@ setup()
 ├── matrix.setIntensity(displayIntensity)  // Set to user-configured brightness
 │
 ├── scrollMessageWait("Welcome to the Wagner Family Calendar Clock!!!")
-│   └── (Blocks until scroll complete, serving web in each pixel step)
 │
 ├── WiFiManager.autoConnect()         // AP fallback if not connected
 │   └── On failure: WiFi.disconnect(), ESP.reset()
 │
 ├── checkOtaRollback()               // Crash-loop detection + rollback
 │
-├── Generate CSRF token               // Random 16-char token for form protection
-├── Generate web password (first boot) // Random 8-char password, printed to serial
-│
-├── server.on("/", displayHomePage)   // Register all web + REST API routes
-├── server.on("/pull", handlePull)
-│   ... (all routes registered, including /api/* endpoints)
-├── serverUpdater.setup(&server, "/update", "admin", webPassword)
+├── server.on("/", redirectToSpa)     // Legacy paths 302 → /spa/
+├── server.on("/api/...")             // Register REST API handlers
+├── server.on("/update", ...)         // /update + /updatefs upload handlers (no auth)
+├── server.serveStatic("/spa", LittleFS, "/spa/")  // SPA bundle from LittleFS
+├── server.onNotFound(handleNotFound) // SPA-aware 404 fallback
 ├── server.begin()                   // Start HTTP server on port 80
 │
 ├── scrollMessageWait(" vVERSION  IP: x.x.x.x  ")  // Announce IP on display
@@ -404,36 +413,33 @@ edge cases — see `CODE_REVIEW.md`.
 
 ## Web Handlers
 
-### `handleSaveConfig()` — `marquee.ino:450`
+The legacy server-rendered handlers (`handleSaveConfig`, `handleConfigure`,
+`handlePull`, `handleSystemReset`, `handleForgetWifi`, `displayHomePage`,
+`sendHeader`, `sendFooter`) were removed in Phase D (PR #80). The legacy
+paths now 302-redirect to `/spa/` via `redirectToSpa()`. Their replacements
+in the SPA call REST API endpoints — see [`README.md` — REST API](../README.md#rest-api)
+for the full table.
 
-1. Read all form fields from `server.arg("fieldName")`
-2. Update all global setting variables
+### `handleApiConfigPost()` — body-bearing JSON
+
+1. Wired through `AsyncCallbackJsonWebHandler` so the body is parsed by the framework
+2. Iterate the JSON object, applying any recognised key to its global setting variable
 3. Call `bdayClient.updateBdayClient()`, `weatherClient.setMetric()`,
-   `weatherClient.setGeoLocation()`
+   `weatherClient.setGeoLocation()` as needed
 4. Call `savePersistentConfig()` (write to file)
-5. Call `getWeatherData()` (immediate refresh)
-6. `redirectHome()` (HTTP 302 to `/`)
+5. Set `weatherRefreshRequested = true` (deferred — `getWeatherData()` runs from `loop()`)
+6. Respond with the updated config as JSON
 
-### `handleConfigure()` — `marquee.ino:506`
-
-1. Set streaming response headers
-2. Call `sendHeader()` (writes HTML head + sidebar nav)
-3. Load `CHANGE_FORM1`–`CHANGE_FORM4` from PROGMEM, replace `%PLACEHOLDER%` tokens,
-   send each chunk via `server.sendContent()`
-4. Send `UPDATE_FORM` for firmware update section
-5. Call `sendFooter()` (version, next-update countdown, WiFi signal)
-
-### `handlePull()` — `marquee.ino:444`
-
-Calls `getWeatherData()` then `displayHomePage()`.
-
-### `handleUpdateFromUrl()` — `marquee.ino:635`
+### `handleUpdateFromUrl()` — `marquee.ino:747`
 
 1. Validate URL starts with `http://` (HTTPS not supported)
-2. Send response page, flush, close connection
-3. Call `ESPhttpUpdate.update(client, firmwareUrl)` — downloads and flashes
-4. On success: device reboots automatically
-5. On failure: log error to Serial (user must check Serial monitor or refresh page)
+2. Validate URL against the firmware-domain allowlist (`isTrustedFirmwareDomain`)
+3. Stash the URL in `pendingOtaUrl`, set `otaFromUrlRequested = true`,
+   respond with the "STARTING UPDATE" page (the actual flash is deferred —
+   `doOtaFlash()` runs from `loop()` because `ESPhttpUpdate.update()` would
+   block the async event loop for 20–30s)
+4. From the deferred path: `doOtaFlash()` writes the rollback record, then
+   calls `ESPhttpUpdate.update(client, firmwareUrl)` — device reboots on success
 
 ---
 

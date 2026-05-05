@@ -1,18 +1,15 @@
 # Live Device Testing Playbook
 
 Recipe for end-to-end testing the firmware against a real clock on the LAN.
-Captures the constraints + shortcuts that aren't obvious from reading the code,
-distilled from the live-test work documented in
-[`docs/TEST_RESULTS_HEARTBEAT_LIVE.md`](TEST_RESULTS_HEARTBEAT_LIVE.md).
+Captures the constraints + shortcuts that aren't obvious from reading the code.
 
 ## Prerequisites
 
 - A clock device on the LAN running the firmware you want to exercise
   (`/api/status` reports `version`, but **note the version-string trap below**).
-- The clock's web admin password. It's auto-generated on first boot
-  (`marquee/marquee.ino:267-275`, 8 chars from `abcdefghjkmnpqrstuvwxyz23456789`)
-  and printed to serial. If you've lost it, the only recovery is a flash + FS
-  erase — there's no auth bypass.
+- All web and REST API routes are currently open — no authentication is
+  required (and there is no admin password). See `docs/SECURITY_AUDIT.md` for
+  the historical context.
 - Docker, `curl`, and (for any firmware rebuild) the PlatformIO toolchain
   (`pio` from `pip install platformio` or VS Code's PIO extension).
 
@@ -29,7 +26,7 @@ to the LAN. Example from this session:
 ```bash
 # Mac was on en0 (192.168.168.x Wi-Fi, stale) AND en6 (10.10.2.x ethernet).
 # Inter-subnet routing existed but the kernel preferred en0's stale route.
-curl -s -m 5 --interface en6 -u admin:<pw> http://<clock-ip>/api/status
+curl -s -m 5 --interface en6 http://<clock-ip>/api/status
 ```
 
 Same idea works with `ping -S <source-ip>` and Python sockets via explicit
@@ -42,23 +39,19 @@ certainly the issue.
 The heartbeat interval is `minutes_between_data_refresh`, persisted in
 `/conf.txt`, and exposed via `/api/config`. **You do not need to flash
 firmware to change the cadence** — the firmware clamps the value with
-`max(1, ...)` (`marquee/marquee.ino:471` and `:1389`), so 1 minute is the
-floor and reachable from a single REST call:
+`max(1, ...)` so 1 minute is the floor and reachable from a single REST
+call (no auth, no CSRF header):
 
 ```bash
 # Save the original first (CRITICAL — restore it at the end)
-curl -s -u admin:<pw> http://<clock-ip>/api/config > /tmp/orig_config.json
+curl -s http://<clock-ip>/api/config > /tmp/orig_config.json
 
 # Dial down for testing
-curl -s -u admin:<pw> \
-  -H "X-Requested-With: XMLHttpRequest" \
+curl -s \
   -H "Content-Type: application/json" \
   -X POST http://<clock-ip>/api/config \
   -d '{"minutes_between_data_refresh": 1}'
 ```
-
-The `X-Requested-With` header is required for all POST API endpoints
-(`requireApiCsrf`, `marquee.ino:1299-1305`).
 
 ## Pointing the clock at a local heartbeat server (TLS required)
 
@@ -77,16 +70,13 @@ openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem \
   -addext "subjectAltName = IP:<your-LAN-IP>,DNS:localhost"
 
 # Point clock at your TLS server (update API key to match server's expected value)
-curl -s -u admin:<pw> \
-  -H "X-Requested-With: XMLHttpRequest" \
+curl -s \
   -H "Content-Type: application/json" \
   -X POST http://<clock-ip>/api/config \
   -d '{"wagfam_data_url":"https://<your-LAN-IP>:8443/api/v1/calendar","wagfam_api_key":"<test-key>"}'
 
 # Force an immediate refresh (don't wait for the periodic timer)
-curl -s -u admin:<pw> \
-  -H "X-Requested-With: XMLHttpRequest" \
-  -X POST http://<clock-ip>/api/refresh
+curl -s -X POST http://<clock-ip>/api/refresh
 ```
 
 The clock's `Authorization: token <key>` header is sent on every request, so
@@ -111,11 +101,9 @@ make build && make artifacts  # produces artifacts/firmware.bin + VERSION.txt
 cd artifacts
 python3 -m http.server 8080 --bind <your-LAN-IP>
 
-# Trigger flash. Must be GET (the device's UPDATE_FORM uses method='get'
-# and the route is registered HTTP_GET) and the URL must be http:// since
-# ESPhttpUpdate doesn't speak TLS.
-curl -s -u admin:<pw> \
-  -G http://<clock-ip>/updateFromUrl \
+# Trigger flash. The route is registered HTTP_GET and the URL must be http://
+# since ESPhttpUpdate doesn't speak TLS.
+curl -s -G http://<clock-ip>/updateFromUrl \
   --data-urlencode "firmwareUrl=http://<your-LAN-IP>:8080/firmware.bin"
 ```
 
@@ -134,9 +122,7 @@ times out — for instance if your LAN host can't reach the clock for some
 reason, or you want to flash without exposing an HTTP server):
 
 ```bash
-curl -s -u admin:<pw> \
-  -F "image=@artifacts/firmware.bin" \
-  http://<clock-ip>/update
+curl -s -F "image=@artifacts/firmware.bin" http://<clock-ip>/update
 ```
 
 The upload arrives chunk-by-chunk via async callbacks, the device flashes
@@ -147,11 +133,11 @@ Verify success by polling `/api/status` for the new `version` string.
 ### Caveat: `OTA_SAFE_URL` rewrite
 
 When an OTA flash succeeds and confirms, the device's `OTA_SAFE_URL` is
-rewritten to the URL you flashed from (`marquee.ino:353`). After your local
-test, that URL points at your dev box's HTTP server, which won't be running
-later. **You cannot patch this via `/api/fs/write`** — `/conf.txt` is in the
-protected-paths list (`marquee.ino:1457` and `SecurityHelpers.cpp:isProtectedPath`)
-so the API rejects writes to it.
+rewritten to the URL you flashed from. After your local test, that URL
+points at your dev box's HTTP server, which won't be running later.
+**You cannot patch this via `/api/fs/write`** — `/conf.txt` is in
+`SecurityHelpers::isProtectedPath`'s blocklist, so the API rejects
+writes to it.
 
 Mitigation options:
 
@@ -191,8 +177,7 @@ debugging gets ambiguous.
    match the production calendar source's auth, otherwise the next periodic
    fetch will 401 and the marquee will stop scrolling family events.
 
-The PR #25 live test left a clean restore on every field except OTA_SAFE_URL —
-see `docs/TEST_RESULTS_HEARTBEAT_LIVE.md` for the worked example.
+The PR #25 live test left a clean restore on every field except OTA_SAFE_URL.
 
 ## Quick decision tree: what testing approach?
 

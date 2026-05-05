@@ -1,12 +1,19 @@
 # Legacy UI → SPA parity tracker
 
+> **Status: Complete.** Phase D (PR #80, 2026-05-03) removed the legacy
+> w3.css UI. The legacy `/`, `/configure`, `/pull`, `/systemreset`,
+> `/forgetwifi`, and `/saveconfig` paths now 302-redirect to `/spa/`.
+> All `CHANGE_FORM*` / `WEB_ACTIONS*` PROGMEM constants and the
+> `displayHomePage` / `handleConfigure` / `sendHeader` / `sendFooter`
+> handlers are gone.
+>
+> This document is kept as the historical record of the migration and
+> the parity matrix that drove it. It is no longer a live checklist.
+
 Goal: full feature parity from the legacy w3.css UI (`/`, `/configure`,
 sidebar actions) into the Preact SPA (`/spa/`), so the legacy routes
 can be retired and their PROGMEM strings reclaimed (~5 KB flash + the
 W3.CSS / Font Awesome CDN dependency).
-
-This doc is the working checklist. It dies when all rows are ✅ and
-the legacy routes are removed.
 
 ## Source of truth
 

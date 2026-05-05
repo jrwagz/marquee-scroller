@@ -74,30 +74,47 @@ to the device through one of two paths:
 
 `make uploadfs` (which builds the SPA first, then runs
 `pio run --target uploadfs`). **Caveat: this wipes the entire LittleFS
-partition**, including `/conf.txt` (web password, calendar URL, API
-keys, OTA state). After a serial flash you'll need to reconnect WiFi
-and reconfigure from scratch. Use this for first-time SPA install or
-major changes.
+partition**, including `/conf.txt` (calendar URL, API keys, OTA state).
+After a serial flash you'll need to reconnect WiFi and reconfigure
+from scratch. Use this only when OTA is unavailable or you need to
+force a clean filesystem.
 
 ```bash
 make uploadfs                                   # autodetected port
 make uploadfs UPLOAD_PORT=/dev/cu.usbserial-XXXX
 ```
 
-### Option B: API-based upload (per-file, preserves /conf.txt)
+### Option B: OTA flash via `/updatefs` (preserves /conf.txt)
 
-For incremental updates, push individual files via `POST /api/fs/write`.
-This preserves config but currently has caveats:
+Once the device is running firmware ≥ 3.09.3-wagfam, the LittleFS
+image (`littlefs.bin`) can be flashed over the network — no serial
+cable needed. The handler backs up `/conf.txt` before the flash and
+restores it after the new filesystem mounts, so settings survive the
+SPA refresh.
 
-- The handler's `setMaxContentLength` is **8 KB** — files larger than
-  ~7.5 KB after JSON-encoding overhead will be rejected. The empty
-  shell's `assets/index.js` is 11.7 KB, already over the limit.
-- The body is parsed as a JSON string (`content`) so binary `.gz` files
-  can't be uploaded directly.
+- Browser: open `http://<device-ip>/updatefs`, choose `littlefs.bin`,
+  click **Upload & Flash FS**. The device reboots into the new FS.
+- API: `POST /api/spa/update-from-url` with `{"url":"http://..."}`
+  pulls the image from a URL, with the same backup/restore behaviour.
+- SPA Actions tab also exposes the URL-fetch flow (and the SPA-update
+  banner offers a one-click upgrade when the calendar server advertises
+  a newer SPA version).
 
-A proper `/api/fs/upload` (multipart, streamed, accepts binary) is on
-the radar but not in this PR. Until it lands, Option A is the
-realistic path for installing the full bundle.
+This is the recommended path for SPA refreshes after the initial
+install.
+
+### Option C: Single-file API upload (`POST /api/fs/write`)
+
+For ad-hoc per-file pushes (e.g. dropping a debug HTML file onto the
+device), `POST /api/fs/write` accepts a JSON body with `path` +
+`content`. Caveats:
+
+- The handler's `setMaxContentLength` is **8 KB** — anything larger
+  (after JSON-encoding overhead) is rejected. Most SPA chunks exceed
+  this, so this endpoint is **not** suitable for bundle deploys.
+- The body is parsed as a JSON string, so binary `.gz` files can't be
+  uploaded directly.
+- `/conf.txt` and `/ota_pending.txt` are protected and rejected with 403.
 
 ### Building the LittleFS image without flashing
 
@@ -160,15 +177,20 @@ runtime heap during peak load. Stay small.
 
 1. ~~**Status dashboard page**~~ — landed in PR #59. Polls `/api/status`
    every 30 s; SSE upgrade still open.
-2. ~~**Configure form**~~ — landed in PRs #59 + #62. All `CHANGE_FORM*`
-   fields (display, refresh, weather toggles, OWM/calendar sources, web
-   password) are now exposed in the SPA Settings tab. The legacy
-   `/configure` route is still wired but no longer needed for any user
-   action.
-3. **Filesystem browser** — leans on `/api/fs/list`, `/api/fs/read`,
-   `/api/fs/write`, `/api/fs/delete`.
-4. **Binary file upload endpoint** (`/api/fs/upload`) — multipart
-   streaming, eliminates the serial-flash caveat for SPA updates.
-5. **Drop W3.CSS / Font Awesome CDN dependencies** — once the SPA
-   covers all features, remove the legacy `/` and `/configure` routes
-   and their PROGMEM strings. Reclaims ~5 KB of flash.
+2. ~~**Configure form**~~ — landed in PRs #59 + #62. All settings
+   (display, refresh, weather toggles, OWM/calendar sources) are now
+   exposed in the SPA Settings tab.
+3. ~~**Drop legacy `/` and `/configure` routes + PROGMEM strings**~~ —
+   landed in PR #80 (Phase D). Saved ~12 KB flash + ~3 KB RAM. The
+   legacy paths now 302-redirect to `/spa/`.
+4. ~~**SPA bundle OTA refresh**~~ — landed in 3.09.3-wagfam: `/updatefs`
+   (browser upload) + `POST /api/spa/update-from-url` + the SPA
+   "available SPA version" banner with a one-click upgrade flow. SPA
+   refreshes no longer require a serial cable.
+5. **Filesystem browser** — leans on `/api/fs/list`, `/api/fs/read`,
+   `/api/fs/write`, `/api/fs/delete`. Still open.
+6. **Binary file upload endpoint** (`/api/fs/upload`) — multipart
+   streaming. The full SPA bundle is now refreshed via `/updatefs`
+   (the LittleFS image), so this is no longer the critical path; it
+   would still be useful for one-off file pushes that don't justify a
+   full FS image.
