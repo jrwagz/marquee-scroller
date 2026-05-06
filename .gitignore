@@ -12,3 +12,8 @@ server/scripts/.env
 scripts/.env
 data/
 webui/node_modules/
+# Test-only ECDSA keypair used by scripts/sign_test_payloads.py to generate
+# the on-device verify fixtures (PR #100). NEVER commit these — the public
+# half gets baked into HwVerifyTest.cpp, which is enough for anyone to
+# regenerate fresh material with their own keys.
+scripts/test_keys/

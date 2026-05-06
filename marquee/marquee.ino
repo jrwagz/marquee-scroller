@@ -27,6 +27,8 @@
 
 #include "Settings.h"
 #include "SecurityHelpers.h"
+#include "ConfigUpdateVerify.h"
+#include "HwVerifyTest.h"
 
 #define BASE_VERSION "4.1.0-wagfam"
 #ifdef BUILD_SUFFIX
@@ -123,6 +125,18 @@ String pendingOtaFsUrl = "";
 // any failure point, set to "failed" with a diagnostic in spaOtaError.
 String spaOtaStatus = "idle";
 String spaOtaError = "";
+
+// Issue #99: monotonic counter of the most recent signed config update we've
+// applied. Persisted in /conf.txt as LAST_APPLIED_CONFIG_VERSION. The clock
+// rejects any incoming configUpdate whose version is <= this value (replay
+// protection). Server is expected to increment per-device with each push.
+int lastAppliedConfigVersion = 0;
+
+// Issue #99: most recent troll message override. We track it as device state
+// so a transient server outage doesn't immediately drop us back to normal
+// scrolling — the troll persists in RAM until the server explicitly stops
+// sending it (or the device reboots, since we don't persist trolls to flash).
+String trollMessageOverride = "";
 uint32_t todayDisplayMilliSecond = 0;
 uint32_t todayDisplayStartingLED = 0;
 
@@ -227,6 +241,15 @@ int externalLight = LED_BUILTIN; // LED_BUILTIN is is the built in LED on the We
 
 void setup() {
   Serial.begin(115200);
+#ifdef WAGFAM_HW_VERIFY_TEST
+  // jrwagz/marquee-scroller#100: when the verify-test build flag is set, hand
+  // setup() over to the fixture immediately.  runHwVerifyTest() prints results
+  // and never returns — we don't init LittleFS, WiFi, displays, or anything
+  // else, so the test exercises only the BearSSL ECDSA path under realistic
+  // ESP8266 conditions (clock speed, Flash mapping, RAM layout) without any
+  // unrelated state to confound the result.
+  runHwVerifyTest();
+#endif
   // Use LittleFS directly (not SPIFFS — they are separate objects; SPIFFS
   // refers to the old SPIFFS format and would silently wipe a valid LittleFS
   // partition on mount failure). Disable autoFormat so a freshly-flashed
@@ -641,6 +664,18 @@ void processEverySecond() {
 }
 
 void processEveryMinute() {
+  // Issue #99: troll-message override — bypass everything else (weather error,
+  // birthday rotation, weather/calendar mix) and scroll only the troll. This
+  // intentionally fires every cycle, with no displayRefreshCount gating, so
+  // the trolled clock is unmistakable and never accidentally interleaves with
+  // normal content.
+  if (trollMessageOverride.length() > 0) {
+    matrix.fillScreen(LOW);
+    String msg = "  " + trollMessageOverride + "  ";
+    scrollMessageWait(msg);
+    return;
+  }
+
   if (weatherClient.getErrorMessage() != "") {
     scrollMessageWait(weatherClient.getErrorMessage());
     return;
@@ -1094,6 +1129,53 @@ void getWeatherData() //client function to send/receive GET request data.
     savePersistentConfig();
   }
 
+  // Issue #99: signed remote config update. We verify HMAC-SHA256 over the
+  // raw payload bytes BEFORE parsing — that way a malformed JSON or unknown
+  // field can't leak past the trust boundary. Replay protection: the server
+  // increments configUpdateVersion per-device on every push; we reject anything
+  // not strictly greater than the version we last applied (persisted in flash).
+  if (serverConfig.configUpdateVersion > 0
+      && serverConfig.configUpdatePayload.length() > 0
+      && serverConfig.configUpdateSignature.length() > 0) {
+    if (serverConfig.configUpdateVersion <= lastAppliedConfigVersion) {
+      // Idempotent quiet-skip: server resends the same update on every poll
+      // until we increment past it. Don't spam the serial log on every poll.
+    } else if (!verifyConfigUpdateSignature(serverConfig.configUpdatePayload,
+                                            serverConfig.configUpdateSignature,
+                                            WAGFAM_CONFIG_PUBLIC_KEY)) {
+      // verifyConfigUpdateSignature already logged the reason
+    } else {
+      JsonDocument cfgDoc;
+      DeserializationError err = deserializeJson(cfgDoc, serverConfig.configUpdatePayload);
+      if (err) {
+        Serial.print(F("[CFG] config update payload didn't parse as JSON: "));
+        Serial.println(err.c_str());
+      } else if (!cfgDoc.is<JsonObject>()) {
+        Serial.println(F("[CFG] config update payload not a JSON object — ignoring"));
+      } else {
+        Serial.println("[CFG] applying signed config update v" + String(serverConfig.configUpdateVersion));
+        applyConfigJson(cfgDoc.as<JsonObject>());
+        lastAppliedConfigVersion = serverConfig.configUpdateVersion;
+        savePersistentConfig();
+      }
+    }
+  }
+
+  // Issue #99: troll message override. When the server sends a non-empty
+  // trollMessage, processEveryMinute() will display it exclusively until it's
+  // cleared. Track in RAM only — we *want* a reboot to drop back to normal,
+  // so a trolled clock can be revived by a power cycle even if the server is
+  // unreachable.
+  if (serverConfig.trollMessageValid) {
+    if (trollMessageOverride != serverConfig.trollMessage) {
+      Serial.println("[TROLL] override set: " + serverConfig.trollMessage);
+    }
+    trollMessageOverride = serverConfig.trollMessage;
+  } else if (trollMessageOverride.length() > 0) {
+    Serial.println(F("[TROLL] override cleared, resuming normal scroll"));
+    trollMessageOverride = "";
+  }
+
   // Check for a remote firmware update pushed via the calendar config.
   //
   // Build with `-DWAGFAM_AUTO_UPDATE_DISABLED=1` to skip this branch. Useful
@@ -1313,6 +1395,7 @@ void savePersistentConfig() {
     f.println("SHOW_DATE=" + String(SHOW_DATE));
     f.println("OTA_SAFE_URL=" + OTA_SAFE_URL);
     f.println("DEVICE_NAME=" + DEVICE_NAME);
+    f.println("LAST_APPLIED_CONFIG_VERSION=" + String(lastAppliedConfigVersion));
   }
   f.close();
   // Apply current settings to hardware and clients directly.
@@ -1406,6 +1489,9 @@ void readPersistentConfig() {
     } else if (key == "DEVICE_NAME") {
       DEVICE_NAME = value;
       Serial.println("DEVICE_NAME: " + DEVICE_NAME);
+    } else if (key == "LAST_APPLIED_CONFIG_VERSION") {
+      lastAppliedConfigVersion = value.toInt();
+      Serial.println("LAST_APPLIED_CONFIG_VERSION=" + String(lastAppliedConfigVersion));
     }
   }
   fr.close();
@@ -1571,13 +1657,11 @@ void handleApiConfigGet(AsyncWebServerRequest *request) {
   sendJsonResponse(request, 200, doc);
 }
 
-void handleApiConfigPost(AsyncWebServerRequest *request, JsonVariant &json) {
-  if (!json.is<JsonObject>()) {
-    sendJsonError(request, 400, "expected JSON object");
-    return;
-  }
-
-  // Partial update: only set fields that are present in the request body
+// Apply a partial config dict to global state. Used by both the LAN-side
+// `POST /api/config` handler and the signed-config-update path that ingests
+// payloads from the calendar response (issue #99). Caller is responsible for
+// `savePersistentConfig()` and any side effects (re-fetch on URL/key change).
+static void applyConfigJson(JsonObject json) {
   if (json["wagfam_data_url"].is<const char*>()) WAGFAM_DATA_URL = json["wagfam_data_url"].as<String>();
   if (json["wagfam_api_key"].is<const char*>()) WAGFAM_API_KEY = json["wagfam_api_key"].as<String>();
   if (json["wagfam_event_today"].is<bool>()) WAGFAM_EVENT_TODAY = json["wagfam_event_today"].as<bool>();
@@ -1597,7 +1681,16 @@ void handleApiConfigPost(AsyncWebServerRequest *request, JsonVariant &json) {
   if (json["show_wind"].is<bool>()) SHOW_WIND = json["show_wind"].as<bool>();
   if (json["show_pressure"].is<bool>()) SHOW_PRESSURE = json["show_pressure"].as<bool>();
   if (json["show_highlow"].is<bool>()) SHOW_HIGHLOW = json["show_highlow"].as<bool>();
+  if (json["device_name"].is<const char*>()) DEVICE_NAME = json["device_name"].as<String>();
+  if (json["ota_safe_url"].is<const char*>()) OTA_SAFE_URL = json["ota_safe_url"].as<String>();
+}
 
+void handleApiConfigPost(AsyncWebServerRequest *request, JsonVariant &json) {
+  if (!json.is<JsonObject>()) {
+    sendJsonError(request, 400, "expected JSON object");
+    return;
+  }
+  applyConfigJson(json.as<JsonObject>());
   savePersistentConfig();
   sendJsonOk(request, "config updated");
 }

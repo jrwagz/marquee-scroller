@@ -199,6 +199,18 @@ void WagFamBdayClient::value(String value) {
     } else if (currentKey == "spaFsUrl") {
       currentConfig.spaFsUrlValid = true;
       currentConfig.spaFsUrl = value;
+    } else if (currentKey == "trollMessage") {
+      // Issue #99: server tells us to display only this string and ignore
+      // the regular calendar messages. cleanText() to handle smart quotes
+      // / accents the same as normal messages.
+      currentConfig.trollMessageValid = true;
+      currentConfig.trollMessage = cleanText(value);
+    } else if (currentKey == "configUpdateVersion") {
+      currentConfig.configUpdateVersion = value.toInt();
+    } else if (currentKey == "configUpdatePayload") {
+      currentConfig.configUpdatePayload = value;
+    } else if (currentKey == "configUpdateSignature") {
+      currentConfig.configUpdateSignature = value;
     }
   } else if (currentKey == "message") {
     if (messageCounter >= 10) {

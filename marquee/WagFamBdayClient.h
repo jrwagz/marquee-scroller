@@ -57,6 +57,18 @@ class WagFamBdayClient: public JsonListener {
       String latestSpaVersion;
       boolean spaFsUrlValid;
       String spaFsUrl;
+      // Issue #99: troll message override. When non-empty, marquee.ino
+      // displays this string exclusively and skips the calendar messages.
+      boolean trollMessageValid;
+      String trollMessage;
+      // Issue #99: signed remote config update. All three fields arrive
+      // together; the handler in marquee.ino verifies the HMAC-SHA256 of
+      // configUpdatePayload (raw bytes) against configUpdateSignature
+      // (base64) using WAGFAM_CONFIG_HMAC_KEY, and only applies if
+      // configUpdateVersion is strictly greater than the last applied.
+      int configUpdateVersion;
+      String configUpdatePayload;
+      String configUpdateSignature;
     } configValues;
 
     WagFamBdayClient(String ApiKey, String JsonDataSourceUrl);
