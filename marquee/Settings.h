@@ -73,15 +73,23 @@ boolean WAGFAM_EVENT_TODAY = false; // Whether or not an event is happening toda
 #define WAGFAM_TRUSTED_FIRMWARE_DOMAINS ""
 #endif
 
-// Issue #99: shared secret for verifying signed config updates pushed via the
-// calendar response. Hex-encoded (must be at least 32 hex chars / 16 bytes,
-// recommended 64 hex chars / 32 bytes). Must match the server's
-// WAGFAM_CONFIG_HMAC_KEY env var. Empty default means the firmware silently
-// ignores any configUpdate fields in the calendar response — the server fails
-// closed too. Override at build time, e.g.:
-//   pio run --build-flag '-DWAGFAM_CONFIG_HMAC_KEY="\"0123...\""'
-#ifndef WAGFAM_CONFIG_HMAC_KEY
-#define WAGFAM_CONFIG_HMAC_KEY ""
+// Issue #99: ECDSA-P256 PUBLIC key for verifying signed config updates pushed
+// via the calendar response. 130 hex chars = uncompressed point (04 || X || Y,
+// 65 bytes). The matching PRIVATE key lives only on the server as
+// WAGFAM_CONFIG_SIGNING_PRIVATE_KEY_HEX — forging a signature requires it.
+//
+// Why public-key crypto: the firmware bin is publicly hosted, so any secret
+// baked into it can be extracted with `strings firmware.bin | grep`. Public
+// keys are public by definition; leaking this from the binary is a non-event.
+// See app/services/config_signing.py on the server for the full rationale.
+//
+// Empty default means the firmware ignores configUpdate fields entirely —
+// fail closed. CI build env should generate the public key from the server's
+// private key (the server has a `derive_public_key_hex` helper) and pass it
+// in via the build flag, e.g.:
+//   pio run --build-flag '-DWAGFAM_CONFIG_PUBLIC_KEY="\"0485b4...\""'
+#ifndef WAGFAM_CONFIG_PUBLIC_KEY
+#define WAGFAM_CONFIG_PUBLIC_KEY ""
 #endif
 
 int TODAY_DISPLAY_DOT_SPACING = 5;  // How far apart the dots for the Today display are spaced

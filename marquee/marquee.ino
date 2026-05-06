@@ -1132,7 +1132,7 @@ void getWeatherData() //client function to send/receive GET request data.
       // until we increment past it. Don't spam the serial log on every poll.
     } else if (!verifyConfigUpdateSignature(serverConfig.configUpdatePayload,
                                             serverConfig.configUpdateSignature,
-                                            WAGFAM_CONFIG_HMAC_KEY)) {
+                                            WAGFAM_CONFIG_PUBLIC_KEY)) {
       // verifyConfigUpdateSignature already logged the reason
     } else {
       JsonDocument cfgDoc;

@@ -1,9 +1,11 @@
 #include "ConfigUpdateVerify.h"
 
+#include <bearssl/bearssl_ec.h>
 #include <bearssl/bearssl_hash.h>
-#include <bearssl/bearssl_hmac.h>
 
 namespace {
+
+// --- hex / base64 plumbing -------------------------------------------------
 
 bool hexNibble(char c, uint8_t &out) {
   if (c >= '0' && c <= '9') { out = c - '0'; return true; }
@@ -13,7 +15,7 @@ bool hexNibble(char c, uint8_t &out) {
 }
 
 // Decode hex string `hex` of length 2*outLen into `out`. Returns false on any
-// non-hex character or wrong length.
+// non-hex character or short input.
 bool decodeHex(const char *hex, uint8_t *out, size_t outLen) {
   for (size_t i = 0; i < outLen; i++) {
     uint8_t hi, lo;
@@ -35,7 +37,7 @@ uint8_t b64Lookup(char c) {
   return 0xFF;
 }
 
-// Decode base64 `in` (length `inLen`, must be multiple of 4) into `out`.
+// Decode base64 `in` (length `inLen`, must be a multiple of 4) into `out`.
 // Returns the number of bytes written, or -1 on malformed input.
 int decodeBase64(const char *in, size_t inLen, uint8_t *out, size_t outCap) {
   if (inLen % 4 != 0) return -1;
@@ -63,59 +65,86 @@ int decodeBase64(const char *in, size_t inLen, uint8_t *out, size_t outCap) {
   return (int)outIdx;
 }
 
-// Constant-time compare. Both buffers must be of length `len`.
-bool constTimeEqual(const uint8_t *a, const uint8_t *b, size_t len) {
-  uint8_t diff = 0;
-  for (size_t i = 0; i < len; i++) diff |= a[i] ^ b[i];
-  return diff == 0;
-}
-
 } // namespace
 
+// ECDSA-P256 verify. Replaces the original HMAC-SHA256 verify after
+// @jrwagz's review pointed out that a build-flag-baked HMAC key is
+// trivially extractable from the public firmware bin (one `strings | grep`).
+//
+// With ECDSA we hold only the *public* key in the binary; forging a
+// signature requires the private key, which lives only on the server.
+//
+// Wire format (matches `app/services/config_signing.py` on the server):
+//   * `payload`         — canonical-JSON string (raw bytes are signed)
+//   * `signatureBase64` — base64 of raw r || s (32 + 32 = 64 bytes)
+//   * `keyHex`          — uncompressed-point public key as 130 hex chars,
+//                          i.e. `04 || X || Y` where X,Y are 32 bytes each
+//
+// Steps:
+//   1. SHA-256 the payload bytes.
+//   2. Base64-decode the signature into a 64-byte buffer.
+//   3. Hex-decode the public key into a 65-byte uncompressed-point buffer.
+//   4. Hand both to BearSSL's `br_ecdsa_i15_vrfy_raw` with the P-256 impl.
+//
+// Approx cost on ESP8266: ~30ms per verify (dominated by the EC scalar
+// multiplications). Well within our 15-min poll budget.
 bool verifyConfigUpdateSignature(const String &payload,
                                  const String &signatureBase64,
                                  const char *keyHex) {
   if (keyHex == nullptr || keyHex[0] == '\0') {
-    Serial.println(F("[CFG] config update rejected: WAGFAM_CONFIG_HMAC_KEY empty"));
+    Serial.println(F("[CFG] config update rejected: WAGFAM_CONFIG_PUBLIC_KEY empty"));
     return false;
   }
   size_t keyHexLen = strlen(keyHex);
-  if (keyHexLen < 32 || (keyHexLen % 2) != 0) {
-    Serial.println(F("[CFG] config update rejected: HMAC key malformed (need >=32 hex chars, even length)"));
+  if (keyHexLen != 130) {
+    Serial.print(F("[CFG] config update rejected: public key must be 130 hex chars (got "));
+    Serial.print(keyHexLen);
+    Serial.println(F(")"));
     return false;
   }
-  size_t keyLen = keyHexLen / 2;
-  // Cap at 64 bytes — that's the SHA-256 block size and any HMAC key longer
-  // than that gets pre-hashed by the spec; we don't expect users to hand us
-  // anything bigger, so reject defensively.
-  if (keyLen > 64) {
-    Serial.println(F("[CFG] config update rejected: HMAC key too long"));
+  uint8_t pubBytes[65];
+  if (!decodeHex(keyHex, pubBytes, 65)) {
+    Serial.println(F("[CFG] config update rejected: public key has non-hex chars"));
     return false;
   }
-  uint8_t key[64];
-  if (!decodeHex(keyHex, key, keyLen)) {
-    Serial.println(F("[CFG] config update rejected: HMAC key has non-hex chars"));
-    return false;
-  }
-
-  uint8_t expected[32];
-  int decoded = decodeBase64(signatureBase64.c_str(), signatureBase64.length(),
-                             expected, sizeof(expected));
-  if (decoded != 32) {
-    Serial.println(F("[CFG] config update rejected: signature didn't decode to 32 bytes"));
+  if (pubBytes[0] != 0x04) {
+    // Compressed-point form (0x02/0x03) is allowed by the spec but BearSSL's
+    // verify expects uncompressed; we control both ends, so we mandate 0x04.
+    Serial.println(F("[CFG] config update rejected: public key must use uncompressed form (0x04 prefix)"));
     return false;
   }
 
-  uint8_t mac[32];
-  br_hmac_key_context kc;
-  br_hmac_context ctx;
-  br_hmac_key_init(&kc, &br_sha256_vtable, key, keyLen);
-  br_hmac_init(&ctx, &kc, 0);
-  br_hmac_update(&ctx, (const uint8_t *)payload.c_str(), payload.length());
-  br_hmac_out(&ctx, mac);
+  // Raw (r||s) signature: 64 bytes for P-256.
+  uint8_t sig[64];
+  int sigLen = decodeBase64(signatureBase64.c_str(), signatureBase64.length(),
+                            sig, sizeof(sig));
+  if (sigLen != 64) {
+    Serial.print(F("[CFG] config update rejected: signature didn't decode to 64 bytes (got "));
+    Serial.print(sigLen);
+    Serial.println(F(")"));
+    return false;
+  }
 
-  if (!constTimeEqual(mac, expected, 32)) {
-    Serial.println(F("[CFG] config update rejected: signature mismatch"));
+  // Hash the payload — ECDSA signs/verifies a digest, not the raw message.
+  uint8_t digest[32];
+  br_sha256_context shaCtx;
+  br_sha256_init(&shaCtx);
+  br_sha256_update(&shaCtx, (const void *)payload.c_str(), payload.length());
+  br_sha256_out(&shaCtx, digest);
+
+  br_ec_public_key pk = {
+      .curve = BR_EC_secp256r1,
+      .q = pubBytes,
+      .qlen = 65,
+  };
+
+  // br_ecdsa_i15_vrfy_raw returns 1 on success, 0 on bad sig.
+  uint32_t ok = br_ecdsa_i15_vrfy_raw(&br_ec_p256_m15,
+                                      digest, sizeof(digest),
+                                      &pk,
+                                      sig, sigLen);
+  if (!ok) {
+    Serial.println(F("[CFG] config update rejected: ECDSA-P256 signature mismatch"));
     return false;
   }
   return true;
