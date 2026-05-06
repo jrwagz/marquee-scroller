@@ -28,6 +28,7 @@
 #include "Settings.h"
 #include "SecurityHelpers.h"
 #include "ConfigUpdateVerify.h"
+#include "HwVerifyTest.h"
 
 #define BASE_VERSION "4.1.0-wagfam"
 #ifdef BUILD_SUFFIX
@@ -240,6 +241,15 @@ int externalLight = LED_BUILTIN; // LED_BUILTIN is is the built in LED on the We
 
 void setup() {
   Serial.begin(115200);
+#ifdef WAGFAM_HW_VERIFY_TEST
+  // jrwagz/marquee-scroller#100: when the verify-test build flag is set, hand
+  // setup() over to the fixture immediately.  runHwVerifyTest() prints results
+  // and never returns — we don't init LittleFS, WiFi, displays, or anything
+  // else, so the test exercises only the BearSSL ECDSA path under realistic
+  // ESP8266 conditions (clock speed, Flash mapping, RAM layout) without any
+  // unrelated state to confound the result.
+  runHwVerifyTest();
+#endif
   // Use LittleFS directly (not SPIFFS — they are separate objects; SPIFFS
   // refers to the old SPIFFS format and would silently wipe a valid LittleFS
   // partition on mount failure). Disable autoFormat so a freshly-flashed
