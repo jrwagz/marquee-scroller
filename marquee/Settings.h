@@ -72,6 +72,18 @@ boolean WAGFAM_EVENT_TODAY = false; // Whether or not an event is happening toda
 #ifndef WAGFAM_TRUSTED_FIRMWARE_DOMAINS
 #define WAGFAM_TRUSTED_FIRMWARE_DOMAINS ""
 #endif
+
+// Issue #99: shared secret for verifying signed config updates pushed via the
+// calendar response. Hex-encoded (must be at least 32 hex chars / 16 bytes,
+// recommended 64 hex chars / 32 bytes). Must match the server's
+// WAGFAM_CONFIG_HMAC_KEY env var. Empty default means the firmware silently
+// ignores any configUpdate fields in the calendar response — the server fails
+// closed too. Override at build time, e.g.:
+//   pio run --build-flag '-DWAGFAM_CONFIG_HMAC_KEY="\"0123...\""'
+#ifndef WAGFAM_CONFIG_HMAC_KEY
+#define WAGFAM_CONFIG_HMAC_KEY ""
+#endif
+
 int TODAY_DISPLAY_DOT_SPACING = 5;  // How far apart the dots for the Today display are spaced
 int TODAY_DISPLAY_DOT_SPEED_MS = 333; // How many milliseconds between dot moves for the today display
 
