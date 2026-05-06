@@ -17,3 +17,6 @@ webui/node_modules/
 # half gets baked into HwVerifyTest.cpp, which is enough for anyone to
 # regenerate fresh material with their own keys.
 scripts/test_keys/
+# Captured serial logs from scripts/run_hw_verify.sh — always reproducible
+# from the same build, no value in committing them.
+scripts/test_logs/

@@ -14,20 +14,45 @@ captures the per-case PASS/FAIL log. The test code lives in
 without that flag the entire test fixture compiles to nothing and the
 production firmware is bit-identical to a normal `pio run -e dev` build.
 
+## TL;DR — happy-path one-liner
+
+```sh
+cd /path/to/marquee-scroller
+./scripts/run_hw_verify.sh                    # build → flash → capture → grep → exit 0 iff 8/8 pass
+./scripts/restore_prod_build.sh               # reflash the normal firmware afterward
+```
+
+`run_hw_verify.sh` auto-detects the serial port if exactly one is plugged
+in, builds with the test flag, flashes, monitors at 115200, saves the
+captured serial output to `scripts/test_logs/ecdsa-verify-<timestamp>.log`
+(gitignored), parses the `[ECDSA-TEST] DONE: N/M passed` line, and exits
+non-zero if anything failed. Pass an explicit port (`./scripts/run_hw_verify.sh
+/dev/cu.usbserial-XYZ`) if multiple are connected, or `--dry-run` to do a
+build-only sanity check.
+
+The rest of this document describes what those scripts are doing and how
+to do it manually if something goes wrong.
+
 ## Prerequisites
 
 - macOS dev workstation with PlatformIO installed (`pio --version` works).
-  This is the same setup used to produce the `dev` and `default` env builds
-  already in `platformio.ini`.
-- Wemos D1 mini connected over USB-serial. Detect the port with:
+  Same setup that produces the `dev` and `default` env builds in `platformio.ini`.
+- Wemos D1 mini connected over USB-serial. Detect with:
   ```sh
-  ls /dev/cu.usbserial-* /dev/cu.wchusbserial* /dev/cu.SLAB_USBtoUART 2>/dev/null
+  ls /dev/cu.usbserial-* /dev/cu.wchusbserial* /dev/cu.SLAB_USBtoUART /dev/cu.usbmodem* 2>/dev/null
   ```
-  The CH340-based clones usually enumerate as `/dev/cu.wchusbserial-XXXX` or
+  CH340-based clones usually enumerate as `/dev/cu.wchusbserial-XXXX` or
   `/dev/cu.usbserial-XXXX`. There should be exactly one match while the
-  clock is plugged in.
+  clock is plugged in. If `pio device list` doesn't show your device,
+  check the USB-UART driver (CH340 / CH9102 / CP2102) is installed.
 - `cryptography>=43` available to system Python 3 (already a dep of
   `jrwagz/wagfam-server`; if not present, `pip install cryptography`).
+
+## Manual fallback
+
+If `run_hw_verify.sh` can't auto-detect the port, errors out building, or you
+want to walk through the steps yourself, the rest of this doc explains what
+the script is doing under the hood.
 
 ## Step 1 — generate fresh fixtures (optional)
 
@@ -140,10 +165,12 @@ negative case — that's the production reason-logging in
 
 ## Step 5 — share the result
 
-Filter the log for the test lines and paste them into PR #100:
+`run_hw_verify.sh` already prints the relevant lines and saves the full log
+under `scripts/test_logs/`. To copy just the proof lines for a PR comment:
 
 ```sh
-grep -E '^\[ECDSA-TEST\]|^\[CFG\] config update rejected' /tmp/ecdsa-test.log
+grep -E '^\[ECDSA-TEST\]|^\[CFG\] config update rejected' \
+    "$(ls -t scripts/test_logs/ecdsa-verify-*.log | head -1)"
 ```
 
 A passing run is `8/8 passed`. Anything else (a `FAIL` line, or a number
@@ -154,16 +181,25 @@ the PR should NOT merge until investigated.
 
 The verify-test firmware doesn't connect to WiFi, doesn't touch LittleFS,
 and doesn't start the web server, so the device is unusable for normal
-duty until you reflash without the flag. To get back to prod-like:
+duty until you reflash without the flag. The script:
 
 ```sh
-# Either flash the dev env without the flag…
-pio run -e dev --target upload --upload-port "$PORT"
-
-# …or flash the latest auto-update build that the calendar would push.
-# Both of these paths leave LittleFS intact (the test build never
-# formats it), so the device's persistent config is untouched.
+./scripts/restore_prod_build.sh
 ```
+
+builds the `default` env (auto-update enabled, signed by the production
+calendar) without `WAGFAM_HW_VERIFY_TEST` and flashes it. Pass `--env dev`
+if you want the dev env (auto-update disabled — useful if you're about to
+flash another local build), and `--dry-run` to do build-only.
+
+Manual fallback if the script can't find the port:
+
+```sh
+pio run -e default -t upload --upload-port /dev/cu.usbserial-XXXX
+```
+
+LittleFS is left intact across all flashes (the test build never formats
+it), so the device's persistent config is untouched.
 
 If you flashed via OTA instead of USB-serial, the device is still on
 WiFi internally, but `setup()` halted before reaching the OTA handlers,
