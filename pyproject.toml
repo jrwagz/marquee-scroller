@@ -5,6 +5,17 @@ addopts = "-vv --strict-markers"
 # Require an xfail test to actually fail.
 xfail_strict = 1
 
+[tool.coverage.run]
+# These two scripts are test infrastructure for the ECDSA hardware-verify
+# procedure (docs/HARDWARE_TEST_ECDSA_VERIFY.md) — they run only on a dev
+# workstation when manually exercising the on-device verify fixture; they
+# aren't part of any production code path or CI workflow. Excluding them so
+# the 90% coverage gate reflects what the firmware actually depends on.
+omit = [
+    "scripts/sign_test_payloads.py",
+    "scripts/_capture_serial.py",
+]
+
 [tool.ruff]
 target-version = "py311"
 line-length = 120
