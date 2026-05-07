@@ -28,6 +28,7 @@
 #include "Settings.h"
 #include "SecurityHelpers.h"
 #include "ConfigUpdateVerify.h"
+#include "CorsSupport.h"
 #include "HwVerifyTest.h"
 
 #define BASE_VERSION "4.2.0-wagfam"
@@ -371,6 +372,23 @@ void setup() {
   server.on("/api/fs/read", HTTP_GET, handleApiFsRead);
   server.on("/api/fs/delete", HTTP_DELETE, handleApiFsDelete);
   server.on("/api/fs/list", HTTP_GET, handleApiFsList);
+
+  // CORS preflight (OPTIONS) for every JSON-API endpoint. Without these,
+  // the firmware's onNotFound 302-redirects unmatched OPTIONS to /spa/,
+  // and the browser refuses to treat that as a successful preflight.
+  // Each endpoint that can be called cross-origin from the wagfam-server
+  // upgrade/admin pages needs its own OPTIONS registration. See
+  // marquee/CorsSupport.cpp for the rationale.
+  static const char *kJsonApiPaths[] = {
+      "/api/status", "/api/config", "/api/restart", "/api/refresh",
+      "/api/ota/status", "/api/weather", "/api/events",
+      "/api/system-reset", "/api/forget-wifi",
+      "/api/fs/read", "/api/fs/write", "/api/fs/delete", "/api/fs/list",
+      "/api/spa/update-from-url",
+  };
+  for (size_t i = 0; i < sizeof(kJsonApiPaths) / sizeof(kJsonApiPaths[0]); i++) {
+    server.on(kJsonApiPaths[i], HTTP_OPTIONS, handleCorsPreflight);
+  }
 
   // JSON-body POST endpoints. AsyncWebServer doesn't populate request->arg("plain")
   // for JSON bodies, so these go through AsyncCallbackJsonWebHandler which parses
@@ -1567,6 +1585,12 @@ void centerPrint(const String &msg, boolean extraStuff) {
 static void sendJsonResponse(AsyncWebServerRequest *request, int code, JsonDocument &doc) {
   AsyncResponseStream *response = request->beginResponseStream(F("application/json"));
   response->setCode(code);
+  // Attach CORS headers if the request's Origin is whitelisted. Same-origin
+  // requests (no Origin header — the SPA at /spa/ talking to /api/* on the
+  // same host) get nothing extra; cross-origin requests from the wagfam-
+  // server /lan/ + /admin/ pages get the headers they need to read the
+  // response. See marquee/CorsSupport.cpp for the rationale.
+  setCorsHeaders(request, response);
   serializeJson(doc, *response);
   request->send(response);
 }
