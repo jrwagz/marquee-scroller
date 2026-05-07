@@ -43,7 +43,8 @@ import sys
 from pathlib import Path
 
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ec, utils as asym_utils
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.asymmetric import utils as asym_utils
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 KEY_DIR = REPO_ROOT / "scripts" / "test_keys"

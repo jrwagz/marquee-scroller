@@ -38,9 +38,11 @@ to do it manually if something goes wrong.
 - macOS dev workstation with PlatformIO installed (`pio --version` works).
   Same setup that produces the `dev` and `default` env builds in `platformio.ini`.
 - Wemos D1 mini connected over USB-serial. Detect with:
+
   ```sh
   ls /dev/cu.usbserial-* /dev/cu.wchusbserial* /dev/cu.SLAB_USBtoUART /dev/cu.usbmodem* 2>/dev/null
   ```
+
   CH340-based clones usually enumerate as `/dev/cu.wchusbserial-XXXX` or
   `/dev/cu.usbserial-XXXX`. There should be exactly one match while the
   clock is plugged in. If `pio device list` doesn't show your device,
@@ -84,9 +86,9 @@ PLATFORMIO_BUILD_FLAGS="-DWAGFAM_HW_VERIFY_TEST=1" pio run -e dev
 
 Verified flash + RAM impact on this machine (Wemos D1 mini target):
 
-| Build               | Flash             | RAM              |
-|---------------------|-------------------|------------------|
-| `pio run -e dev` (no flag)              | 560065 / 1044464 | 37240 / 81920 |
+| Build | Flash | RAM |
+| --- | --- | --- |
+| `pio run -e dev` (no flag) | 560065 / 1044464 | 37240 / 81920 |
 | `PLATFORMIO_BUILD_FLAGS=-DWAGFAM_HW_VERIFY_TEST=1 pio run -e dev` | 562201 / 1044464 | 38408 / 81920 |
 
 Delta: +2136 bytes flash, +1168 bytes RAM. Well within budget.
@@ -133,7 +135,7 @@ clean boot.
 
 Lines you should see on the serial port (in order):
 
-```
+```text
 [ECDSA-TEST] === ECDSA-P256 verify hardware test (PR #100) ===
 [ECDSA-TEST] Fixtures from scripts/sign_test_payloads.py
 [ECDSA-TEST] Each case calls verifyConfigUpdateSignature() — same path as the production poll.
@@ -151,13 +153,19 @@ Lines you should see on the serial port (in order):
 
 Then every ~30 seconds while the device sits halted:
 
-```
+```text
 [ECDSA-TEST] (still halted) DONE: 8/8 passed
 ```
 
-`<N>` is the wall-clock duration of the 8 verify calls. Each P-256 verify
-takes about 30 ms on the d1 mini, so expect roughly 200–250 ms total —
-some cases hit the early-reject path before BearSSL is invoked at all.
+`<N>` is the wall-clock duration of the 8 verify calls. On a real D1 mini
+with `br_ec_p256_m15` (BearSSL's smallest/slowest P-256 impl, chosen for
+code size), measured cost is ~385 ms per verify and ~3076 ms total
+(positive case, plus 5 sig/key/payload-mismatch verifies that all run
+BearSSL, plus 2 early-reject cases). Cases 7 and 8 short-circuit before
+the EC math.
+Earlier comments in this PR's thread cited "~30 ms per verify" from the
+BearSSL docs — that turned out to be an order of magnitude optimistic;
+this doc reflects the actual hardware measurement.
 
 You'll also see one `[CFG] config update rejected: <reason>` line per
 negative case — that's the production reason-logging in
@@ -208,14 +216,14 @@ That's why this whole procedure is documented as USB-serial-only.
 
 ## Failure modes the test is designed to catch
 
-| Failure mode | Caught by case |
-|---|---|
-| Verify accepts a malformed signature | 06 (mutated 1 byte in raw r∥s) |
-| Verify accepts a sig made for a different payload | 02, 04 (truncated), 05 (mutated payload) |
-| Verify ignores the public key argument | 03 (wrong key) |
-| Verify accepts a malformed key | 07 (wrong prefix), 08 (empty) |
-| BearSSL/ESP8266 unaligned-access bugs | All cases — verify runs on real silicon |
-| Stack/heap exhaustion in BearSSL on small RAM | 01 (still passes proves we have headroom) |
+| Failure mode                                        | Caught by case                              |
+| --------------------------------------------------- | ------------------------------------------- |
+| Verify accepts a malformed signature                | 06 (mutated 1 byte in raw r∥s)              |
+| Verify accepts a sig made for a different payload   | 02, 04 (truncated), 05 (mutated payload)    |
+| Verify ignores the public key argument              | 03 (wrong key)                              |
+| Verify accepts a malformed key                      | 07 (wrong prefix), 08 (empty)               |
+| BearSSL/ESP8266 unaligned-access bugs               | All cases — verify runs on real silicon     |
+| Stack/heap exhaustion in BearSSL on small RAM       | 01 (still passes proves we have headroom)   |
 
 What the test does *not* catch:
 
