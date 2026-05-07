@@ -89,7 +89,7 @@ boolean WAGFAM_EVENT_TODAY = false; // Whether or not an event is happening toda
 // in via the build flag, e.g.:
 //   pio run --build-flag '-DWAGFAM_CONFIG_PUBLIC_KEY="\"0485b4...\""'
 #ifndef WAGFAM_CONFIG_PUBLIC_KEY
-#define WAGFAM_CONFIG_PUBLIC_KEY ""
+#define WAGFAM_CONFIG_PUBLIC_KEY "0429ad542d32ded3469e0e87c5a66bc59c3fd0bbc2f3b62721bed3204620a751bf06ad1b393f708ca6f82565ab2699a39f83a6c666c9e99eb683aba674a1ef347b"
 #endif
 
 int TODAY_DISPLAY_DOT_SPACING = 5;  // How far apart the dots for the Today display are spaced
