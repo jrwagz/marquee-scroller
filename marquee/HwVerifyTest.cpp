@@ -92,15 +92,30 @@ void runOne(const TestCase &tc, uint8_t &passes) {
   Serial.print(got ? F("true") : F("false"));
   Serial.println(F(")"));
   if (ok) passes++;
-  // No yield() here — observed in-the-wild on a d1 mini: BearSSL's
-  // br_ec_p256_m15 verify uses enough cont stack that subsequent yield()
-  // panics at core_esp8266_main.cpp:191 (cont_can_suspend → false because
-  // the cont struct's stack_end got smashed; ctx still reads "cont" but
-  // g_pcont is corrupt).  Production isn't affected: the poll-time call
-  // site runs ONE verify per ~15-min poll inside loop() with the cont
-  // stack already deep, not in a tight setup() scaffold like this.
-  // 8 verifies × ~30ms = ~240ms total — well under the soft watchdog's
-  // 3.2s budget, so no scheduling cooperation is needed between cases.
+  // ESP.wdtFeed() — pet the soft watchdog without entering the cooperative
+  // scheduler.  Two things bite us here that production doesn't see:
+  //
+  //   * No yield(): the previous fix (1086781) dropped yield() because
+  //     BearSSL's br_ec_p256_m15 verify smashes enough cont stack that
+  //     the next yield() panics at cont_can_suspend.  yield()'s side
+  //     effect of feeding the soft WDT goes with it.
+  //
+  //   * Cumulative verify time: br_ec_p256_m15 is BearSSL's smallest /
+  //     slowest P-256 impl (chosen for code size, not speed), and a
+  //     single verify on a D1 mini measures closer to 600ms than the
+  //     ~30ms estimate the docs cite.  Five back-to-back verifies push
+  //     past the 3.2s soft-WDT budget, and the device resets mid-test
+  //     (exactly what showed up in scripts/test_logs/ecdsa-verify-
+  //     20260506-203910.log: cases 1-5 print PASS, then "Soft WDT
+  //     reset / Exception (4)" and a reboot loop — 6-8 never run).
+  //
+  // wdtFeed() is the right primitive: it talks to the WDT timer
+  // directly, doesn't traverse the cont scheduler, and is cheap
+  // (single register write).  Production isn't affected — the poll-
+  // time call site runs ONE verify per ~15-min poll inside loop()
+  // with the SDK's own yield() between iterations, not back-to-back
+  // in a tight setup() loop.
+  ESP.wdtFeed();
 }
 
 }  // namespace
