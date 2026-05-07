@@ -30,7 +30,7 @@
 #include "ConfigUpdateVerify.h"
 #include "HwVerifyTest.h"
 
-#define BASE_VERSION "4.1.0-wagfam"
+#define BASE_VERSION "4.2.0-wagfam"
 #ifdef BUILD_SUFFIX
 #define VERSION BASE_VERSION BUILD_SUFFIX
 #else
