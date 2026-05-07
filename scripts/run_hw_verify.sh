@@ -163,42 +163,16 @@ if (( FLASH_RC != 0 )); then
 fi
 
 # ── Monitor + capture ──────────────────────────────────────────────────────
-# pio device monitor doesn't have a "quit on regex" mode, so we run it in
-# the background, watch the log file for the DONE marker, then SIGTERM the
-# monitor process. trap covers Ctrl-C so a partial log is still saved.
+# Originally this used `pio device monitor`, but pio's monitor wraps
+# pyserial's miniterm which calls termios.tcgetattr(stdout_fd) at startup
+# to save the host terminal state.  When we redirect stdout to a log file,
+# that fd isn't a TTY → ENOTTY → monitor dies before opening the serial
+# port at all.  Using a small pyserial reader (scripts/_capture_serial.py)
+# avoids the issue entirely and gives us cleaner exit semantics.
 echo "[hw-verify] capturing serial → $LOG (timeout ${TIMEOUT_S}s)"
-pio device monitor --port "$PORT" --baud "$MONITOR_BAUD" --quiet >"$LOG" 2>&1 &
-MONITOR_PID=$!
-
-cleanup() {
-  if kill -0 "$MONITOR_PID" 2>/dev/null; then
-    kill "$MONITOR_PID" 2>/dev/null || true
-    wait "$MONITOR_PID" 2>/dev/null || true
-  fi
-}
-trap 'echo; echo "[hw-verify] interrupted — partial log: $LOG"; cleanup; exit 130' INT TERM
-
-START="$(date +%s)"
-SAW_DONE=0
-while true; do
-  if [[ -s "$LOG" ]] && grep -qF "[ECDSA-TEST] DONE:" "$LOG"; then
-    # Let one more frame of output flush before we kill the monitor.
-    sleep 1
-    SAW_DONE=1
-    break
-  fi
-  if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
-    echo "[hw-verify] monitor exited unexpectedly — see $LOG" >&2
-    break
-  fi
-  if (( $(date +%s) - START > TIMEOUT_S )); then
-    echo "[hw-verify] timeout after ${TIMEOUT_S}s — DONE line never appeared" >&2
-    break
-  fi
-  sleep 0.5
-done
-
-cleanup
+trap 'echo; echo "[hw-verify] interrupted — partial log: $LOG"; exit 130' INT TERM
+python3 "$REPO_ROOT/scripts/_capture_serial.py" "$PORT" "$MONITOR_BAUD" "$TIMEOUT_S" "$LOG"
+CAPTURE_RC=$?
 trap - INT TERM
 
 # ── Parse + report ─────────────────────────────────────────────────────────
@@ -215,25 +189,34 @@ if grep -qE '^\[CFG\]' "$LOG"; then
   echo
 fi
 
-if (( ! SAW_DONE )); then
-  echo "[hw-verify] FAIL — DONE line not observed; full log: $LOG" >&2
-  exit 8
-fi
-
-DONE_LINE="$(grep -m1 '\[ECDSA-TEST\] DONE:' "$LOG")"
-# Expected shape:  "[ECDSA-TEST] DONE: N/M passed in T ms"
-if [[ "$DONE_LINE" =~ DONE:\ ([0-9]+)/([0-9]+)\ passed ]]; then
-  PASSES="${BASH_REMATCH[1]}"
-  TOTAL="${BASH_REMATCH[2]}"
-  if [[ "$PASSES" == "$TOTAL" ]]; then
-    echo "[hw-verify] PASS — $PASSES/$TOTAL cases verified on hardware"
+# _capture_serial.py exit codes:
+#   0 = saw "DONE: N/N" with N == total
+#   1 = TIMEOUT_S elapsed without seeing any DONE line
+#   2 = saw "DONE: N/M" with N < M
+#   3 = couldn't open serial port
+#   130 = SIGINT
+case "$CAPTURE_RC" in
+  0)
+    DONE_LINE="$(grep -m1 '\[ECDSA-TEST\].*DONE:' "$LOG")"
+    echo "[hw-verify] PASS — $DONE_LINE"
     echo "[hw-verify] log saved: $LOG"
     exit 0
-  else
-    echo "[hw-verify] FAIL — only $PASSES/$TOTAL cases passed; full log: $LOG" >&2
+    ;;
+  1)
+    echo "[hw-verify] FAIL — timeout after ${TIMEOUT_S}s, DONE line never appeared; full log: $LOG" >&2
+    exit 8
+    ;;
+  2)
+    DONE_LINE="$(grep -m1 '\[ECDSA-TEST\].*DONE:' "$LOG")"
+    echo "[hw-verify] FAIL — partial pass: $DONE_LINE; full log: $LOG" >&2
     exit 9
-  fi
-fi
-
-echo "[hw-verify] FAIL — couldn't parse DONE line: $DONE_LINE" >&2
-exit 10
+    ;;
+  3)
+    echo "[hw-verify] FAIL — serial port error; full log: $LOG" >&2
+    exit 11
+    ;;
+  *)
+    echo "[hw-verify] FAIL — capture exited $CAPTURE_RC; full log: $LOG" >&2
+    exit "$CAPTURE_RC"
+    ;;
+esac

@@ -92,9 +92,15 @@ void runOne(const TestCase &tc, uint8_t &passes) {
   Serial.print(got ? F("true") : F("false"));
   Serial.println(F(")"));
   if (ok) passes++;
-  // Each verify is ~30ms; yield between cases so the soft watchdog stays
-  // happy even if BearSSL ends up doing more work than expected.
-  yield();
+  // No yield() here — observed in-the-wild on a d1 mini: BearSSL's
+  // br_ec_p256_m15 verify uses enough cont stack that subsequent yield()
+  // panics at core_esp8266_main.cpp:191 (cont_can_suspend → false because
+  // the cont struct's stack_end got smashed; ctx still reads "cont" but
+  // g_pcont is corrupt).  Production isn't affected: the poll-time call
+  // site runs ONE verify per ~15-min poll inside loop() with the cont
+  // stack already deep, not in a tight setup() scaffold like this.
+  // 8 verifies × ~30ms = ~240ms total — well under the soft watchdog's
+  // 3.2s budget, so no scheduling cooperation is needed between cases.
 }
 
 }  // namespace
@@ -161,13 +167,20 @@ void runHwVerifyTest() {
   Serial.println(F(" ms"));
   Serial.println(F("[ECDSA-TEST] === halting; reset the device to re-run ==="));
 
-  // Halt — feed the watchdog so the device stays alive and the user has
-  // time to scroll up in the serial monitor.  Re-print the summary every
-  // 30s so it's easy to find no matter when serial is attached.
+  // Halt — keep the device alive so the user has time to scroll up in the
+  // serial monitor, and re-print the summary every 30s so it's easy to find
+  // no matter when serial is attached.
+  //
+  // Cannot use yield()/delay() here for the same reason runOne() can't:
+  // BearSSL has trampled the cont stack and any cont-touching primitive
+  // panics.  delayMicroseconds() is a busy-wait that stays out of the
+  // scheduler entirely (capped at uint16_t max ≈ 65535µs per call), and
+  // ESP.wdtFeed() pets the soft watchdog directly without going through
+  // the cooperative-scheduling layer.
   unsigned long lastEchoMs = millis();
   while (true) {
-    yield();
-    delay(100);
+    ESP.wdtFeed();
+    delayMicroseconds(50000);  // 50 ms busy-wait, well under uint16_t max
     if (millis() - lastEchoMs > 30000UL) {
       Serial.print(F("[ECDSA-TEST] (still halted) DONE: "));
       Serial.print(passes);
