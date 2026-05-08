@@ -36,6 +36,7 @@
 #include <Fonts/Org_01.h>
 #include "WagfamFont.h"
 #include "ClockStyles.h"
+#include <bearssl/bearssl_hash.h>  // br_sha256_* for OTA SHA256 verification (issue #96)
 
 // Scroller font registry (issue #106). Index 0 is the Adafruit_GFX builtin
 // 5x7 fixed-width font (passed as nullptr to setFont). Other entries are
@@ -115,9 +116,13 @@ void scrollMessageWait(const String &msg);
 void centerPrint(const String &msg, bool extraStuff = false);
 void renderClockFace(bool isRefresh = false);
 String EncodeUrlSpecialChars(const char *msg);
-void performAutoUpdate(const String &firmwareUrl);
+void performAutoUpdate(const String &firmwareUrl, const String &expectedSha256);
 void checkOtaRollback();
 static void doOtaFlash(const String &firmwareUrl);
+// Issue #96 phase A: pre-flash SHA256 verification. Streams `url`, hashes
+// the bytes, compares to `expectedHex`. Empty `expectedHex` returns true
+// (forward-compat with older server that doesn't publish hashes).
+static bool verifyOtaSha256(const String &url, const String &expectedHex);
 
 void handleUpdateFromUrl(AsyncWebServerRequest *request);
 
@@ -139,7 +144,7 @@ void handleApiFsWrite(AsyncWebServerRequest *request, JsonVariant &json);
 void handleApiFsDelete(AsyncWebServerRequest *request);
 void handleApiFsList(AsyncWebServerRequest *request);
 void handleApiSpaUpdateFromUrl(AsyncWebServerRequest *request, JsonVariant &json);
-static void doOtaFsFlash(const String &fsUrl);
+static void doOtaFsFlash(const String &fsUrl, const String &expectedSha256);
 
 // LED Settings
 int spacer = 1;  // dots between letters
@@ -172,8 +177,10 @@ String SPA_VERSION = "unknown"; // Read from /spa/version.json at boot; "unknown
 bool spaUpdateAvailable = false;
 String pendingSpaFsUrl = "";
 String pendingSpaVersion = ""; // Server-published latest SPA version when an update is pending
+String pendingSpaFsSha256 = ""; // Server-published SHA256 of pendingSpaFsUrl (issue #96 phase A); empty if server didn't publish one
 bool otaFsFromUrlRequested = false;
 String pendingOtaFsUrl = "";
+String pendingOtaFsSha256 = ""; // Expected SHA256 carried alongside pendingOtaFsUrl. Empty for the manual /api/spa/update-from-url path (no server-side hash to verify against) and for older-server cases.
 
 // SPA-FS OTA status, surfaced via /api/status so the SPA UI can detect
 // silent failures of the deferred flash run by doOtaFsFlash(). Value
@@ -740,14 +747,16 @@ void processEverySecond() {
   // (ESPhttpUpdate.updateSpiffs() reboots internally before we can restore it).
   if (otaFsFromUrlRequested && pendingOtaFsUrl.length() > 0) {
     String url = pendingOtaFsUrl;
+    String sha = pendingOtaFsSha256;
     otaFsFromUrlRequested = false;
     pendingOtaFsUrl = "";
+    pendingOtaFsSha256 = "";
     digitalWrite(externalLight, LOW);
     matrix.fillScreen(LOW);
     scrollMessageWait(F("   ...Updating SPA..."));
     centerPrint(F("..."));
     Serial.printf_P(PSTR("[OTAFS] Starting deferred FS update from URL: %s\n"), url.c_str());
-    doOtaFsFlash(url);
+    doOtaFsFlash(url, sha);
     // Only reached on failure — doOtaFsFlash reboots the device on success.
     digitalWrite(externalLight, HIGH);
   }
@@ -917,10 +926,24 @@ void handleUpdateFromUrl(AsyncWebServerRequest *request) {
 }
 
 // Trigger an OTA update from the given HTTP URL (called from the auto-update path).
-// Writes a rollback record to LittleFS before flashing so crash-loop recovery is possible.
-// On ESPhttpUpdate success the device reboots; this function only returns on failure.
-void performAutoUpdate(const String &firmwareUrl) {
+//
+// Phase A SHA256 verification (issue #96): if `expectedSha256` is non-empty,
+// pre-fetch the firmware bytes and verify their SHA256 against the value
+// before invoking the actual flash. On mismatch (or fetch failure) we abort
+// without touching the sketch partition. An empty `expectedSha256` skips the
+// check, preserving compatibility with older server builds that don't
+// publish the field.
+//
+// Writes a rollback record to LittleFS before flashing so crash-loop
+// recovery is possible. On ESPhttpUpdate success the device reboots; this
+// function only returns on failure.
+void performAutoUpdate(const String &firmwareUrl, const String &expectedSha256) {
   Serial.printf_P(PSTR("[OTA] Auto-update from: %s\n"), firmwareUrl.c_str());
+
+  if (!verifyOtaSha256(firmwareUrl, expectedSha256)) {
+    Serial.println(F("[OTA] Pre-flight SHA256 verification failed; aborting auto-update"));
+    return;
+  }
 
   matrix.fillScreen(LOW);
   scrollMessageWait(F("   ...Auto Updating..."));
@@ -930,6 +953,86 @@ void performAutoUpdate(const String &firmwareUrl) {
 
   // Only reached on failure
   Serial.printf_P(PSTR("[OTA] Auto-update failed.\n"));
+}
+
+// Pre-flight SHA256 of an OTA download (issue #96 phase A).
+//
+// Streams the bytes at `url` through SHA256 and compares the resulting hex
+// digest to `expectedHex` (case-insensitive). Returns true on match OR when
+// `expectedHex` is empty (forward-compat: older server doesn't publish a
+// hash, so we skip the check). Returns false on any fetch error or hash
+// mismatch — caller MUST abort.
+//
+// Trade-off: this doubles the network bandwidth on auto-update because we
+// fetch once for hashing and ESPhttpUpdate fetches again for the actual
+// flash. That's a few hundred KB extra per update, negligible on our
+// fleet. The alternative (replacing ESPhttpUpdate with manual streaming
+// so we hash + flash in one pass) is a much larger surgery on the OTA
+// flow; the bandwidth cost buys us a localized, low-risk change.
+static bool verifyOtaSha256(const String &url, const String &expectedHex) {
+  if (expectedHex.length() == 0) {
+    Serial.println(F("[OTA] No expected SHA256 from server; skipping verification"));
+    return true;
+  }
+
+  WiFiClient httpClient;
+  HTTPClient http;
+  http.begin(httpClient, url);
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  int code = http.GET();
+  if (code != HTTP_CODE_OK) {
+    Serial.printf_P(PSTR("[OTA] SHA256 pre-fetch HTTP %d for %s\n"), code, url.c_str());
+    http.end();
+    return false;
+  }
+
+  br_sha256_context shaCtx;
+  br_sha256_init(&shaCtx);
+
+  WiFiClient *stream = http.getStreamPtr();
+  uint8_t buf[512];
+  int contentLength = http.getSize();
+  int totalRead = 0;
+  while (http.connected() && (contentLength <= 0 || totalRead < contentLength)) {
+    size_t avail = stream->available();
+    if (avail) {
+      size_t toRead = min(avail, sizeof(buf));
+      size_t got = stream->readBytes(buf, toRead);
+      br_sha256_update(&shaCtx, buf, got);
+      totalRead += got;
+    } else if (contentLength > 0 && totalRead >= contentLength) {
+      break;
+    }
+    yield();
+  }
+  http.end();
+
+  if (contentLength > 0 && totalRead < contentLength) {
+    Serial.printf_P(PSTR("[OTA] SHA256 pre-fetch truncated at %d/%d bytes\n"),
+                    totalRead, contentLength);
+    return false;
+  }
+
+  uint8_t digest[32];
+  br_sha256_out(&shaCtx, digest);
+
+  char actualHex[65];
+  for (int i = 0; i < 32; i++) {
+    snprintf(&actualHex[i * 2], 3, "%02x", digest[i]);
+  }
+  actualHex[64] = '\0';
+
+  if (!String(actualHex).equalsIgnoreCase(expectedHex)) {
+    Serial.print(F("[OTA] SHA256 mismatch! expected="));
+    Serial.print(expectedHex);
+    Serial.print(F(" actual="));
+    Serial.println(actualHex);
+    return false;
+  }
+  Serial.print(F("[OTA] SHA256 verified ("));
+  Serial.print(String(actualHex).substring(0, 16));
+  Serial.println(F("...)"));
+  return true;
 }
 
 // Helper: record a SPA OTA failure, log it to serial, and reset HTTP/FS
@@ -956,9 +1059,17 @@ static void spaOtaFail(const __FlashStringHelper *stage, const String &detail,
 // Never returns on success — the device reboots after a successful flash.
 // On any failure, sets spaOtaStatus="failed" + spaOtaError so the SPA poll
 // loop in StatusPage can surface it instead of silently returning success.
-static void doOtaFsFlash(const String &fsUrl) {
+static void doOtaFsFlash(const String &fsUrl, const String &expectedSha256) {
   spaOtaStatus = "downloading";
   spaOtaError = "";
+
+  // Issue #96 phase A: pre-flight SHA256 against the server-published hash.
+  // Done before LittleFS.end() so a hash failure leaves the existing FS
+  // intact and the device keeps working with its current SPA bundle.
+  if (!verifyOtaSha256(fsUrl, expectedSha256)) {
+    spaOtaFail(F("sha256"), "downloaded SPA bundle hash didn't match server", nullptr);
+    return;
+  }
 
   // Back up /conf.txt before unmounting LittleFS.
   String confBackup = "";
@@ -1304,7 +1415,8 @@ void getWeatherData() //client function to send/receive GET request data.
       Serial.println(F("[SEC] Rejected firmware URL — domain not allowlisted and does not match calendar source"));
     } else {
     Serial.println("[OTA] Server version: " + serverConfig.latestVersion + ", current: " + String(VERSION));
-    performAutoUpdate(serverConfig.firmwareUrl);
+    String fwSha = serverConfig.firmwareSha256Valid ? serverConfig.firmwareSha256 : String();
+    performAutoUpdate(serverConfig.firmwareUrl, fwSha);
     // If we return here the update failed; continue normal operation
     }
   }
@@ -1321,11 +1433,13 @@ void getWeatherData() //client function to send/receive GET request data.
     spaUpdateAvailable = true;
     pendingSpaFsUrl = serverConfig.spaFsUrl;
     pendingSpaVersion = serverConfig.latestSpaVersion;
+    pendingSpaFsSha256 = serverConfig.spaFsSha256Valid ? serverConfig.spaFsSha256 : String();
     Serial.println("[SPA] Update available: server=" + serverConfig.latestSpaVersion + ", current=" + SPA_VERSION);
   } else {
     spaUpdateAvailable = false;
     pendingSpaFsUrl = "";
     pendingSpaVersion = "";
+    pendingSpaFsSha256 = "";
   }
 
   // Auto-apply the SPA update if one was just detected. Mirrors the firmware
@@ -1345,6 +1459,7 @@ void getWeatherData() //client function to send/receive GET request data.
     } else {
       Serial.println("[SPA] Auto-applying SPA update: " + pendingSpaVersion);
       pendingOtaFsUrl = pendingSpaFsUrl;
+      pendingOtaFsSha256 = pendingSpaFsSha256;
       otaFsFromUrlRequested = true;
       // Mirror handleApiSpaUpdateFromUrl: surface progress via /api/status
       // spa_ota.{status,error} so the SPA waitForUpdateOutcome() poll picks
@@ -1991,6 +2106,10 @@ void handleApiSpaUpdateFromUrl(AsyncWebServerRequest *request, JsonVariant &json
   }
 
   pendingOtaFsUrl = url;
+  // Manual SPA update from the SPA Settings tab: the user supplies the URL
+  // directly, so there is no server-published hash to verify against.
+  // doOtaFsFlash treats an empty expectedSha256 as "skip verification."
+  pendingOtaFsSha256 = "";
   otaFsFromUrlRequested = true;
   spaOtaStatus = "queued";
   spaOtaError = "";

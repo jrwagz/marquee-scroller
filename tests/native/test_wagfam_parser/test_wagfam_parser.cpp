@@ -259,6 +259,51 @@ void test_config_spa_fields_with_firmware_fields() {
     TEST_ASSERT_EQUAL_STRING("http://example.com/littlefs.bin", cfg.spaFsUrl.c_str());
 }
 
+// Issue #96 phase A: SHA256 hash fields next to their respective URLs.
+
+void test_config_firmware_sha256_parsed() {
+    WagFamBdayClient client("", "");
+    feed_json(client,
+        "[{\"config\":{"
+        "\"firmwareUrl\":\"http://example.com/fw.bin\","
+        "\"firmwareSha256\":\"deadbeef00112233445566778899aabbccddeeff0011223344556677889900ff\""
+        "}}]");
+    auto cfg = client.getLastConfig();
+    TEST_ASSERT_TRUE(cfg.firmwareSha256Valid);
+    TEST_ASSERT_EQUAL_STRING(
+        "deadbeef00112233445566778899aabbccddeeff0011223344556677889900ff",
+        cfg.firmwareSha256.c_str());
+}
+
+void test_config_spa_fs_sha256_parsed() {
+    WagFamBdayClient client("", "");
+    feed_json(client,
+        "[{\"config\":{"
+        "\"spaFsUrl\":\"http://example.com/littlefs.bin\","
+        "\"spaFsSha256\":\"00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff\""
+        "}}]");
+    auto cfg = client.getLastConfig();
+    TEST_ASSERT_TRUE(cfg.spaFsSha256Valid);
+    TEST_ASSERT_EQUAL_STRING(
+        "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
+        cfg.spaFsSha256.c_str());
+}
+
+void test_config_sha256_absent_when_not_published() {
+    // Older server doesn't publish the hash fields; the parser must leave
+    // them invalid so verifyOtaSha256 falls through to the skip-verification
+    // path (forward compat).
+    WagFamBdayClient client("", "");
+    feed_json(client,
+        "[{\"config\":{"
+        "\"firmwareUrl\":\"http://example.com/fw.bin\","
+        "\"spaFsUrl\":\"http://example.com/littlefs.bin\""
+        "}}]");
+    auto cfg = client.getLastConfig();
+    TEST_ASSERT_FALSE(cfg.firmwareSha256Valid);
+    TEST_ASSERT_FALSE(cfg.spaFsSha256Valid);
+}
+
 void test_config_device_name_parsed() {
     WagFamBdayClient client("", "");
     feed_json(client, "[{\"config\":{\"deviceName\":\"Kitchen Clock\"}}]");
@@ -347,6 +392,9 @@ int main() {
     RUN_TEST(test_config_absent_fields_not_valid);
     RUN_TEST(test_config_latest_spa_version_parsed);
     RUN_TEST(test_config_spa_fs_url_parsed);
+    RUN_TEST(test_config_firmware_sha256_parsed);
+    RUN_TEST(test_config_spa_fs_sha256_parsed);
+    RUN_TEST(test_config_sha256_absent_when_not_published);
     RUN_TEST(test_config_spa_fields_with_firmware_fields);
     RUN_TEST(test_config_device_name_parsed);
     RUN_TEST(test_config_device_name_with_other_fields);

@@ -198,6 +198,10 @@ void WagFamBdayClient::value(String value) {
     } else if (currentKey == "firmwareUrl") {
       currentConfig.firmwareUrlValid = true;
       currentConfig.firmwareUrl = value;
+    } else if (currentKey == "firmwareSha256") {
+      // Issue #96 phase A: pre-flash hash check.
+      currentConfig.firmwareSha256Valid = true;
+      currentConfig.firmwareSha256 = value;
     } else if (currentKey == "deviceName") {
       currentConfig.deviceNameValid = true;
       currentConfig.deviceName = value;
@@ -207,6 +211,9 @@ void WagFamBdayClient::value(String value) {
     } else if (currentKey == "spaFsUrl") {
       currentConfig.spaFsUrlValid = true;
       currentConfig.spaFsUrl = value;
+    } else if (currentKey == "spaFsSha256") {
+      currentConfig.spaFsSha256Valid = true;
+      currentConfig.spaFsSha256 = value;
     } else if (currentKey == "trollMessage") {
       // Issue #99: server tells us to display only this string and ignore
       // the regular calendar messages. cleanText() to handle smart quotes
