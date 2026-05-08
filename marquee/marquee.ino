@@ -42,6 +42,17 @@
 #define OTA_PENDING_FILE "/ota_pending.txt"
 #define OTA_CONFIRM_MS (5UL * 60UL * 1000UL)  // 5 minutes of stable uptime to confirm an update
 
+// Compile-time auto-update kill switch (issue #95). Resolves to a
+// `constexpr bool` rather than `#ifdef`/`#endif` so the call sites can use
+// plain `if (AUTO_UPDATE_COMPILE_DISABLED) ...` and the runtime toggle
+// (`AUTO_UPDATE_ENABLED` from Settings.h) sits beside it without nested
+// preprocessor blocks.
+#ifdef WAGFAM_AUTO_UPDATE_DISABLED
+constexpr bool AUTO_UPDATE_COMPILE_DISABLED = true;
+#else
+constexpr bool AUTO_UPDATE_COMPILE_DISABLED = false;
+#endif
+
 //declaring prototypes
 void setup();
 void loop();
@@ -1178,16 +1189,27 @@ void getWeatherData() //client function to send/receive GET request data.
 
   // Check for a remote firmware update pushed via the calendar config.
   //
-  // Build with `-DWAGFAM_AUTO_UPDATE_DISABLED=1` to skip this branch. Useful
-  // when running a locally-built firmware that the calendar server doesn't
-  // know about yet (the server's published latestVersion would otherwise
-  // not match VERSION, and the device would auto-revert to the server's
-  // build at the next calendar refresh — losing local work). Default
-  // behavior is unchanged: the flag must be set explicitly to disable.
-#ifdef WAGFAM_AUTO_UPDATE_DISABLED
-  Serial.println(F("[OTA] Auto-update disabled at build time (WAGFAM_AUTO_UPDATE_DISABLED)"));
-#else
-  if (serverConfig.latestVersionValid && serverConfig.firmwareUrlValid
+  // Two layered controls (issue #95):
+  //   - WAGFAM_AUTO_UPDATE_DISABLED build flag (AUTO_UPDATE_COMPILE_DISABLED):
+  //     force-disables auto-update, ignoring the runtime toggle. Useful for
+  //     locally-built firmware that the calendar server doesn't know about
+  //     (the server's latestVersion wouldn't match VERSION, and the device
+  //     would auto-revert to the server's build at the next refresh —
+  //     losing local work).
+  //   - AUTO_UPDATE_ENABLED runtime config: user-controlled toggle, exposed
+  //     via the SPA Settings tab and persisted in /conf.txt. Default true,
+  //     so existing clocks keep auto-updating after upgrading to a build
+  //     that has this setting.
+  //
+  // Detection of an available SPA update (below) is *always* performed
+  // regardless of either gate — those flags drive the manual "Update SPA"
+  // button, which must remain functional in every configuration. Only the
+  // *automatic* trigger is gated.
+  if (AUTO_UPDATE_COMPILE_DISABLED) {
+    Serial.println(F("[OTA] Auto-update disabled at build time (WAGFAM_AUTO_UPDATE_DISABLED)"));
+  } else if (!AUTO_UPDATE_ENABLED) {
+    Serial.println(F("[OTA] Auto-update disabled at runtime (AUTO_UPDATE_ENABLED=false)"));
+  } else if (serverConfig.latestVersionValid && serverConfig.firmwareUrlValid
       && serverConfig.latestVersion != String(VERSION)
       && serverConfig.firmwareUrl.startsWith("http://")
       && otaConfirmAt == 0
@@ -1202,14 +1224,13 @@ void getWeatherData() //client function to send/receive GET request data.
     // If we return here the update failed; continue normal operation
     }
   }
-#endif // WAGFAM_AUTO_UPDATE_DISABLED
 
   // Check for a remote SPA update pushed via the calendar config. Detection
   // (setting spaUpdateAvailable / pendingSpaFsUrl / pendingSpaVersion) is
-  // *always* performed regardless of WAGFAM_AUTO_UPDATE_DISABLED — those
-  // flags drive the manual "Update SPA" button in the SPA banner, which must
-  // remain functional in every build configuration. Only the *automatic*
-  // trigger below is gated by the compile flag.
+  // *always* performed regardless of either auto-update gate — those flags
+  // drive the manual "Update SPA" button in the SPA banner, which must
+  // remain functional in every configuration. Only the *automatic* trigger
+  // below is gated.
   if (serverConfig.latestSpaVersionValid && serverConfig.spaFsUrlValid
       && serverConfig.latestSpaVersion != SPA_VERSION
       && serverConfig.spaFsUrl.startsWith("http://")) {
@@ -1224,14 +1245,15 @@ void getWeatherData() //client function to send/receive GET request data.
   }
 
   // Auto-apply the SPA update if one was just detected. Mirrors the firmware
-  // auto-update branch above: same compile-time flag, same OTA confirmation
-  // gates (so a SPA flash never fires inside the firmware-flash confirmation
-  // window), same trusted-domain check. Defers the actual flash to the main
-  // loop's existing handler at processEverySecond() (which calls
-  // doOtaFsFlash()) by setting otaFsFromUrlRequested — same path the manual
-  // /api/spa/update-from-url endpoint uses.
-#ifndef WAGFAM_AUTO_UPDATE_DISABLED
-  if (spaUpdateAvailable && pendingSpaFsUrl.length() > 0
+  // auto-update branch above: same compile-time flag and same runtime toggle
+  // (issue #95), same OTA confirmation gates (so a SPA flash never fires
+  // inside the firmware-flash confirmation window), same trusted-domain
+  // check. Defers the actual flash to the main loop's existing handler at
+  // processEverySecond() (which calls doOtaFsFlash()) by setting
+  // otaFsFromUrlRequested — same path the manual /api/spa/update-from-url
+  // endpoint uses.
+  if (!AUTO_UPDATE_COMPILE_DISABLED && AUTO_UPDATE_ENABLED
+      && spaUpdateAvailable && pendingSpaFsUrl.length() > 0
       && otaConfirmAt == 0 && millis() > OTA_CONFIRM_MS
       && !otaFsFromUrlRequested) {
     if (!isTrustedFirmwareDomain(pendingSpaFsUrl, WAGFAM_DATA_URL, WAGFAM_TRUSTED_FIRMWARE_DOMAINS)) {
@@ -1247,7 +1269,6 @@ void getWeatherData() //client function to send/receive GET request data.
       spaOtaError = "";
     }
   }
-#endif // WAGFAM_AUTO_UPDATE_DISABLED
 
   Serial.println("Version: " + String(VERSION));
   Serial.println();
@@ -1396,6 +1417,7 @@ void savePersistentConfig() {
     f.println("OTA_SAFE_URL=" + OTA_SAFE_URL);
     f.println("DEVICE_NAME=" + DEVICE_NAME);
     f.println("LAST_APPLIED_CONFIG_VERSION=" + String(lastAppliedConfigVersion));
+    f.println("AUTO_UPDATE_ENABLED=" + String(AUTO_UPDATE_ENABLED ? 1 : 0));
   }
   f.close();
   // Apply current settings to hardware and clients directly.
@@ -1492,6 +1514,9 @@ void readPersistentConfig() {
     } else if (key == "LAST_APPLIED_CONFIG_VERSION") {
       lastAppliedConfigVersion = value.toInt();
       Serial.println("LAST_APPLIED_CONFIG_VERSION=" + String(lastAppliedConfigVersion));
+    } else if (key == "AUTO_UPDATE_ENABLED") {
+      AUTO_UPDATE_ENABLED = value.toInt() != 0;
+      Serial.println("AUTO_UPDATE_ENABLED=" + String(AUTO_UPDATE_ENABLED ? 1 : 0));
     }
   }
   fr.close();
@@ -1653,6 +1678,11 @@ void handleApiConfigGet(AsyncWebServerRequest *request) {
   doc["show_highlow"] = SHOW_HIGHLOW;
   doc["ota_safe_url"] = OTA_SAFE_URL;
   doc["device_name"] = DEVICE_NAME;
+  // Issue #95: runtime auto-update toggle. `auto_update_enabled` is the
+  // user-controllable boolean; `auto_update_compile_disabled` is read-only
+  // and lets the SPA show "force-disabled at build time" when applicable.
+  doc["auto_update_enabled"] = AUTO_UPDATE_ENABLED;
+  doc["auto_update_compile_disabled"] = AUTO_UPDATE_COMPILE_DISABLED;
 
   sendJsonResponse(request, 200, doc);
 }
@@ -1683,6 +1713,11 @@ static void applyConfigJson(JsonObject json) {
   if (json["show_highlow"].is<bool>()) SHOW_HIGHLOW = json["show_highlow"].as<bool>();
   if (json["device_name"].is<const char*>()) DEVICE_NAME = json["device_name"].as<String>();
   if (json["ota_safe_url"].is<const char*>()) OTA_SAFE_URL = json["ota_safe_url"].as<String>();
+  // Issue #95. The compile-flag-disabled case is reported back to the SPA
+  // via the read-only `auto_update_compile_disabled` field but isn't itself
+  // settable here — runtime writes always land, the compile flag just
+  // overrides them in the auto-update gate above.
+  if (json["auto_update_enabled"].is<bool>()) AUTO_UPDATE_ENABLED = json["auto_update_enabled"].as<bool>();
 }
 
 void handleApiConfigPost(AsyncWebServerRequest *request, JsonVariant &json) {

@@ -47,6 +47,10 @@ const DEFAULTS: ConfigData = {
   show_highlow: false,
   ota_safe_url: "",
   device_name: "",
+  // Issue #95: default-on so a clock that just upgraded to a build with
+  // this setting keeps auto-updating until the user explicitly opts out.
+  auto_update_enabled: true,
+  auto_update_compile_disabled: false,
 };
 
 const config = signal<ConfigData | null>(null);
@@ -299,6 +303,15 @@ export function SettingsPage() {
         />
       </div>
 
+      <div class="form-section">
+        <h2>Updates</h2>
+        <AutoUpdateRow
+          enabled={cfg.auto_update_enabled !== false}
+          compileDisabled={!!cfg.auto_update_compile_disabled}
+          onChange={(v) => setVal("auto_update_enabled", v)}
+        />
+      </div>
+
       <div class="save-bar">
         <button
           class="btn"
@@ -346,6 +359,41 @@ function ToggleRow({
         onChange={(e) => onChange((e.target as HTMLInputElement).checked)}
       />
     </label>
+  );
+}
+
+function AutoUpdateRow({
+  enabled,
+  compileDisabled,
+  onChange,
+}: {
+  enabled: boolean;
+  compileDisabled: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  // When the firmware is built with WAGFAM_AUTO_UPDATE_DISABLED, the runtime
+  // toggle is force-overridden by the compile flag. Render the checkbox
+  // disabled (and unchecked, to reflect the effective state) and surface
+  // the build-flag note so the user understands why the toggle won't move.
+  return (
+    <div class="form-row" style="flex-direction: column; align-items: stretch;">
+      <label class="toggle-row" for="auto-update" style="width: 100%;">
+        <span class="form-label">Allow automatic updates</span>
+        <input
+          id="auto-update"
+          type="checkbox"
+          class="toggle"
+          checked={!compileDisabled && enabled}
+          disabled={compileDisabled}
+          onChange={(e) => onChange((e.target as HTMLInputElement).checked)}
+        />
+      </label>
+      <p class="form-note muted" style="margin-top: 4px;">
+        {compileDisabled
+          ? "Force-disabled at build time (WAGFAM_AUTO_UPDATE_DISABLED). The runtime toggle is ignored until the firmware is rebuilt without that flag."
+          : "Covers both firmware and SPA. The manual \"Update\" button in the SPA banner stays available either way."}
+      </p>
+    </div>
   );
 }
 
