@@ -143,6 +143,22 @@ also works — it 302-redirects to `/spa/`).
 All settings are managed through the web interface and persisted to the device filesystem.
 Editing `Settings.h` only affects defaults for a completely fresh start (filesystem erased).
 
+### Scroller font
+
+The marquee message font is selectable on the **Settings → Display** tab (issue #106). Five
+options ship with the firmware:
+
+| ID | Name | Notes |
+| --- | --- | --- |
+| 0 | Classic | Adafruit_GFX builtin 5×7 (the default) |
+| 1 | Block | Custom 5×7, blocky/all-caps — defined in `marquee/WagfamFont.h` |
+| 2 | Org | Adafruit_GFX `Org_01` — small retro pixel font |
+| 3 | Picopixel | Adafruit_GFX `Picopixel` — variable-width, 6px tall |
+| 4 | TomThumb | Adafruit_GFX `TomThumb` — 3×5 micro |
+
+The clock face always uses Classic; only the marquee scroll changes. The selection persists
+in `/conf.txt` (`scrollFont=` key) and is exposed via `display_font` on `/api/config`.
+
 ### API Keys
 
 | Key | Purpose | Required? |

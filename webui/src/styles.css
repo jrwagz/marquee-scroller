@@ -188,7 +188,8 @@ a {
 }
 
 .text-group input[type="text"],
-.text-group input[type="password"] {
+.text-group input[type="password"],
+.text-group select {
   width: 100%;
   padding: 0.35rem 0.5rem;
   border: 1px solid var(--border);

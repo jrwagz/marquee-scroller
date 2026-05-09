@@ -29,6 +29,29 @@
 #include "SecurityHelpers.h"
 #include "ConfigUpdateVerify.h"
 #include "HwVerifyTest.h"
+#include <Fonts/Picopixel.h>
+#include <Fonts/TomThumb.h>
+#include <Fonts/Org_01.h>
+#include "WagfamFont.h"
+
+// Scroller font registry (issue #106). Index 0 is the Adafruit_GFX builtin
+// 5x7 fixed-width font (passed as nullptr to setFont). Indices 1-4 are
+// custom GFXfonts. Each non-default font has a baseline y coordinate so
+// setCursor(x, y) places the glyph correctly within the 8-pixel-tall
+// matrix; the builtin font's path uses drawChar with y=0 instead.
+struct ScrollerFont {
+  const char *name;          // user-facing label
+  const GFXfont *font;       // nullptr = Adafruit builtin 5x7
+  int8_t baselineY;          // y coordinate for setCursor when rendering
+};
+static const ScrollerFont SCROLLER_FONTS[] = {
+  { "Classic",   nullptr,      0 },
+  { "Block",     &WagfamBlock, 7 },  // 5x7 cell, baseline at row 7
+  { "Org",       &Org_01,      6 },  // glyphs ~6px tall, baseline near bottom
+  { "Picopixel", &Picopixel,   5 },  // glyphs <=6px tall
+  { "TomThumb",  &TomThumb,    5 },  // 3x5 micro
+};
+static const int SCROLLER_FONT_COUNT = sizeof(SCROLLER_FONTS) / sizeof(SCROLLER_FONTS[0]);
 
 #define BASE_VERSION "4.2.0-wagfam"
 #ifdef BUILD_SUFFIX
@@ -92,8 +115,9 @@ static void doOtaFsFlash(const String &fsUrl);
 
 // LED Settings
 int spacer = 1;  // dots between letters
-int width = 5 + spacer; // The font width is 5 pixels + spacer
+int width = 5 + spacer; // The font width is 5 pixels + spacer (Classic font path)
 bool displayDirty = true; // true = framebuffer needs redraw before next write
+int displayFont = 0;  // index into SCROLLER_FONTS; persisted as scrollFont in /conf.txt
 
 // Matrix panel
 Max72xxPanel matrix = Max72xxPanel(pinCS, numberOfHorizontalDisplays, numberOfVerticalDisplays);
@@ -1381,6 +1405,7 @@ void savePersistentConfig() {
     f.println("CityID=" + geoLocation);
     f.println("ledIntensity=" + String(displayIntensity));
     f.println("scrollSpeed=" + String(displayScrollSpeed));
+    f.println("scrollFont=" + String(displayFont));
     f.println("is24hour=" + String(IS_24HOUR));
     f.println("isPM=" + String(IS_PM));
     f.println("isMetric=" + String(IS_METRIC));
@@ -1461,6 +1486,11 @@ void readPersistentConfig() {
     } else if (key == "scrollSpeed") {
       displayScrollSpeed = value.toInt();
       Serial.println("displayScrollSpeed=" + String(displayScrollSpeed));
+    } else if (key == "scrollFont") {
+      int v = value.toInt();
+      if (v < 0 || v >= SCROLLER_FONT_COUNT) v = 0;
+      displayFont = v;
+      Serial.println("displayFont=" + String(displayFont));
     } else if (key == "SHOW_CITY") {
       SHOW_CITY = value.toInt();
       Serial.println("SHOW_CITY=" + String(SHOW_CITY));
@@ -1502,7 +1532,43 @@ void readPersistentConfig() {
   bdayClient.updateBdayClient(WAGFAM_API_KEY,WAGFAM_DATA_URL);
 }
 
+// Render the marquee message using a non-default GFXfont. Adafruit's variable-
+// width custom-font path needs the whole string drawn each frame (we can't
+// indexed-draw character-by-character at fixed pitch), so we measure the
+// string with getTextBounds once and slide the cursor leftward by one pixel
+// per frame. setFont is restored to the builtin before returning so the
+// time display path stays on its fast fixed-width code.
+static void scrollMessageWaitCustomFont(const String &msg, const ScrollerFont &sf) {
+  matrix.setFont(sf.font);
+  matrix.setTextWrap(false);
+  matrix.setTextColor(HIGH, LOW);
+
+  int16_t x1, y1;
+  uint16_t w, h;
+  matrix.getTextBounds(msg, 0, sf.baselineY, &x1, &y1, &w, &h);
+  // total scroll distance: matrix width (off-screen on the right) + text
+  // width + small trailing margin so the last glyph fully exits on the left
+  int totalScroll = (int)w + matrix.width() + 1;
+
+  for (int i = 0; i < totalScroll; i++) {
+    matrix.fillScreen(LOW);
+    matrix.setCursor(matrix.width() - i, sf.baselineY);
+    matrix.print(msg);
+    matrix.write();
+    delay(displayScrollSpeed);
+  }
+
+  matrix.setFont();  // restore builtin for the clock face
+}
+
 void scrollMessageWait(const String &msg) {
+  if (displayFont > 0 && displayFont < SCROLLER_FONT_COUNT &&
+      SCROLLER_FONTS[displayFont].font != nullptr) {
+    scrollMessageWaitCustomFont(msg, SCROLLER_FONTS[displayFont]);
+    matrix.setCursor(0, 0);
+    return;
+  }
+
   for ( int i = 0 ; i < width * (int)msg.length() + matrix.width() - 1 - spacer; i++ ) {
     matrix.fillScreen(LOW);
 
@@ -1526,6 +1592,12 @@ void scrollMessageWait(const String &msg) {
 }
 
 void centerPrint(const String &msg, boolean extraStuff) {
+  // The clock face stays on the fast fixed-width Classic path regardless of
+  // the scroller font selection. The custom GFXfonts have variable-width
+  // glyphs and a different baseline, which would require rewriting the
+  // event-day border math; the time display reads fine as-is, and the
+  // selected scroller font still applies to the marquee message.
+  matrix.setFont();
   int x = (matrix.width() - (msg.length() * width)) / 2;
 
   // Print the static portions of the display before the main Message
@@ -1642,6 +1714,7 @@ void handleApiConfigGet(AsyncWebServerRequest *request) {
   doc["is_metric"] = IS_METRIC;
   doc["display_intensity"] = displayIntensity;
   doc["display_scroll_speed"] = displayScrollSpeed;
+  doc["display_font"] = displayFont;
   doc["minutes_between_data_refresh"] = minutesBetweenDataRefresh;
   doc["minutes_between_scrolling"] = minutesBetweenScrolling;
   doc["show_date"] = SHOW_DATE;
@@ -1672,6 +1745,7 @@ static void applyConfigJson(JsonObject json) {
   if (json["is_metric"].is<bool>()) IS_METRIC = json["is_metric"].as<bool>();
   if (json["display_intensity"].is<int>()) displayIntensity = constrain(json["display_intensity"].as<int>(), 0, 15);
   if (json["display_scroll_speed"].is<int>()) displayScrollSpeed = max(1, json["display_scroll_speed"].as<int>());
+  if (json["display_font"].is<int>()) displayFont = constrain(json["display_font"].as<int>(), 0, SCROLLER_FONT_COUNT - 1);
   if (json["minutes_between_data_refresh"].is<int>()) minutesBetweenDataRefresh = max(1, json["minutes_between_data_refresh"].as<int>());
   if (json["minutes_between_scrolling"].is<int>()) minutesBetweenScrolling = max(1, json["minutes_between_scrolling"].as<int>());
   if (json["show_date"].is<bool>()) SHOW_DATE = json["show_date"].as<bool>();
