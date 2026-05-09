@@ -191,6 +191,16 @@ export function SettingsPage() {
               <option value="2">Org (retro)</option>
               <option value="3">Picopixel (tiny)</option>
               <option value="4">TomThumb (3x5 micro)</option>
+              <option value="5">Tall (5x8 standard)</option>
+              <option value="6">Bold (5x8 thick)</option>
+              <option value="7">Slim (3x8 narrow)</option>
+              <option value="8">Outline (5x8 hollow)</option>
+              <option value="9">Digi (5x8 segment)</option>
+              <option value="10">Italic (5x8 leaned)</option>
+              <option value="11">Serif (5x8 slab)</option>
+              <option value="12">Pixel (5x8 halftone)</option>
+              <option value="13">Inverse (5x8 negative)</option>
+              <option value="14">Stencil (5x8 cut)</option>
             </select>
           </div>
         </div>

@@ -35,21 +35,33 @@
 #include "WagfamFont.h"
 
 // Scroller font registry (issue #106). Index 0 is the Adafruit_GFX builtin
-// 5x7 fixed-width font (passed as nullptr to setFont). Indices 1-4 are
+// 5x7 fixed-width font (passed as nullptr to setFont). Other entries are
 // custom GFXfonts. Each non-default font has a baseline y coordinate so
 // setCursor(x, y) places the glyph correctly within the 8-pixel-tall
-// matrix; the builtin font's path uses drawChar with y=0 instead.
+// matrix; the builtin font's path uses drawChar with y=0 instead. Fonts
+// with cell height 7 use baseline 7 (top row at y=0); cell height 8 uses
+// baseline 8 (top row at y=0, bottom at y=7 — every pixel of the matrix).
 struct ScrollerFont {
   const char *name;          // user-facing label
   const GFXfont *font;       // nullptr = Adafruit builtin 5x7
   int8_t baselineY;          // y coordinate for setCursor when rendering
 };
 static const ScrollerFont SCROLLER_FONTS[] = {
-  { "Classic",   nullptr,      0 },
-  { "Block",     &WagfamBlock, 7 },  // 5x7 cell, baseline at row 7
-  { "Org",       &Org_01,      6 },  // glyphs ~6px tall, baseline near bottom
-  { "Picopixel", &Picopixel,   5 },  // glyphs <=6px tall
-  { "TomThumb",  &TomThumb,    5 },  // 3x5 micro
+  { "Classic",   nullptr,        0 },
+  { "Block",     &WagfamBlock,   7 },  // 5x7 cell, baseline at row 7
+  { "Org",       &Org_01,        6 },  // glyphs ~6px tall, baseline near bottom
+  { "Picopixel", &Picopixel,     5 },  // glyphs <=6px tall
+  { "TomThumb",  &TomThumb,      5 },  // 3x5 micro
+  { "Tall",      &WagfamTall,    8 },  // 5x8 standard, distinct lowercase
+  { "Bold",      &WagfamBold,    8 },  // 5x8 thick double-stroke
+  { "Slim",      &WagfamSlim,    8 },  // 3x8 narrow, distinct lowercase
+  { "Outline",   &WagfamOutline, 8 },  // 5x8 hollow / signage
+  { "Digi",      &WagfamDigi,    8 },  // 5x8 segment-style, distinct lowercase
+  { "Italic",    &WagfamItalic,  8 },  // 5x8 leaned, distinct lowercase
+  { "Serif",     &WagfamSerif,   8 },  // 5x8 with slab serifs
+  { "Pixel",     &WagfamPixel,   8 },  // 5x8 deterministically halftoned
+  { "Inverse",   &WagfamInverse, 8 },  // 5x8 negative-space stylized
+  { "Stencil",   &WagfamStencil, 8 },  // 5x8 with stencil bridge cuts
 };
 static const int SCROLLER_FONT_COUNT = sizeof(SCROLLER_FONTS) / sizeof(SCROLLER_FONTS[0]);
 
