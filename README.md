@@ -178,10 +178,30 @@ The calendar client fetches a JSON array from the configured URL (HTTPS supporte
 ### Device Heartbeat
 
 Each calendar fetch includes device telemetry as URL query parameters (`chip_id`, `version`,
-`uptime`, `heap`, `rssi`, and `utc_offset_sec`). The UTC offset in seconds is derived
-automatically from the OpenWeatherMap response — no extra configuration needed. A backend
-can use these to identify and monitor all deployed clocks. Static JSON hosts ignore the query
-params.
+`uptime`, `heap`, `rssi`, `utc_offset_sec`, `lan_ip`, and `mdns_name`). The UTC offset in
+seconds is derived automatically from the OpenWeatherMap response. `lan_ip` is the device's
+private LAN IP (e.g. `192.168.1.42`) — distinct from the household NAT public IP that a
+backend would otherwise see in `X-Forwarded-For`. `mdns_name` is the sanitized Bonjour
+hostname (see below). A backend uses these to power a directory page that one-click jumps the
+user to `http://<mdns_name>.local/spa/` when they're on the same LAN. Static JSON hosts
+ignore the query params.
+
+### Local discovery (mDNS / Bonjour)
+
+The device advertises itself on the local network via mDNS so users don't have to look up
+its IP. After WiFi connects, the device publishes:
+
+- An `A` record at `<sanitized-name>.local` — open `http://<sanitized-name>.local/spa/` from
+  any device on the same LAN. The name is derived from the server-set `device_name` (e.g.
+  "Kitchen Clock" → `kitchen-clock.local`); when no name is set yet the fallback is
+  `wagfam-<chip-id>.local` so every clock has a stable label even before naming.
+- An `_http._tcp` service record (port 80) so generic HTTP browsers see the device.
+- A `_wagfam._tcp` service record with `chip` and `version` TXT entries — intended for a
+  future native app that enumerates every clock on the LAN with one Bonjour query.
+
+The current `mdns_name` is also exposed in `GET /api/status` for debugging. mDNS works
+reliably on iOS Safari, macOS, and Linux; Android Chrome support is patchy and may need a
+fallback to the LAN IP.
 
 ### Geo Location
 

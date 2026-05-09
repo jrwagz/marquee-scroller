@@ -27,6 +27,7 @@
 
 #include "Settings.h"
 #include "SecurityHelpers.h"
+#include "MdnsHelpers.h"
 #include "ConfigUpdateVerify.h"
 #include "HwVerifyTest.h"
 
@@ -54,6 +55,7 @@ void redirectToSpa(AsyncWebServerRequest *request);
 void handleNotFound(AsyncWebServerRequest *request);
 void configModeCallback (AsyncWiFiManager *myWiFiManager);
 void flashLED(int number, int delayTime);
+void startMdns();
 String getTempSymbol(bool forWeb = false);
 String getSpeedSymbol();
 String getPressureSymbol();
@@ -111,6 +113,10 @@ WagFamBdayClient bdayClient(WAGFAM_API_KEY, WAGFAM_DATA_URL);
 int bdayMessageIndex = 0;
 WagFamBdayClient::configValues serverConfig = {};
 String DEVICE_NAME = "";     // Human-friendly name assigned by server (not user-editable)
+String mdnsHostname = "";    // DNS-safe label registered with ESP8266mDNS (e.g.
+                             // "kitchen-clock"); resolves as "<name>.local" on
+                             // any mDNS-capable client. Recomputed in startMdns()
+                             // and again whenever DEVICE_NAME changes.
 String SPA_VERSION = "unknown"; // Read from /spa/version.json at boot; "unknown" if absent
 bool spaUpdateAvailable = false;
 String pendingSpaFsUrl = "";
@@ -567,6 +573,12 @@ void setup() {
   Serial.println("Use this URL : " + webAddress);
   scrollMessageWait(" v" + String(VERSION) + "  IP: " + WiFi.localIP().toString() + "  ");
 
+  // mDNS bringup — advertises the device under <mdnsHostname>.local so users
+  // (and a future native discovery app) can reach it without knowing the LAN
+  // IP. Also publishes a `_wagfam._tcp.local.` service record so a discovery
+  // pass on the LAN can enumerate every clock with one mDNS query.
+  startMdns();
+
   // Start NTP , although it can't do anything while in config mode or when no WiFi AP connected
   timeNTPsetup();
 
@@ -577,6 +589,10 @@ void setup() {
 // Main Loop
 //************************************************************
 void loop() {
+
+  // Pump the mDNS responder. The sync ESP8266mDNS variant needs this every
+  // loop iteration; the wrapper is cheap when no queries are pending.
+  MDNS.update();
 
   if (lastSecond != second()) {
     lastSecond = second();
@@ -1099,6 +1115,8 @@ void getWeatherData() //client function to send/receive GET request data.
   devInfo.freeHeap = ESP.getFreeHeap();
   devInfo.rssi = WiFi.RSSI();
   devInfo.utcOffsetSec = weatherClient.getTimeZoneSeconds();
+  devInfo.lanIp = WiFi.localIP().toString();
+  devInfo.mdnsName = mdnsHostname;
   serverConfig = bdayClient.updateData(devInfo);
   bool needToSave = false;
   // SEC-12: Validate server-pushed dataSourceUrl must use HTTPS
@@ -1123,6 +1141,9 @@ void getWeatherData() //client function to send/receive GET request data.
   if (serverConfig.deviceNameValid) {
     DEVICE_NAME = serverConfig.deviceName;
     needToSave = true;
+    // Re-derive and re-announce mDNS so `<name>.local` follows renames
+    // without waiting for a reboot.
+    startMdns();
   }
   if (needToSave) {
     Serial.println("Saving new config received from server");
@@ -1321,6 +1342,34 @@ void configModeCallback (AsyncWiFiManager *myWiFiManager) {
   Serial.println("To setup Wifi Configuration");
   scrollMessageWait("Please Connect to AP: " + String(myWiFiManager->getConfigPortalSSID()));
   centerPrint("wifi");
+}
+
+// Bring up mDNS responder + advertise the HTTP server at port 80 and a
+// `_wagfam._tcp` service record so a future native discovery app can
+// enumerate every clock with a single Bonjour query. Safe to call again
+// after DEVICE_NAME changes; we tear down and rebuild the responder so the
+// announced name actually updates (just calling MDNS.setHostname would
+// silently keep the old name on some Espressif builds).
+void startMdns() {
+  String chipId = String(ESP.getChipId(), HEX);
+  String label = mdnsLabelFor(DEVICE_NAME, chipId);
+  if (label == mdnsHostname && mdnsHostname.length() > 0) {
+    return;  // already running with the correct label
+  }
+  if (mdnsHostname.length() > 0) {
+    MDNS.end();
+  }
+  mdnsHostname = label;
+  if (!MDNS.begin(mdnsHostname.c_str())) {
+    Serial.println(F("[mDNS] begin() failed"));
+    mdnsHostname = "";
+    return;
+  }
+  MDNS.addService("http", "tcp", 80);
+  MDNS.addService("wagfam", "tcp", 80);
+  MDNS.addServiceTxt("wagfam", "tcp", "chip", chipId);
+  MDNS.addServiceTxt("wagfam", "tcp", "version", VERSION);
+  Serial.printf_P(PSTR("[mDNS] http://%s.local/\n"), mdnsHostname.c_str());
 }
 
 void flashLED(int number, int delayTime) {
@@ -1592,6 +1641,8 @@ void handleApiStatus(AsyncWebServerRequest *request) {
   doc["heap_fragmentation"] = ESP.getHeapFragmentation();
   doc["chip_id"] = String(ESP.getChipId(), HEX);
   doc["device_name"] = DEVICE_NAME;
+  doc["mdns_name"] = mdnsHostname;
+  doc["lan_ip"] = WiFi.localIP().toString();
   doc["flash_size"] = ESP.getFlashChipRealSize();
   doc["sketch_size"] = ESP.getSketchSize();
   doc["free_sketch_space"] = ESP.getFreeSketchSpace();
