@@ -94,6 +94,7 @@ export interface ConfigData {
   display_intensity: number;
   display_scroll_speed: number;
   display_font: number;
+  display_clock_style: number;
   minutes_between_data_refresh: number;
   minutes_between_scrolling: number;
   show_date: boolean;

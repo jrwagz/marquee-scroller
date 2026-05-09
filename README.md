@@ -170,11 +170,37 @@ Tall. Together they share the same `marquee/WagfamFont.h` PROGMEM bank generated
 | 13 | Inverse | Tall inverted in the top h-1 rows — stylized "block-art" aesthetic, not strict legibility |
 | 14 | Stencil | Tall with 1-pixel "bridge" cuts in the middle of every long vertical stroke |
 
-The clock face always uses Classic; only the marquee scroll changes. The selection persists
-in `/conf.txt` (`scrollFont=` key) and is exposed via `display_font` on `/api/config`. The
-six hand-designed custom fonts (Block, Tall, Bold, Slim, Outline, Digi) and the five derived
-ones (Italic, Serif, Pixel, Inverse, Stencil) all live in `marquee/WagfamFont.h`; re-run
-`scripts/gen_wagfam_font.py` after editing the GLYPHS dicts or the procedural transforms.
+The marquee font selection persists in `/conf.txt` (`scrollFont=` key) and is exposed via
+`display_font` on `/api/config`. The six hand-designed custom fonts (Block, Tall, Bold, Slim,
+Outline, Digi) and the five derived ones (Italic, Serif, Pixel, Inverse, Stencil) all live
+in `marquee/WagfamFont.h`; re-run `scripts/gen_wagfam_font.py` after editing the GLYPHS dicts
+or the procedural transforms.
+
+### Clock face style
+
+The clock face has its own selectable rendering — separate from the marquee font, since the
+clock only ever shows ten digits + a colon (and an AM/PM marker in 12-hour mode), which lets
+each style optimize layout for that constrained alphabet. Selection persists as `clockStyle=`
+in `/conf.txt` and is exposed as `display_clock_style` on `/api/config`. Render functions
+live in [`marquee/ClockStyles.h`](marquee/ClockStyles.h).
+
+| ID | Name | 12h | 24h | Notes |
+| --- | --- | --- | --- | --- |
+| 0 | Classic | ✓ | ✓ | Default — Adafruit 5x7 digits, blinking colon, top-right PM dot |
+| 1 | Mega | ✓ | ✗ | Bespoke 5x8 digits filling the full matrix height |
+| 2 | Banner | ✓ | ✓ | Classic digits + horizontal rule across the bottom row, corner notches up top |
+| 3 | Pulse | ✓ | ✓ | Classic digits with an animated heartbeat colon (alternates dot ↔ square every 500 ms) |
+| 4 | Stack | ✓ | ✗ | Hour digits in the top half, minute digits in the bottom half, custom 3x4 micro-digits |
+| 5 | Frame | ✓ | ✓ | Classic time inside a 1-pixel rectangular border |
+| 6 | Suffix | ✓ | ✗ | Classic digits at left, "AM"/"PM" rendered with TomThumb at right |
+| 7 | Inverse | ✓ | ✗ | Solid 32x7 plate with the time digits carved out as negative space |
+| 8 | Stencil | ✓ | ✓ | Bespoke 5x8 digits with a 1-pixel "bridge" cut at the midline of every vertical stem |
+| 9 | Italic | ✓ | ✗ | Bespoke 5x8 digits with the upper half row-shifted right by 1 column |
+| 10 | Dotted | ✓ | ✓ | Bespoke 5x8 digits with a `(x*7+y*13)%5==0` halftone speckle |
+
+Styles flagged as 12h-only fall back to **Classic** at render time when the device is in
+24-hour mode (no manual switching needed). The SPA Settings tab shows a hint when a 12h-only
+style is paired with a 24-hour clock.
 
 ### API Keys
 

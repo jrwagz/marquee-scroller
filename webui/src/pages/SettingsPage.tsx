@@ -37,6 +37,7 @@ const DEFAULTS: ConfigData = {
   display_intensity: 4,
   display_scroll_speed: 25,
   display_font: 0,
+  display_clock_style: 0,
   minutes_between_data_refresh: 15,
   minutes_between_scrolling: 1,
   show_date: false,
@@ -206,6 +207,41 @@ export function SettingsPage() {
               <option value="13">Inverse (5x8 negative)</option>
               <option value="14">Stencil (5x8 cut)</option>
             </select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <label class="form-label" for="clock-style">
+            Clock face
+          </label>
+          <div class="text-group">
+            <select
+              id="clock-style"
+              value={String(cfg.display_clock_style)}
+              onChange={(e) =>
+                setVal(
+                  "display_clock_style",
+                  +(e.target as HTMLSelectElement).value,
+                )
+              }
+            >
+              <option value="0">Classic (5x7 — both)</option>
+              <option value="1">Mega (5x8 huge — 12h only)</option>
+              <option value="2">Banner (Classic + bars — both)</option>
+              <option value="3">Pulse (animated colon — both)</option>
+              <option value="4">Stack (hour over minute — 12h only)</option>
+              <option value="5">Frame (bordered — both)</option>
+              <option value="6">Suffix (with AM/PM — 12h only)</option>
+              <option value="7">Inverse (negative space — 12h only)</option>
+              <option value="8">Stencil (bridge cuts — both)</option>
+              <option value="9">Italic (leaned — 12h only)</option>
+              <option value="10">Dotted (halftone — both)</option>
+            </select>
+            {cfg.is_24hour && [1, 4, 6, 7, 9].includes(cfg.display_clock_style) && (
+              <span class="form-note">
+                12h-only style — falls back to Classic in 24-hour mode
+              </span>
+            )}
           </div>
         </div>
 
