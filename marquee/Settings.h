@@ -109,6 +109,14 @@ int minutesBetweenScrolling = 1; // Time in minutes between scrolling data (defa
 int displayScrollSpeed = 25; // In milliseconds -- Configurable by the web UI (slow = 35, normal = 25, fast = 15, very fast = 5)
 // The : will always flash on and off as a seconds indicator
 
+// Issue #95: runtime opt-out for both firmware and SPA auto-update. Layered
+// on top of the existing WAGFAM_AUTO_UPDATE_DISABLED compile flag — when the
+// compile flag is set, AUTO_UPDATE_ENABLED is ignored (force-disabled). When
+// the compile flag is NOT set, the runtime toggle gates auto-update.
+// Default true preserves the prior behavior for clocks upgrading from a
+// build that didn't have this setting.
+boolean AUTO_UPDATE_ENABLED = true;
+
 
 // Display Settings
 // CLK -> D5 (SCK)

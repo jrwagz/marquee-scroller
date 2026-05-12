@@ -104,4 +104,13 @@ export interface ConfigData {
   show_highlow: boolean;
   ota_safe_url: string;
   device_name: string;
+  // Issue #95: runtime auto-update toggle. `auto_update_enabled` is the
+  // user-controllable boolean (default true) shown in Settings. The
+  // optional `auto_update_compile_disabled` is read-only metadata: when
+  // true, the firmware was built with WAGFAM_AUTO_UPDATE_DISABLED and the
+  // runtime toggle is ignored — the UI reflects this with a disabled
+  // checkbox + explanatory note. Both are optional so the SPA still
+  // renders against firmware that predates the field.
+  auto_update_enabled?: boolean;
+  auto_update_compile_disabled?: boolean;
 }

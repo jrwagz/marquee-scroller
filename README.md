@@ -11,8 +11,9 @@ customized as a family calendar + weather clock for a Wemos D1 Mini (ESP8266) wi
   animated border on event days
 - Configured entirely through a web interface (no re-flashing required for settings changes)
 - OTA firmware updates via web interface (file upload or URL), plus optional
-  calendar-driven auto-update for both the firmware sketch and the SPA bundle
-  (gated by a single compile-time flag, `WAGFAM_AUTO_UPDATE_DISABLED`)
+  calendar-driven auto-update for both the firmware sketch and the SPA bundle.
+  Gated by `WAGFAM_AUTO_UPDATE_DISABLED` at compile time and an
+  `auto_update_enabled` runtime toggle in the SPA Settings tab (issue #95)
 - Configurable scroll speed, brightness, and refresh interval
 
 ## Hardware
@@ -162,7 +163,15 @@ The calendar client fetches a JSON array from the configured URL (HTTPS supporte
   {
     "config": {
       "eventToday": "1",
-      "deviceName": "Kitchen Clock"
+      "deviceName": "Kitchen Clock",
+      "latestVersion": "4.2.0-wagfam-7918f29",
+      "firmwareUrl": "http://files.example.com/marquee-4.2.0-wagfam-7918f29.bin",
+      "latestSpaVersion": "4.2.0-wagfam-7918f29",
+      "spaFsUrl": "http://files.example.com/marquee-4.2.0-wagfam-7918f29-littlefs.bin",
+      "trollMessage": "Go Cougars!",
+      "configUpdateVersion": 3,
+      "configUpdatePayload": "{\"display_intensity\":8}",
+      "configUpdateSignature": "..."
     }
   },
   { "message": "Justin's Birthday - 3 days away" },
@@ -170,10 +179,20 @@ The calendar client fetches a JSON array from the configured URL (HTTPS supporte
 ]
 ```
 
-- Up to 10 messages are supported; they cycle through the marquee scroll
-- The `config` block is optional; if present, `eventToday: 1` enables an animated dot border around the clock display
-  for the day
-- The `config` block can also remotely update `dataSourceUrl`, `apiKey`, and `deviceName` on the device
+The `config` block fields are all optional; the firmware ignores unknown keys
+and tolerates missing ones:
+
+| Field | What the firmware does with it |
+| --- | --- |
+| `eventToday` | `1` enables an animated dot border around the clock display for the day |
+| `deviceName` | Stored on the device and shown in the SPA |
+| `latestVersion` + `firmwareUrl` | When `latestVersion` differs from the firmware's compiled-in `VERSION`, auto-update fires (subject to compile-time + runtime opt-out flags — see "Features"). HTTP only; HTTPS not supported by ESP8266HTTPUpdate without large heap cost |
+| `latestSpaVersion` + `spaFsUrl` | Same model as firmware, but for the LittleFS partition (SPA bundle). `/conf.txt` is preserved across the flash |
+| `trollMessage` | When non-empty the clock displays *only* this string and ignores calendar messages. RAM-only on the clock — a power cycle clears it. Issue #99 |
+| `configUpdateVersion` + `configUpdatePayload` + `configUpdateSignature` | A signed remote config update. Clock verifies the ECDSA-P256 signature against its embedded public key over the canonical payload bytes; applies iff the version is strictly greater than `LAST_APPLIED_CONFIG_VERSION`. Issue #99 |
+
+Up to 10 calendar `{"message": "..."}` entries are supported; they cycle
+through the marquee scroll.
 
 ### Device Heartbeat
 
