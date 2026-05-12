@@ -386,9 +386,16 @@ Dots travel: left edge top→bottom, bottom edge left→right, right edge bottom
 
 ### Font
 
-The built-in Adafruit GFX 5×7 font is used. Each character is 5 pixels wide + 1 pixel
-spacer = 6 pixels total. This is the `width` variable. `scrollMessageWait` uses `width` to
-compute how many scroll steps are needed for a given message.
+The clock face uses the built-in Adafruit GFX 5×7 font. Each character is 5 pixels wide + 1 pixel
+spacer = 6 pixels total. This is the `width` variable; `scrollMessageWait` uses `width` to
+compute how many scroll steps are needed for a given message in the default path.
+
+The marquee scroll font is selectable per device via the `display_font` config (issue #106).
+Five fonts are registered in `SCROLLER_FONTS[]` near the top of `marquee.ino`: Classic
+(default), Block (custom 5×7 from `marquee/WagfamFont.h`), Org, Picopixel, TomThumb.
+Non-default fonts go through `scrollMessageWaitCustomFont()`, which uses Adafruit_GFX's
+variable-width path (`setFont` + `setCursor` + `print`) and re-renders the whole message
+each frame. The clock face always uses Classic regardless of selection.
 
 ---
 

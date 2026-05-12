@@ -36,6 +36,7 @@ const DEFAULTS: ConfigData = {
   is_metric: false,
   display_intensity: 4,
   display_scroll_speed: 25,
+  display_font: 0,
   minutes_between_data_refresh: 15,
   minutes_between_scrolling: 1,
   show_date: false,
@@ -171,6 +172,40 @@ export function SettingsPage() {
               }
             />
             <span class="slider-val">{cfg.display_scroll_speed} ms</span>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <label class="form-label" for="font">
+            Scroller font
+          </label>
+          <div class="text-group">
+            <select
+              id="font"
+              value={String(cfg.display_font)}
+              onChange={(e) =>
+                setVal(
+                  "display_font",
+                  +(e.target as HTMLSelectElement).value,
+                )
+              }
+            >
+              <option value="0">Classic (5x7)</option>
+              <option value="1">Block (5x7, all caps)</option>
+              <option value="2">Org (retro)</option>
+              <option value="3">Picopixel (tiny)</option>
+              <option value="4">TomThumb (3x5 micro)</option>
+              <option value="5">Tall (5x8 standard)</option>
+              <option value="6">Bold (5x8 thick)</option>
+              <option value="7">Slim (3x8 narrow)</option>
+              <option value="8">Outline (5x8 hollow)</option>
+              <option value="9">Digi (5x8 segment)</option>
+              <option value="10">Italic (5x8 leaned)</option>
+              <option value="11">Serif (5x8 slab)</option>
+              <option value="12">Pixel (5x8 halftone)</option>
+              <option value="13">Inverse (5x8 negative)</option>
+              <option value="14">Stencil (5x8 cut)</option>
+            </select>
           </div>
         </div>
 
