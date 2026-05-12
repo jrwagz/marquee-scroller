@@ -129,12 +129,18 @@ and `firmwareUrl` in the `config` block:
   {
     "config": {
       "latestVersion": "3.08.0-wagfam",
-      "firmwareUrl": "http://example.com/marquee-v3.08.0.bin"
+      "firmwareUrl": "http://example.com/marquee-v3.08.0.bin",
+      "firmwareSha256": "deadbeef…64-hex-chars…00ff"
     }
   },
   { "message": "Justin's Birthday - 3 days away" }
 ]
 ```
+
+`firmwareSha256` (and the parallel `spaFsSha256` for the SPA-FS path) is
+optional (issue #96 phase A). When present, the device pre-fetches the
+binary, computes its SHA256, and aborts the flash on mismatch. When absent
+(older server), the device skips the check and proceeds — forward-compat.
 
 When `getWeatherData()` processes the server response, it compares `latestVersion`
 against the compiled `VERSION` macro. If they differ and all guard conditions pass,

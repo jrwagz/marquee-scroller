@@ -252,6 +252,18 @@ and tolerates missing ones:
 Up to 10 calendar `{"message": "..."}` entries are supported; they cycle
 through the marquee scroll.
 
+#### Pre-flash SHA256 verification (issue #96 phase A)
+
+When the server publishes `firmwareSha256` (alongside `firmwareUrl`) and/or
+`spaFsSha256` (alongside `spaFsUrl`) in the `config` block, the firmware
+streams the downloaded bytes through SHA256 and refuses to flash on
+mismatch. When the field is absent (older server), the firmware logs
+`[OTA] No expected SHA256 from server; skipping verification` and proceeds
+— forward-compat with deployments where the server hasn't been upgraded
+yet. See `verifyOtaSha256()` in `marquee/marquee.ino` and
+[`docs/OTA_STRATEGY.md`](docs/OTA_STRATEGY.md) for the verifier and its
+failure modes.
+
 ### Device Heartbeat
 
 Each calendar fetch includes device telemetry as URL query parameters (`chip_id`, `version`,

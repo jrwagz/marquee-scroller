@@ -59,12 +59,21 @@ class WagFamBdayClient: public JsonListener {
       String latestVersion;
       boolean firmwareUrlValid;
       String firmwareUrl;
+      // Issue #96 phase A: SHA256 hex of the firmware bin at firmwareUrl,
+      // published by the server. When valid, the firmware verifies this
+      // before flashing; when missing, verification is skipped (forward-
+      // compat with older server builds that don't publish the field).
+      boolean firmwareSha256Valid;
+      String firmwareSha256;
       boolean deviceNameValid;
       String deviceName;
       boolean latestSpaVersionValid;
       String latestSpaVersion;
       boolean spaFsUrlValid;
       String spaFsUrl;
+      // Issue #96 phase A: SHA256 hex of the SPA-FS bin at spaFsUrl.
+      boolean spaFsSha256Valid;
+      String spaFsSha256;
       // Issue #99: troll message override. When non-empty, marquee.ino
       // displays this string exclusively and skips the calendar messages.
       boolean trollMessageValid;
