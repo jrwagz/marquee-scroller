@@ -11,8 +11,9 @@ customized as a family calendar + weather clock for a Wemos D1 Mini (ESP8266) wi
   animated border on event days
 - Configured entirely through a web interface (no re-flashing required for settings changes)
 - OTA firmware updates via web interface (file upload or URL), plus optional
-  calendar-driven auto-update for both the firmware sketch and the SPA bundle
-  (gated by a single compile-time flag, `WAGFAM_AUTO_UPDATE_DISABLED`)
+  calendar-driven auto-update for both the firmware sketch and the SPA bundle.
+  Gated by `WAGFAM_AUTO_UPDATE_DISABLED` at compile time and an
+  `auto_update_enabled` runtime toggle in the SPA Settings tab (issue #95)
 - Configurable scroll speed, brightness, and refresh interval
 
 ## Hardware
