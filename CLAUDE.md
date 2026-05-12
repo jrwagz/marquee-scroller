@@ -407,20 +407,29 @@ ArduinoOTA was removed in v3.08.0-wagfam. Updates are now delivered six ways
 | --- | --- | --- | --- |
 | Sketch | Web upload (`/update`) | Manual via browser | No (use `/updateFromUrl` to revert) |
 | Sketch | URL update (`/updateFromUrl`) | Manual via web form | Boot-confirmation rollback |
-| Sketch | Auto-update (calendar JSON) | `latestVersion` != `VERSION`, gated by `WAGFAM_AUTO_UPDATE_DISABLED` | Boot-confirmation rollback |
+| Sketch | Auto-update (calendar JSON) | `latestVersion` != `VERSION`, gated by `WAGFAM_AUTO_UPDATE_DISABLED` + runtime `AUTO_UPDATE_ENABLED` | Boot-confirmation rollback |
 | LittleFS / SPA | Web upload (`/updatefs`) | Manual via browser | No |
 | LittleFS / SPA | URL update (`POST /api/spa/update-from-url`) | SPA "Update SPA" button | No |
-| LittleFS / SPA | Auto-update (calendar JSON) | `latestSpaVersion` != `SPA_VERSION`, gated by `WAGFAM_AUTO_UPDATE_DISABLED` | No |
+| LittleFS / SPA | Auto-update (calendar JSON) | `latestSpaVersion` != `SPA_VERSION`, gated by same compile + runtime flags | No |
 
-**Compile-time gate.** A single flag, `WAGFAM_AUTO_UPDATE_DISABLED`, gates *both*
-the sketch auto-update branch and the SPA auto-apply branch in `getWeatherData()`.
-Set via PlatformIO `-DWAGFAM_AUTO_UPDATE_DISABLED=1` (enabled in `[env:dev]` for
-local builds). The flag controls only the *automatic trigger* — SPA detection
-(`spa_update_available` in `/api/status`) and the manual "Update SPA" button in
-the SPA banner remain functional in every build configuration. The auto-apply
-SPA path also shares the same `OTA_CONFIRM_MS` / `otaConfirmAt` gates as
-firmware auto-update, so a SPA flash never fires inside the firmware-flash
-boot-confirmation window.
+**Two layered gates.** The auto-update path is controlled by two flags applied
+in order (issue #95):
+
+1. **Compile-time:** `WAGFAM_AUTO_UPDATE_DISABLED`. Set via PlatformIO
+   `-DWAGFAM_AUTO_UPDATE_DISABLED=1` (enabled in `[env:dev]`). Force-disables
+   auto-update; the runtime toggle is ignored. Surfaced as
+   `auto_update_compile_disabled` in `GET /api/config` so the SPA can show
+   the user that the build flag is in effect.
+2. **Runtime:** `AUTO_UPDATE_ENABLED` boolean in `/conf.txt`, exposed as
+   `auto_update_enabled` in `GET /api/config` and writable via
+   `POST /api/config`. SPA Settings tab → "Allow automatic updates" checkbox.
+   Defaults to `true`, so existing clocks keep auto-updating after upgrading.
+
+Both gate only the *automatic trigger* — SPA detection (`spa_update_available`
+in `/api/status`) and the manual "Update SPA" button in the SPA banner remain
+functional in every configuration. The auto-apply SPA path also shares the
+same `OTA_CONFIRM_MS` / `otaConfirmAt` gates as firmware auto-update, so a
+SPA flash never fires inside the firmware-flash boot-confirmation window.
 
 **Boot-confirmation rollback** applies to sketch flashes only. Before every
 sketch flash, a `/ota_pending.txt` record is written to LittleFS with the
