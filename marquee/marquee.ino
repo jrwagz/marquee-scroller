@@ -35,6 +35,7 @@
 #include <Fonts/TomThumb.h>
 #include <Fonts/Org_01.h>
 #include "WagfamFont.h"
+#include "ClockStyles.h"
 
 // Scroller font registry (issue #106). Index 0 is the Adafruit_GFX builtin
 // 5x7 fixed-width font (passed as nullptr to setFont). Other entries are
@@ -67,7 +68,7 @@ static const ScrollerFont SCROLLER_FONTS[] = {
 };
 static const int SCROLLER_FONT_COUNT = sizeof(SCROLLER_FONTS) / sizeof(SCROLLER_FONTS[0]);
 
-#define BASE_VERSION "4.3.0-wagfam"
+#define BASE_VERSION "4.4.0-wagfam"
 #ifdef BUILD_SUFFIX
 #define VERSION BASE_VERSION BUILD_SUFFIX
 #else
@@ -112,6 +113,7 @@ void savePersistentConfig();
 void readPersistentConfig();
 void scrollMessageWait(const String &msg);
 void centerPrint(const String &msg, bool extraStuff = false);
+void renderClockFace(bool isRefresh = false);
 String EncodeUrlSpecialChars(const char *msg);
 void performAutoUpdate(const String &firmwareUrl);
 void checkOtaRollback();
@@ -144,6 +146,7 @@ int spacer = 1;  // dots between letters
 int width = 5 + spacer; // The font width is 5 pixels + spacer (Classic font path)
 bool displayDirty = true; // true = framebuffer needs redraw before next write
 int displayFont = 0;  // index into SCROLLER_FONTS; persisted as scrollFont in /conf.txt
+int displayClockStyle = 0;  // index into CLOCK_STYLES; persisted as clockStyle in /conf.txt
 
 // Matrix panel
 Max72xxPanel matrix = Max72xxPanel(pinCS, numberOfHorizontalDisplays, numberOfVerticalDisplays);
@@ -671,11 +674,17 @@ void loop() {
     processEveryMinute();
   }
 
-  // Only redraw when content has changed. The animated event-day border
-  // requires per-frame updates, so always redraw when it is active.
-  if (displayDirty || WAGFAM_EVENT_TODAY) {
+  // Only redraw when content has changed. The animated event-day border, the
+  // animated colon, and animated clock styles (Pulse) all need per-frame
+  // updates, so always redraw when those are active.
+  bool needsAnimatedFrame = WAGFAM_EVENT_TODAY;
+  if (displayClockStyle > 0 && displayClockStyle < CLOCK_STYLE_COUNT) {
+    needsAnimatedFrame = true;  // bespoke styles repaint every frame
+  }
+  if (displayDirty || needsAnimatedFrame) {
     matrix.fillScreen(LOW);
-    centerPrint(displayTime, true);
+    renderClockFace(/*isRefresh=*/false);
+    matrix.write();
     displayDirty = false;
   }
 
@@ -1124,7 +1133,7 @@ void getWeatherData() //client function to send/receive GET request data.
 
   // pull the weather data
   if (firstTimeSync != 0) {
-    centerPrint(displayTime, true);
+    renderClockFace(/*isRefresh=*/true);
   } else {
     centerPrint("...");
   }
@@ -1506,6 +1515,7 @@ void savePersistentConfig() {
     f.println("ledIntensity=" + String(displayIntensity));
     f.println("scrollSpeed=" + String(displayScrollSpeed));
     f.println("scrollFont=" + String(displayFont));
+    f.println("clockStyle=" + String(displayClockStyle));
     f.println("is24hour=" + String(IS_24HOUR));
     f.println("isPM=" + String(IS_PM));
     f.println("isMetric=" + String(IS_METRIC));
@@ -1592,6 +1602,11 @@ void readPersistentConfig() {
       if (v < 0 || v >= SCROLLER_FONT_COUNT) v = 0;
       displayFont = v;
       Serial.println("displayFont=" + String(displayFont));
+    } else if (key == "clockStyle") {
+      int v = value.toInt();
+      if (v < 0 || v >= CLOCK_STYLE_COUNT) v = 0;
+      displayClockStyle = v;
+      Serial.println("displayClockStyle=" + String(displayClockStyle));
     } else if (key == "SHOW_CITY") {
       SHOW_CITY = value.toInt();
       Serial.println("SHOW_CITY=" + String(SHOW_CITY));
@@ -1693,6 +1708,21 @@ void scrollMessageWait(const String &msg) {
     delay(displayScrollSpeed);
   }
   matrix.setCursor(0, 0);
+}
+
+// Dispatch a single clock-face frame through the active style in CLOCK_STYLES.
+// Falls back to Classic when the selected style doesn't declare support for
+// the current 12h/24h mode. The caller is responsible for fillScreen/write
+// — we just paint into the buffer so the boot path can layer extras (the
+// data-refresh dot indicator) on top.
+void renderClockFace(bool isRefresh) {
+  const ClockStyle &style = CLOCK_STYLES[
+      (displayClockStyle >= 0 && displayClockStyle < CLOCK_STYLE_COUNT)
+      ? displayClockStyle : 0];
+  bool ok = IS_24HOUR ? style.supports24h : style.supports12h;
+  const ClockStyle &active = ok ? style : CLOCK_STYLES[0];
+  active.render(hourFormat12(), hour(), minute(), isPM(),
+                isRefresh, WAGFAM_EVENT_TODAY);
 }
 
 void centerPrint(const String &msg, boolean extraStuff) {
@@ -1827,6 +1857,7 @@ void handleApiConfigGet(AsyncWebServerRequest *request) {
   doc["display_intensity"] = displayIntensity;
   doc["display_scroll_speed"] = displayScrollSpeed;
   doc["display_font"] = displayFont;
+  doc["display_clock_style"] = displayClockStyle;
   doc["minutes_between_data_refresh"] = minutesBetweenDataRefresh;
   doc["minutes_between_scrolling"] = minutesBetweenScrolling;
   doc["show_date"] = SHOW_DATE;
@@ -1863,6 +1894,7 @@ static void applyConfigJson(JsonObject json) {
   if (json["display_intensity"].is<int>()) displayIntensity = constrain(json["display_intensity"].as<int>(), 0, 15);
   if (json["display_scroll_speed"].is<int>()) displayScrollSpeed = max(1, json["display_scroll_speed"].as<int>());
   if (json["display_font"].is<int>()) displayFont = constrain(json["display_font"].as<int>(), 0, SCROLLER_FONT_COUNT - 1);
+  if (json["display_clock_style"].is<int>()) displayClockStyle = constrain(json["display_clock_style"].as<int>(), 0, CLOCK_STYLE_COUNT - 1);
   if (json["minutes_between_data_refresh"].is<int>()) minutesBetweenDataRefresh = max(1, json["minutes_between_data_refresh"].as<int>());
   if (json["minutes_between_scrolling"].is<int>()) minutesBetweenScrolling = max(1, json["minutes_between_scrolling"].as<int>());
   if (json["show_date"].is<bool>()) SHOW_DATE = json["show_date"].as<bool>();

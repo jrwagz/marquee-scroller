@@ -30,6 +30,7 @@ All firmware source lives in [marquee/](marquee/):
 | [MdnsHelpers.h/.cpp](marquee/MdnsHelpers.h) | DNS-safe hostname sanitization for mDNS bringup (extracted so it's testable under tests/native/) |
 | [timeNTP.h/.cpp](marquee/timeNTP.h) | NTP time sync; exposes `timeNTPsetup()`, `getNtpTime()`, and `set_timeZoneSec()` |
 | [timeStr.h/.cpp](marquee/timeStr.h) | Time formatting helpers (zero-pad, day/month names, etc.) |
+| [ClockStyles.h](marquee/ClockStyles.h) | Selectable clock-face render styles, registry with 12h/24h compatibility flags, and per-style render functions (Mega, Stack, Pulse, Frame, etc.) |
 
 The SPA frontend lives in [`webui/`](webui/) — Vite + Preact + signals + TypeScript.
 See [`docs/WEBUI.md`](docs/WEBUI.md) for the build pipeline and deploy story. Bundle is
