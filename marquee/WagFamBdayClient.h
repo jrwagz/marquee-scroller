@@ -35,6 +35,14 @@ struct DeviceInfo {
     uint32_t freeHeap;
     int32_t rssi;
     int32_t utcOffsetSec; // UTC offset in seconds from OWM (e.g. -21600 for UTC-6)
+    String lanIp;         // Device's LAN IP (e.g. "192.168.1.42") — server uses
+                          // this to redirect a directory click to the device.
+                          // Differs from server-side X-Forwarded-For, which
+                          // captures only the household NAT public IP.
+    String mdnsName;      // Sanitized mDNS hostname (e.g. "kitchen-clock"),
+                          // suffixed `.local` by the resolver. Stable across
+                          // DHCP reassignments — preferred over lanIp by the
+                          // directory page's redirect target.
 };
 
 class WagFamBdayClient: public JsonListener {
