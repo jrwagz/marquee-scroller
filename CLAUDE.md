@@ -27,6 +27,7 @@ All firmware source lives in [marquee/](marquee/):
 | [OpenWeatherMapClient.h/.cpp](marquee/OpenWeatherMapClient.h) | Fetches weather from OpenWeatherMap API using ArduinoJson |
 | [WagFamBdayClient.h/.cpp](marquee/WagFamBdayClient.h) | Fetches family calendar JSON over HTTPS; parses messages and remote config |
 | [SecurityHelpers.h/.cpp](marquee/SecurityHelpers.h) | Firmware URL validation, path protection, domain extraction |
+| [MdnsHelpers.h/.cpp](marquee/MdnsHelpers.h) | DNS-safe hostname sanitization for mDNS bringup (extracted so it's testable under tests/native/) |
 | [timeNTP.h/.cpp](marquee/timeNTP.h) | NTP time sync; exposes `timeNTPsetup()`, `getNtpTime()`, and `set_timeZoneSec()` |
 | [timeStr.h/.cpp](marquee/timeStr.h) | Time formatting helpers (zero-pad, day/month names, etc.) |
 

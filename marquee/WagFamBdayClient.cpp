@@ -65,6 +65,14 @@ WagFamBdayClient::configValues WagFamBdayClient::updateData(const DeviceInfo& de
   url += String(device.rssi);
   url += "&utc_offset_sec=";
   url += String(device.utcOffsetSec);
+  if (device.lanIp.length() > 0) {
+    url += "&lan_ip=";
+    url += device.lanIp;
+  }
+  if (device.mdnsName.length() > 0) {
+    url += "&mdns_name=";
+    url += device.mdnsName;
+  }
 
   Serial.println("Getting Birthdays Data");
   Serial.println(F("[calendar URL redacted]"));
