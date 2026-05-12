@@ -32,7 +32,7 @@ Run:  ./scripts/gen_wagfam_font.py
 """
 from __future__ import annotations
 
-import sys
+from collections.abc import Callable
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -5172,7 +5172,7 @@ class FontDef:
         x_advance: int,
         glyphs: dict[str, str],
         lowercase_strategy: str,  # "fallback" | "distinct"
-        derive_from: tuple[str, "Callable"] | None = None,
+        derive_from: tuple[str, Callable] | None = None,
     ) -> None:
         self.name = name
         self.width = width
