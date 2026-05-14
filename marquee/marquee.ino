@@ -264,6 +264,17 @@ static const char MINIMAL_PAGE_CLOSE[] PROGMEM =
 extern "C" uint32_t _FS_start;
 extern "C" uint32_t _FS_end;
 
+// Did the most recent /update or /updatefs request actually receive upload
+// bytes? AsyncWebServer fires the completion handler whether or not the
+// upload callback ever ran — so a POST with an empty/missing multipart body
+// (e.g. a cross-origin browser request killed by mixed-content blocking)
+// would otherwise reach `!Update.hasError()` and reboot the device without
+// having written any flash. The completion handler checks these flags and
+// returns 400 instead, so callers see a real failure. ESP8266 is
+// effectively single-threaded so file-scope flags are safe here.
+bool sketchUploadStarted = false;
+bool fsUploadStarted = false;
+
 // OTA auto-update state
 String OTA_SAFE_URL = "";       // URL of last confirmed firmware; rollback target for next update
 uint32_t otaConfirmAt = 0;      // non-zero: millis() target after which the pending update is confirmed
@@ -496,6 +507,22 @@ void setup() {
   // Update.runAsync(true) lets the flash routine cooperate with the async event loop.
   server.on("/update", HTTP_POST,
     [](AsyncWebServerRequest *request) {
+      // No upload bytes ever arrived — almost always a cross-origin browser
+      // block (HTTPS page POSTing to HTTP clock IP is mixed-content; the
+      // browser kills the request before any bytes leave). Without this
+      // guard the device would reboot regardless and the caller would
+      // assume the flash succeeded.
+      if (!sketchUploadStarted) {
+        Serial.println(F("[OTA] /update POST received no upload bytes — likely cross-origin browser block"));
+        AsyncWebServerResponse *response = request->beginResponse(400, F("text/plain"),
+          F("FAIL: no upload bytes received. If this came from a cross-origin browser request "
+            "(e.g. an HTTPS admin page POSTing to this http:// clock), mixed-content protection "
+            "likely killed it silently. Try uploading directly from http://<clock-ip>/update."));
+        response->addHeader(F("Connection"), F("close"));
+        request->send(response);
+        return;
+      }
+      sketchUploadStarted = false; // reset for the next request
       bool ok = !Update.hasError();
       AsyncWebServerResponse *response = request->beginResponse(200, F("text/plain"), ok ? F("OK") : F("FAIL"));
       response->addHeader(F("Connection"), F("close"));
@@ -509,6 +536,7 @@ void setup() {
     },
     [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
       if (index == 0) {
+        sketchUploadStarted = true;
         Serial.printf_P(PSTR("[OTA] Upload start: %s\n"), filename.c_str());
         Update.runAsync(true);
         uint32_t maxSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
@@ -558,6 +586,22 @@ void setup() {
   // called to remount the (still-old) FS so the device stays usable.
   server.on("/updatefs", HTTP_POST,
     [](AsyncWebServerRequest *request) {
+      // No upload bytes ever arrived — almost always cross-origin mixed-content
+      // blocking from an HTTPS admin page (e.g. wagfam-server's /lan/ tool).
+      // The upload callback never fired, so /conf.txt was NOT backed up and
+      // LittleFS was NOT unmounted — the old FS is still intact. Return 400
+      // so the caller surfaces a real error instead of "success → reboot".
+      if (!fsUploadStarted) {
+        Serial.println(F("[OTAFS] /updatefs POST received no upload bytes — likely cross-origin browser block"));
+        AsyncWebServerResponse *response = request->beginResponse(400, F("text/plain"),
+          F("FAIL: no upload bytes received. If this came from a cross-origin browser request "
+            "(e.g. an HTTPS admin page POSTing to this http:// clock), mixed-content protection "
+            "likely killed it silently. Try uploading directly from http://<clock-ip>/updatefs."));
+        response->addHeader(F("Connection"), F("close"));
+        request->send(response);
+        return;
+      }
+      fsUploadStarted = false; // reset for the next request
       bool ok = !Update.hasError();
       AsyncWebServerResponse *response = request->beginResponse(200, F("text/plain"),
         ok ? F("OK — device will reboot to mount the new FS") : F("FAIL — see serial log"));
@@ -589,6 +633,7 @@ void setup() {
     },
     [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
       if (index == 0) {
+        fsUploadStarted = true;
         Serial.printf_P(PSTR("[OTAFS] Upload start: %s\n"), filename.c_str());
         // Save /conf.txt before unmounting so it survives the FS wipe.
         fsUpdateConfBackup = "";
