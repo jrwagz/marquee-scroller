@@ -9,6 +9,7 @@ import type {
   TasmotaSchedulesData,
   TasmotaScheduleInput,
   TasmotaPowerProbeData,
+  TasmotaDiscoveryData,
 } from "./types";
 
 const POST_HEADERS = {
@@ -123,3 +124,12 @@ export const runTasmotaScheduleNow = (id: number): Promise<ActionAck> =>
 
 export const getTasmotaPower = (ip: string): Promise<TasmotaPowerProbeData> =>
   apiFetch<TasmotaPowerProbeData>(`/api/tasmota/power?ip=${encodeURIComponent(ip)}`);
+
+export const startTasmotaDiscovery = (): Promise<unknown> =>
+  apiFetch<unknown>("/api/tasmota/discover", {
+    method: "POST",
+    headers: POST_HEADERS,
+  });
+
+export const getTasmotaDiscoveryState = (): Promise<TasmotaDiscoveryData> =>
+  apiFetch<TasmotaDiscoveryData>("/api/tasmota/discover/state");

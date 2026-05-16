@@ -27,11 +27,14 @@ import {
   deleteTasmotaSchedule,
   runTasmotaScheduleNow,
   getTasmotaPower,
+  startTasmotaDiscovery,
+  getTasmotaDiscoveryState,
 } from "../api";
 import type {
   TasmotaDevice,
   TasmotaSchedule,
   TasmotaActionStr,
+  TasmotaDiscoveryData,
 } from "../types";
 
 // ── shared state ──────────────────────────────────────────────────────────
@@ -46,6 +49,14 @@ const livePower = signal<Record<string, string>>({});
 
 const schedules = signal<TasmotaSchedule[]>([]);
 const schedulesError = signal<string | null>(null);
+
+// Auto-discovery state — open/visible while a scan is in flight or results
+// are waiting to be imported.
+const discoveryOpen = signal(false);
+const discoveryData = signal<TasmotaDiscoveryData | null>(null);
+const discoveryError = signal<string | null>(null);
+// Which IPs the user has checked to import. Keyed by IP so we don't double-add.
+const discoveryPicked = signal<Set<string>>(new Set());
 
 // Edit form state (works for both create and update — `editingId` switches).
 const editingId = signal<number | null>(null);
@@ -98,6 +109,76 @@ async function saveDevices() {
   } catch (e) {
     devicesError.value = (e as Error).message;
   }
+}
+
+// ── auto-discovery ────────────────────────────────────────────────────────
+
+let discoveryPollHandle: ReturnType<typeof setInterval> | null = null;
+
+function stopDiscoveryPoll() {
+  if (discoveryPollHandle !== null) {
+    clearInterval(discoveryPollHandle);
+    discoveryPollHandle = null;
+  }
+}
+
+async function pollDiscovery() {
+  try {
+    const data = await getTasmotaDiscoveryState();
+    discoveryData.value = data;
+    if (data.progress.state === "done" || data.progress.state === "idle") {
+      stopDiscoveryPoll();
+    }
+  } catch (e) {
+    discoveryError.value = (e as Error).message;
+    stopDiscoveryPoll();
+  }
+}
+
+async function startDiscovery() {
+  discoveryError.value = null;
+  discoveryPicked.value = new Set();
+  discoveryOpen.value = true;
+  try {
+    await startTasmotaDiscovery();
+  } catch (e) {
+    discoveryError.value = (e as Error).message;
+    return;
+  }
+  // Fast poll while running. The full scan takes ~60s on a /24; polling
+  // every 2s gives ~30 progress updates, which is enough for the bar.
+  void pollDiscovery();
+  stopDiscoveryPoll();
+  discoveryPollHandle = setInterval(() => void pollDiscovery(), 2000);
+}
+
+function toggleDiscoveryPick(ip: string) {
+  const next = new Set(discoveryPicked.value);
+  if (next.has(ip)) next.delete(ip);
+  else next.add(ip);
+  discoveryPicked.value = next;
+}
+
+function importPickedDiscoveries() {
+  const data = discoveryData.value;
+  if (!data) return;
+  // Add picked IPs to the devices list (skip ones already there).
+  const existing = new Set(devices.value.map((d) => d.ip));
+  const additions = data.results
+    .filter((r) => discoveryPicked.value.has(r.ip) && !existing.has(r.ip))
+    .map<TasmotaDevice>((r) => ({
+      ip: r.ip,
+      name: r.name || r.hostname || "",
+    }));
+  if (additions.length === 0) {
+    discoveryOpen.value = false;
+    return;
+  }
+  devices.value = [...devices.value, ...additions];
+  devicesDirty.value = true;
+  discoveryOpen.value = false;
+  discoveryData.value = null;
+  discoveryPicked.value = new Set();
 }
 
 // ── cron picker helpers ──────────────────────────────────────────────────
@@ -173,6 +254,7 @@ export function SchedulesPage() {
   return (
     <div class="schedules-page">
       <DevicesCard />
+      {discoveryOpen.value && <DiscoveryCard />}
       <ScheduleFormCard />
       <SchedulesListCard />
     </div>
@@ -186,6 +268,7 @@ function DevicesCard() {
       <header class="card-header">
         <h2>Tasmota devices</h2>
         <button onClick={() => void reloadDevices()}>Refresh</button>
+        <button onClick={() => void startDiscovery()}>Auto-detect</button>
       </header>
       <p class="muted">
         IPs the clock controls. Schedules reference these by IP. Power state
@@ -271,6 +354,114 @@ function DevicesCard() {
           {devicesDirty.value ? "Save changes" : "No changes"}
         </button>
       </div>
+    </section>
+  );
+}
+
+function DiscoveryCard() {
+  const data = discoveryData.value;
+  const progress = data?.progress;
+  const isRunning = progress?.state === "mdns" || progress?.state === "scanning";
+  const isDone = progress?.state === "done";
+  // Scan progress %: based on /24 sweep (1..254). mDNS phase happens first
+  // and is fast, so we show 0% during it; ping sweep dominates the bar.
+  const pct = progress?.state === "scanning"
+    ? Math.min(100, Math.round((progress.pings_sent / 254) * 100))
+    : isDone ? 100 : 0;
+  const existingIps = new Set(devices.value.map((d) => d.ip));
+
+  return (
+    <section class="card">
+      <header class="card-header">
+        <h2>Auto-detect Tasmota devices</h2>
+        <button onClick={() => {
+          stopDiscoveryPoll();
+          discoveryOpen.value = false;
+          discoveryData.value = null;
+        }}>
+          Close
+        </button>
+      </header>
+
+      <p class="muted">
+        Combined mDNS query + /24 ping sweep + HTTP probe. Catches Tasmotas
+        regardless of <code>SetOption55</code> setting. Full scan takes
+        ~60s on a typical /24.
+      </p>
+
+      {discoveryError.value && (
+        <p class="error">{discoveryError.value}</p>
+      )}
+
+      {progress && (
+        <div class="scan-progress">
+          {isRunning ? `Scanning… ${progress.pings_sent}/254 sent, ` : ""}
+          {progress.tasmota_found} Tasmota(s) found,
+          {" "}{progress.pings_responded} hosts responding to ping.
+          <div class="progress-bar">
+            <div class="progress-fill" style={{ width: `${pct}%` }} />
+          </div>
+        </div>
+      )}
+
+      {data && data.results.length > 0 && (
+        <>
+          <table class="net-table">
+            <thead>
+              <tr>
+                <th />
+                <th>IP</th>
+                <th>Name</th>
+                <th>Hostname</th>
+                <th>Source</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.results.map((d) => {
+                const already = existingIps.has(d.ip);
+                const picked = discoveryPicked.value.has(d.ip);
+                return (
+                  <tr key={d.ip} class={already ? "row-muted" : ""}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={picked || already}
+                        disabled={already}
+                        onChange={() => toggleDiscoveryPick(d.ip)}
+                      />
+                    </td>
+                    <td><code>{d.ip}</code></td>
+                    <td>{d.name || <span class="muted">—</span>}</td>
+                    <td><code>{d.hostname || ""}</code></td>
+                    <td>
+                      <span class={`tag tag-${d.source}`}>{d.source}</span>
+                      {already && <span class="muted small"> · already added</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+
+          <div class="card-actions">
+            <button
+              class="primary"
+              disabled={discoveryPicked.value.size === 0}
+              onClick={importPickedDiscoveries}
+            >
+              Import {discoveryPicked.value.size} selected
+            </button>
+          </div>
+        </>
+      )}
+
+      {isDone && data?.results.length === 0 && (
+        <p class="muted">
+          No Tasmotas found. If you know a specific IP is a Tasmota,
+          add it manually in the Devices table above — auto-detect
+          can miss devices behind aggressive firewalls.
+        </p>
+      )}
     </section>
   );
 }

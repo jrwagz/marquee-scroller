@@ -37,6 +37,7 @@
 #include "WagfamFont.h"
 #include "ClockStyles.h"
 #include "TasmotaScheduler.h"
+#include "TasmotaDiscovery.h"
 #include <bearssl/bearssl_hash.h>  // br_sha256_* for OTA SHA256 verification (issue #96)
 
 // Scroller font registry (issue #106). Index 0 is the Adafruit_GFX builtin
@@ -155,6 +156,9 @@ void handleApiTasmotaSchedulePut(AsyncWebServerRequest *request, JsonVariant &js
 void handleApiTasmotaScheduleDelete(AsyncWebServerRequest *request);
 void handleApiTasmotaScheduleRun(AsyncWebServerRequest *request);
 void handleApiTasmotaPower(AsyncWebServerRequest *request);
+void handleApiTasmotaDiscoverStart(AsyncWebServerRequest *request);
+void handleApiTasmotaDiscoverState(AsyncWebServerRequest *request);
+void handleApiTasmotaDiscoverProbe(AsyncWebServerRequest *request);
 
 // LED Settings
 int spacer = 1;  // dots between letters
@@ -473,6 +477,9 @@ void setup() {
   server.on("/api/tasmota/schedules", HTTP_DELETE, handleApiTasmotaScheduleDelete);  // ?id=N
   server.on("/api/tasmota/schedule/run", HTTP_POST, handleApiTasmotaScheduleRun);    // ?id=N
   server.on("/api/tasmota/power", HTTP_GET, handleApiTasmotaPower);                  // ?ip=X
+  server.on("/api/tasmota/discover", HTTP_POST, handleApiTasmotaDiscoverStart);
+  server.on("/api/tasmota/discover/state", HTTP_GET, handleApiTasmotaDiscoverState);
+  server.on("/api/tasmota/discover/probe", HTTP_GET, handleApiTasmotaDiscoverProbe);  // ?ip=X
 
   // CORS preflight (OPTIONS) for every JSON-API endpoint. Without these,
   // the firmware's onNotFound 302-redirects unmatched OPTIONS to /spa/,
@@ -760,6 +767,10 @@ void loop() {
   // Pump the mDNS responder. The sync ESP8266mDNS variant needs this every
   // loop iteration; the wrapper is cheap when no queries are pending.
   MDNS.update();
+
+  // Drive Tasmota discovery state machine. No-op when idle/done; dispatches
+  // one ICMP ping (or one deferred HTTP probe) per call when running.
+  TasmotaDiscovery::tick();
 
   if (lastSecond != second()) {
     lastSecond = second();
@@ -2536,6 +2547,74 @@ void handleApiTasmotaPower(AsyncWebServerRequest *request) {
   doc["ip"] = ip;
   doc["power"] = state;
   doc["reachable"] = state.length() > 0;
+  sendJsonResponse(request, 200, doc);
+}
+
+// ── Tasmota auto-discovery ────────────────────────────────────────────────
+
+static void discoveryProgressToJson(const TasmotaDiscovery::DiscoveryProgress &p,
+                                     JsonObject obj) {
+  switch (p.state) {
+    case TasmotaDiscovery::DiscoveryState::Idle:      obj["state"] = "idle"; break;
+    case TasmotaDiscovery::DiscoveryState::MdnsQuery: obj["state"] = "mdns"; break;
+    case TasmotaDiscovery::DiscoveryState::PingSweep: obj["state"] = "scanning"; break;
+    case TasmotaDiscovery::DiscoveryState::Done:      obj["state"] = "done"; break;
+  }
+  obj["id"] = p.id;
+  obj["started_at_ms"] = p.startedAtMs;
+  obj["completed_at_ms"] = p.completedAtMs;
+  obj["pings_sent"] = p.pingsSent;
+  obj["pings_responded"] = p.pingsResponded;
+  obj["http_probed"] = p.httpProbed;
+  obj["tasmota_found"] = p.tasmotaFound;
+  obj["current_host_byte"] = p.currentHostByte;
+  obj["base_ip"] = p.baseIp.toString();
+}
+
+static void discoveryResultsToJson(JsonArray arr) {
+  for (int i = 0; i < TasmotaDiscovery::resultCount(); i++) {
+    const auto &d = TasmotaDiscovery::getResult(i);
+    JsonObject o = arr.add<JsonObject>();
+    o["ip"] = d.ip;
+    o["name"] = d.name;
+    o["hostname"] = d.hostname;
+    o["source"] = d.source ? d.source : "scan";
+  }
+}
+
+void handleApiTasmotaDiscoverStart(AsyncWebServerRequest *request) {
+  if (!TasmotaDiscovery::start()) {
+    return sendJsonError(request, 409, "discovery already in progress (or WiFi not joined)");
+  }
+  JsonDocument doc;
+  JsonObject obj = doc.to<JsonObject>();
+  discoveryProgressToJson(TasmotaDiscovery::getProgress(), obj);
+  sendJsonResponse(request, 202, doc);
+}
+
+void handleApiTasmotaDiscoverState(AsyncWebServerRequest *request) {
+  JsonDocument doc;
+  JsonObject obj = doc["progress"].to<JsonObject>();
+  discoveryProgressToJson(TasmotaDiscovery::getProgress(), obj);
+  JsonArray arr = doc["results"].to<JsonArray>();
+  discoveryResultsToJson(arr);
+  sendJsonResponse(request, 200, doc);
+}
+
+void handleApiTasmotaDiscoverProbe(AsyncWebServerRequest *request) {
+  if (!request->hasParam("ip")) {
+    return sendJsonError(request, 400, "missing ?ip=X");
+  }
+  String ip = request->getParam("ip")->value();
+  TasmotaDiscovery::DiscoveredDevice d = {};
+  bool ok = TasmotaDiscovery::probeOne(ip.c_str(), &d);
+  JsonDocument doc;
+  doc["ip"] = ip;
+  doc["is_tasmota"] = ok;
+  if (ok) {
+    doc["name"] = d.name;
+    doc["hostname"] = d.hostname;
+  }
   sendJsonResponse(request, 200, doc);
 }
 

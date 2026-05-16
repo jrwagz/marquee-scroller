@@ -159,3 +159,28 @@ export interface TasmotaPowerProbeData {
   power: string;       // "ON" | "OFF" | "" if unreachable
   reachable: boolean;
 }
+
+export interface TasmotaDiscoveryProgress {
+  state: "idle" | "mdns" | "scanning" | "done";
+  id: number;
+  started_at_ms: number;
+  completed_at_ms: number;
+  pings_sent: number;
+  pings_responded: number;
+  http_probed: number;
+  tasmota_found: number;
+  current_host_byte: number;
+  base_ip: string;
+}
+
+export interface TasmotaDiscoveredDevice {
+  ip: string;
+  name: string;
+  hostname: string;
+  source: "mdns" | "scan" | "manual";
+}
+
+export interface TasmotaDiscoveryData {
+  progress: TasmotaDiscoveryProgress;
+  results: TasmotaDiscoveredDevice[];
+}

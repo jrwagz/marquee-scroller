@@ -531,3 +531,26 @@ input[type="checkbox"].toggle:checked::after {
 .error-inline { color: var(--red, #b00020); font-size: 0.85em; }
 .link-btn { background: none; border: none; color: var(--accent, #0066cc); cursor: pointer; padding: 0; font: inherit; }
 .link-btn:hover { text-decoration: underline; }
+
+/* ── Discovery card ─────────────────────────────────────────────────────── */
+
+.progress-bar {
+  height: 6px; background: var(--border); border-radius: 3px;
+  overflow: hidden; margin-top: 0.5rem;
+}
+.progress-fill {
+  height: 100%; background: var(--accent, #0066cc); transition: width 0.3s;
+}
+.scan-progress {
+  font-size: 0.9rem; padding: 0.5rem 0.75rem;
+  background: var(--bg-elev, rgba(0, 0, 0, 0.03));
+  border-radius: 4px; margin: 0.5rem 0;
+}
+.net-table .row-muted { opacity: 0.5; }
+.tag {
+  display: inline-block; padding: 0.1rem 0.4rem; border-radius: 999px;
+  font-size: 0.75rem; background: var(--border);
+}
+.tag-mdns { background: rgba(102, 187, 106, 0.2); color: #2e7d32; }
+.tag-scan { background: rgba(96, 165, 250, 0.2); color: #1565c0; }
+.tag-manual { background: rgba(245, 158, 11, 0.2); color: #b45309; }
