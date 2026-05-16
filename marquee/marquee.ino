@@ -159,6 +159,7 @@ void handleApiTasmotaPower(AsyncWebServerRequest *request);
 void handleApiTasmotaDiscoverStart(AsyncWebServerRequest *request);
 void handleApiTasmotaDiscoverState(AsyncWebServerRequest *request);
 void handleApiTasmotaDiscoverProbe(AsyncWebServerRequest *request);
+void handleApiTasmotaDiscoveredGet(AsyncWebServerRequest *request);
 
 // LED Settings
 int spacer = 1;  // dots between letters
@@ -480,6 +481,10 @@ void setup() {
   server.on("/api/tasmota/discover", HTTP_POST, handleApiTasmotaDiscoverStart);
   server.on("/api/tasmota/discover/state", HTTP_GET, handleApiTasmotaDiscoverState);
   server.on("/api/tasmota/discover/probe", HTTP_GET, handleApiTasmotaDiscoverProbe);  // ?ip=X
+  // /api/tasmota/discovered returns the LAST persisted scan (from /tasmota_discovered.json).
+  // Designed for a future server-side fetcher that snapshots this per-clock
+  // so a replacement clock can have its inventory restored.
+  server.on("/api/tasmota/discovered", HTTP_GET, handleApiTasmotaDiscoveredGet);
 
   // CORS preflight (OPTIONS) for every JSON-API endpoint. Without these,
   // the firmware's onNotFound 302-redirects unmatched OPTIONS to /spa/,
@@ -820,6 +825,21 @@ void processEverySecond() {
       || lastRefreshDataTimestamp == 0) {
     weatherRefreshRequested = false;
     getWeatherData();
+
+    // Server-flag-driven Tasmota discovery. When the calendar response
+    // sets `runTasmotaDiscovery: true`, kick a scan; results land in
+    // /tasmota_discovered.json when the scan completes (handled by
+    // TasmotaDiscovery's main-loop tick). The flag is pulse-shape — the
+    // server sets it when it wants a fresh inventory (e.g. after the user
+    // claims a replacement clock and the server needs to compare what the
+    // new hardware sees against the upload from the old one).
+    if (serverConfig.runTasmotaDiscovery) {
+      if (TasmotaDiscovery::start()) {
+        Serial.println(F("[discover] server-requested scan kicked off"));
+      } else {
+        Serial.println(F("[discover] server-requested scan skipped — already running"));
+      }
+    }
   }
 
   // Honor a deferred restart. The deadline gives the async TCP layer time to
@@ -2616,6 +2636,24 @@ void handleApiTasmotaDiscoverProbe(AsyncWebServerRequest *request) {
     doc["hostname"] = d.hostname;
   }
   sendJsonResponse(request, 200, doc);
+}
+
+// Returns the raw /tasmota_discovered.json file. Empty body if no scan has
+// ever completed. Designed for a future server-side cron that snapshots
+// every clock's known-Tasmota inventory — keeps user-visible state durable
+// even when the clock's LittleFS gets wiped (replacement hardware, fresh
+// flash, FS corruption). The server can later push this inventory back
+// down via a new config-block field on the calendar response.
+void handleApiTasmotaDiscoveredGet(AsyncWebServerRequest *request) {
+  AsyncResponseStream *resp = request->beginResponseStream(F("application/json"));
+  setCorsHeaders(request, resp);
+  String body = TasmotaDiscovery::readPersistedResults();
+  if (body.length() == 0) {
+    resp->print("{\"results\":[],\"scan_id\":0}");
+  } else {
+    resp->print(body);
+  }
+  request->send(resp);
 }
 
 // ── End REST API ────────────────────────────────────────────────────────────

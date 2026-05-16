@@ -226,6 +226,14 @@ void WagFamBdayClient::value(String value) {
       currentConfig.configUpdatePayload = value;
     } else if (currentKey == "configUpdateSignature") {
       currentConfig.configUpdateSignature = value;
+    } else if (currentKey == "runTasmotaDiscovery") {
+      // Tasmota auto-discovery trigger. Accept the common truthy spellings
+      // ("1", "true") since the static JSON can come from any tooling. The
+      // flag is pulse-shape — applied once per calendar refresh, then
+      // cleared by the next refresh's parse (this struct is re-zeroed at
+      // the start of each fetch).
+      currentConfig.runTasmotaDiscovery =
+        (value == "1" || value.equalsIgnoreCase("true"));
     }
   } else if (currentKey == "message") {
     if (messageCounter >= 10) {

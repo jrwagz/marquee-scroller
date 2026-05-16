@@ -88,4 +88,17 @@ const DiscoveredDevice &getResult(int i);
 // true and populates *out on success.
 bool probeOne(const char *ip, DiscoveredDevice *out);
 
+// Persistence — last completed scan is written to LittleFS at
+// /tasmota_discovered.json when the state machine transitions
+// PingSweep → Done. The file format is a JSON object with `scan_id`,
+// `completed_at_unix`, and `results` (array of {ip, name, hostname,
+// source}). This is the source of truth for the planned upload-to-server
+// feature: the server fetches it, persists per-clock, and pushes it back
+// down on a hardware replacement so the user doesn't lose their inventory.
+constexpr const char *DISCOVERED_FILE = "/tasmota_discovered.json";
+
+// Read the persisted scan results (raw JSON). Returns empty string if no
+// scan has been written yet. Caller passes to the SPA as-is.
+String readPersistedResults();
+
 }  // namespace TasmotaDiscovery

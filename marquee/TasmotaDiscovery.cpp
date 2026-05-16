@@ -5,6 +5,8 @@
 #include <ESP8266HTTPClient.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
+#include <LittleFS.h>
+#include <TimeLib.h>
 
 namespace TasmotaDiscovery {
 
@@ -194,6 +196,36 @@ void tick() {
     g_progress.completedAtMs = millis();
     Serial.printf_P(PSTR("[discover] done — %d Tasmota(s) on %d responders\n"),
                     (int)g_progress.tasmotaFound, (int)g_progress.pingsResponded);
+
+    // Persist results to LittleFS. Source of truth for the planned
+    // upload-to-server feature: the server periodically fetches this
+    // file, snapshots it per-clock, and on a replacement clock pushes
+    // it back down via a future config-block field so the user's
+    // inventory survives a flash wipe / hardware swap.
+    File f = LittleFS.open(DISCOVERED_FILE, "w");
+    if (f) {
+      JsonDocument doc;
+      doc["scan_id"] = g_progress.id;
+      doc["completed_at_unix"] = (uint32_t)now();
+      doc["completed_at_ms"] = g_progress.completedAtMs;
+      doc["pings_sent"] = g_progress.pingsSent;
+      doc["pings_responded"] = g_progress.pingsResponded;
+      JsonArray arr = doc["results"].to<JsonArray>();
+      for (int i = 0; i < g_resultCount; i++) {
+        const auto &d = g_results[i];
+        JsonObject o = arr.add<JsonObject>();
+        o["ip"] = d.ip;
+        o["name"] = d.name;
+        o["hostname"] = d.hostname;
+        o["source"] = d.source ? d.source : "scan";
+      }
+      serializeJson(doc, f);
+      f.close();
+      Serial.printf_P(PSTR("[discover] wrote %d device(s) to %s\n"),
+                      g_resultCount, DISCOVERED_FILE);
+    } else {
+      Serial.println(F("[discover] FAILED to open discovered file for write"));
+    }
     return;
   }
 
@@ -232,6 +264,14 @@ bool probeOne(const char *ip, DiscoveredDevice *out) {
   d.source = "manual";
   *out = d;
   return true;
+}
+
+String readPersistedResults() {
+  File f = LittleFS.open(DISCOVERED_FILE, "r");
+  if (!f) return String();
+  String s = f.readString();
+  f.close();
+  return s;
 }
 
 }  // namespace TasmotaDiscovery

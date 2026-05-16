@@ -86,6 +86,14 @@ class WagFamBdayClient: public JsonListener {
       int configUpdateVersion;
       String configUpdatePayload;
       String configUpdateSignature;
+      // Tasmota auto-discovery trigger. When the server sets this to true,
+      // the clock kicks off one TasmotaDiscovery scan after the calendar
+      // refresh completes and writes the results to
+      // /tasmota_discovered.json. Pulse-shape: the server reverting the
+      // flag stops *future* scans but doesn't undo a stored result. The
+      // server can use this to backfill stored discovery state on a
+      // replacement clock (see TasmotaDiscovery roadmap notes).
+      boolean runTasmotaDiscovery;
     } configValues;
 
     WagFamBdayClient(String ApiKey, String JsonDataSourceUrl);
