@@ -36,6 +36,7 @@
 #include <Fonts/Org_01.h>
 #include "WagfamFont.h"
 #include "ClockStyles.h"
+#include "TasmotaScheduler.h"
 #include <bearssl/bearssl_hash.h>  // br_sha256_* for OTA SHA256 verification (issue #96)
 
 // Scroller font registry (issue #106). Index 0 is the Adafruit_GFX builtin
@@ -145,6 +146,15 @@ void handleApiFsDelete(AsyncWebServerRequest *request);
 void handleApiFsList(AsyncWebServerRequest *request);
 void handleApiSpaUpdateFromUrl(AsyncWebServerRequest *request, JsonVariant &json);
 static void doOtaFsFlash(const String &fsUrl, const String &expectedSha256);
+// Tasmota scheduler
+void handleApiTasmotaDevicesGet(AsyncWebServerRequest *request);
+void handleApiTasmotaDevicesPut(AsyncWebServerRequest *request, JsonVariant &json);
+void handleApiTasmotaSchedulesGet(AsyncWebServerRequest *request);
+void handleApiTasmotaSchedulesPost(AsyncWebServerRequest *request, JsonVariant &json);
+void handleApiTasmotaSchedulePut(AsyncWebServerRequest *request, JsonVariant &json);
+void handleApiTasmotaScheduleDelete(AsyncWebServerRequest *request);
+void handleApiTasmotaScheduleRun(AsyncWebServerRequest *request);
+void handleApiTasmotaPower(AsyncWebServerRequest *request);
 
 // LED Settings
 int spacer = 1;  // dots between letters
@@ -345,6 +355,15 @@ void setup() {
 
   readPersistentConfig();
 
+  // Tasmota scheduler — pull devices + schedules + parsed cron masks into
+  // RAM from LittleFS. Idempotent; missing files are fine.
+  TasmotaScheduler::loadFromDisk();
+  if (!TasmotaScheduler::runCronSelfTest()) {
+    Serial.println(F("[tasmota] WARNING: cron self-test failed — see lines above"));
+  } else {
+    Serial.println(F("[tasmota] cron self-test ok"));
+  }
+
   {
     File vf = LittleFS.open("/spa/version.json", "r");
     if (vf) {
@@ -446,6 +465,14 @@ void setup() {
   server.on("/api/fs/read", HTTP_GET, handleApiFsRead);
   server.on("/api/fs/delete", HTTP_DELETE, handleApiFsDelete);
   server.on("/api/fs/list", HTTP_GET, handleApiFsList);
+  // Tasmota scheduler — devices list, schedules CRUD, immediate-run + power
+  // state probe. AsyncCallbackJsonWebHandler wires the JSON-body POSTs and
+  // PUTs further below.
+  server.on("/api/tasmota/devices", HTTP_GET, handleApiTasmotaDevicesGet);
+  server.on("/api/tasmota/schedules", HTTP_GET, handleApiTasmotaSchedulesGet);
+  server.on("/api/tasmota/schedules", HTTP_DELETE, handleApiTasmotaScheduleDelete);  // ?id=N
+  server.on("/api/tasmota/schedule/run", HTTP_POST, handleApiTasmotaScheduleRun);    // ?id=N
+  server.on("/api/tasmota/power", HTTP_GET, handleApiTasmotaPower);                  // ?ip=X
 
   // CORS preflight (OPTIONS) for every JSON-API endpoint. Without these,
   // the firmware's onNotFound 302-redirects unmatched OPTIONS to /spa/,
@@ -484,6 +511,26 @@ void setup() {
     spaUpdatePost->setMethod(HTTP_POST);
     spaUpdatePost->setMaxContentLength(512);
     server.addHandler(spaUpdatePost);
+  }
+  // Tasmota JSON-body endpoints. 2KB max each — the schedule object is ~200
+  // bytes, devices list of 16 is ~600 bytes, so 2KB has comfortable headroom.
+  {
+    auto *devicesPut = new AsyncCallbackJsonWebHandler("/api/tasmota/devices", handleApiTasmotaDevicesPut);
+    devicesPut->setMethod(HTTP_PUT);
+    devicesPut->setMaxContentLength(2048);
+    server.addHandler(devicesPut);
+  }
+  {
+    auto *schedulesPost = new AsyncCallbackJsonWebHandler("/api/tasmota/schedules", handleApiTasmotaSchedulesPost);
+    schedulesPost->setMethod(HTTP_POST);
+    schedulesPost->setMaxContentLength(2048);
+    server.addHandler(schedulesPost);
+  }
+  {
+    auto *schedulePut = new AsyncCallbackJsonWebHandler("/api/tasmota/schedules", handleApiTasmotaSchedulePut);
+    schedulePut->setMethod(HTTP_PUT);
+    schedulePut->setMaxContentLength(2048);
+    server.addHandler(schedulePut);
   }
 
   // GET /update — file-upload form. Self-contained page (no SPA chrome,
@@ -808,6 +855,12 @@ void processEverySecond() {
 }
 
 void processEveryMinute() {
+  // Tasmota scheduler tick. Runs first so a scheduled action fires at the
+  // top of its target minute regardless of how long the marquee scroll
+  // below takes. Cheap when no schedules are active (just a few bitset
+  // tests against the current minute).
+  TasmotaScheduler::tickMinute(now());
+
   // Issue #99: troll-message override — bypass everything else (weather error,
   // birthday rotation, weather/calendar mix) and scroll only the troll. This
   // intentionally fires every cycle, with no displayRefreshCount gating, so
@@ -2323,6 +2376,166 @@ void handleApiFsList(AsyncWebServerRequest *request) {
 
   listFilesRecursive("/", files);
 
+  sendJsonResponse(request, 200, doc);
+}
+
+// ── Tasmota scheduler API ───────────────────────────────────────────────────
+
+static const char *actionToCmdLocal(TasmotaScheduler::TasmotaAction a) {
+  using TasmotaScheduler::TasmotaAction;
+  switch (a) {
+    case TasmotaAction::On:     return "ON";
+    case TasmotaAction::Off:    return "OFF";
+    case TasmotaAction::Toggle: return "TOGGLE";
+  }
+  return "OFF";
+}
+
+static TasmotaScheduler::TasmotaAction parseActionLocal(const char *s) {
+  using TasmotaScheduler::TasmotaAction;
+  if (!s) return TasmotaAction::Off;
+  if (!strcasecmp(s, "ON")) return TasmotaAction::On;
+  if (!strcasecmp(s, "TOGGLE")) return TasmotaAction::Toggle;
+  return TasmotaAction::Off;
+}
+
+void handleApiTasmotaDevicesGet(AsyncWebServerRequest *request) {
+  JsonDocument doc;
+  JsonArray arr = doc["devices"].to<JsonArray>();
+  for (int i = 0; i < TasmotaScheduler::deviceCount(); i++) {
+    const auto &d = TasmotaScheduler::getDevice(i);
+    JsonObject o = arr.add<JsonObject>();
+    o["ip"] = d.ip;
+    o["name"] = d.name;
+  }
+  doc["max"] = TasmotaScheduler::MAX_DEVICES;
+  sendJsonResponse(request, 200, doc);
+}
+
+void handleApiTasmotaDevicesPut(AsyncWebServerRequest *request, JsonVariant &json) {
+  if (!json.is<JsonArray>()) {
+    return sendJsonError(request, 400, "body must be a JSON array of {ip, name}");
+  }
+  JsonArray arr = json.as<JsonArray>();
+  TasmotaScheduler::TasmotaDevice buf[TasmotaScheduler::MAX_DEVICES];
+  int n = 0;
+  for (JsonObject o : arr) {
+    if (n >= TasmotaScheduler::MAX_DEVICES) break;
+    const char *ip = o["ip"] | "";
+    if (!ip || !*ip) continue;
+    strlcpy(buf[n].ip, ip, TasmotaScheduler::IP_STR_MAX);
+    strlcpy(buf[n].name, o["name"] | "", TasmotaScheduler::NAME_STR_MAX);
+    n++;
+  }
+  if (!TasmotaScheduler::replaceDevices(buf, n)) {
+    return sendJsonError(request, 500, "couldn't persist devices");
+  }
+  return handleApiTasmotaDevicesGet(request);
+}
+
+static void scheduleToJson(const TasmotaScheduler::Schedule &s, JsonObject o) {
+  o["id"] = s.id;
+  o["ip"] = s.ip;
+  o["cron"] = s.cronStr;
+  o["action"] = actionToCmdLocal(s.action);
+  o["enabled"] = s.enabled;
+  o["name"] = s.name;
+  o["cron_valid"] = s.mask.valid;
+}
+
+void handleApiTasmotaSchedulesGet(AsyncWebServerRequest *request) {
+  JsonDocument doc;
+  JsonArray arr = doc["schedules"].to<JsonArray>();
+  for (int i = 0; i < TasmotaScheduler::scheduleCount(); i++) {
+    JsonObject o = arr.add<JsonObject>();
+    scheduleToJson(TasmotaScheduler::getSchedule(i), o);
+  }
+  doc["max"] = TasmotaScheduler::MAX_SCHEDULES;
+  sendJsonResponse(request, 200, doc);
+}
+
+static bool jsonToSchedule(JsonObject body, TasmotaScheduler::Schedule *out) {
+  using namespace TasmotaScheduler;
+  const char *ip = body["ip"] | "";
+  const char *cron = body["cron"] | "";
+  if (!ip || !*ip) return false;
+  if (!cron || !*cron) return false;
+  strlcpy(out->ip, ip, IP_STR_MAX);
+  strlcpy(out->cronStr, cron, CRON_STR_MAX);
+  strlcpy(out->name, body["name"] | "", NAME_STR_MAX);
+  out->action = parseActionLocal(body["action"] | "OFF");
+  out->enabled = body["enabled"] | true;
+  return true;
+}
+
+void handleApiTasmotaSchedulesPost(AsyncWebServerRequest *request, JsonVariant &json) {
+  if (!json.is<JsonObject>()) {
+    return sendJsonError(request, 400, "body must be a JSON object");
+  }
+  TasmotaScheduler::Schedule s = {};
+  if (!jsonToSchedule(json.as<JsonObject>(), &s)) {
+    return sendJsonError(request, 400, "schedule needs at least ip + cron");
+  }
+  uint32_t id = TasmotaScheduler::createSchedule(s);
+  if (id == 0) {
+    return sendJsonError(request, 400, "couldn't create schedule (bad cron, or limit reached)");
+  }
+  JsonDocument doc;
+  doc["id"] = id;
+  sendJsonResponse(request, 201, doc);
+}
+
+void handleApiTasmotaSchedulePut(AsyncWebServerRequest *request, JsonVariant &json) {
+  if (!request->hasParam("id")) {
+    return sendJsonError(request, 400, "missing ?id=N");
+  }
+  uint32_t id = (uint32_t)request->getParam("id")->value().toInt();
+  if (!json.is<JsonObject>()) {
+    return sendJsonError(request, 400, "body must be a JSON object");
+  }
+  TasmotaScheduler::Schedule s = {};
+  if (!jsonToSchedule(json.as<JsonObject>(), &s)) {
+    return sendJsonError(request, 400, "schedule needs at least ip + cron");
+  }
+  if (!TasmotaScheduler::updateSchedule(id, s)) {
+    return sendJsonError(request, 404, "schedule not found or cron invalid");
+  }
+  sendJsonOk(request, "updated");
+}
+
+void handleApiTasmotaScheduleDelete(AsyncWebServerRequest *request) {
+  if (!request->hasParam("id")) {
+    return sendJsonError(request, 400, "missing ?id=N");
+  }
+  uint32_t id = (uint32_t)request->getParam("id")->value().toInt();
+  if (!TasmotaScheduler::deleteSchedule(id)) {
+    return sendJsonError(request, 404, "schedule not found");
+  }
+  sendJsonOk(request, "deleted");
+}
+
+void handleApiTasmotaScheduleRun(AsyncWebServerRequest *request) {
+  if (!request->hasParam("id")) {
+    return sendJsonError(request, 400, "missing ?id=N");
+  }
+  uint32_t id = (uint32_t)request->getParam("id")->value().toInt();
+  int rc = TasmotaScheduler::runScheduleNow(id);
+  if (rc < 0) {
+    return sendJsonError(request, 502, "schedule not found or Tasmota unreachable");
+  }
+  sendJsonOk(request, "fired");
+}
+
+void handleApiTasmotaPower(AsyncWebServerRequest *request) {
+  if (!request->hasParam("ip")) {
+    return sendJsonError(request, 400, "missing ?ip=X");
+  }
+  String ip = request->getParam("ip")->value();
+  String state = TasmotaScheduler::readTasmotaPower(ip.c_str());
+  JsonDocument doc;
+  doc["ip"] = ip;
+  doc["power"] = state;
+  doc["reachable"] = state.length() > 0;
   sendJsonResponse(request, 200, doc);
 }
 

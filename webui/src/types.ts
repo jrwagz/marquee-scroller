@@ -116,3 +116,46 @@ export interface ConfigData {
   auto_update_enabled?: boolean;
   auto_update_compile_disabled?: boolean;
 }
+
+// ── Tasmota scheduler ──────────────────────────────────────────────────────
+
+export interface TasmotaDevice {
+  ip: string;
+  name: string;
+}
+
+export interface TasmotaDevicesData {
+  devices: TasmotaDevice[];
+  max: number;
+}
+
+export type TasmotaActionStr = "ON" | "OFF" | "TOGGLE";
+
+export interface TasmotaSchedule {
+  id: number;
+  ip: string;
+  cron: string;
+  action: TasmotaActionStr;
+  enabled: boolean;
+  name: string;
+  cron_valid: boolean;
+}
+
+export interface TasmotaSchedulesData {
+  schedules: TasmotaSchedule[];
+  max: number;
+}
+
+export interface TasmotaScheduleInput {
+  ip: string;
+  cron: string;
+  action: TasmotaActionStr;
+  enabled?: boolean;
+  name?: string;
+}
+
+export interface TasmotaPowerProbeData {
+  ip: string;
+  power: string;       // "ON" | "OFF" | "" if unreachable
+  reachable: boolean;
+}
