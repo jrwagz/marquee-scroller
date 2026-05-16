@@ -150,6 +150,8 @@ void handleApiNetworkNeighbors(AsyncWebServerRequest *request);
 void handleApiNetworkScanStart(AsyncWebServerRequest *request);
 void handleApiNetworkScanState(AsyncWebServerRequest *request);
 void handleApiNetworkScanHistory(AsyncWebServerRequest *request);
+void handleApiNetworkProbe(AsyncWebServerRequest *request, JsonVariant &json);
+void handleApiNetworkProbeAudit(AsyncWebServerRequest *request);
 void handleApiSpaUpdateFromUrl(AsyncWebServerRequest *request, JsonVariant &json);
 static void doOtaFsFlash(const String &fsUrl, const String &expectedSha256);
 
@@ -457,6 +459,7 @@ void setup() {
   server.on("/api/network/scan", HTTP_POST, handleApiNetworkScanStart);
   server.on("/api/network/scan/state", HTTP_GET, handleApiNetworkScanState);
   server.on("/api/network/scan/history", HTTP_GET, handleApiNetworkScanHistory);
+  server.on("/api/network/probe/audit", HTTP_GET, handleApiNetworkProbeAudit);
 
   // CORS preflight (OPTIONS) for every JSON-API endpoint. Without these,
   // the firmware's onNotFound 302-redirects unmatched OPTIONS to /spa/,
@@ -495,6 +498,16 @@ void setup() {
     spaUpdatePost->setMethod(HTTP_POST);
     spaUpdatePost->setMaxContentLength(512);
     server.addHandler(spaUpdatePost);
+  }
+  {
+    // POST /api/network/probe — JSON body { url, method, body?, timeout_ms? }.
+    // Phase 3 of the LAN-visibility feature. Capped at 4KB total body so a
+    // PUT/POST payload to a LAN device can carry a reasonable JSON blob
+    // without us holding too much in heap during the probe.
+    auto *probePost = new AsyncCallbackJsonWebHandler("/api/network/probe", handleApiNetworkProbe);
+    probePost->setMethod(HTTP_POST);
+    probePost->setMaxContentLength(4096);
+    server.addHandler(probePost);
   }
 
   // GET /update — file-upload form. Self-contained page (no SPA chrome,
@@ -2440,6 +2453,66 @@ void handleApiNetworkScanHistory(AsyncWebServerRequest *request) {
   AsyncResponseStream *resp = request->beginResponseStream(F("application/x-ndjson"));
   setCorsHeaders(request, resp);
   resp->print(readScanHistory());
+  request->send(resp);
+}
+
+// ── Phase 3: HTTP probe ───────────────────────────────────────────────────
+
+// Cap concurrent probes at 1: a probe is synchronous and can hold the loop
+// for the full timeoutMs. Letting two queue up would mean a 6s+ stall and
+// risk watchdog noise. The 1-probe semaphore is `g_probeInFlight`.
+static bool g_probeInFlight = false;
+
+void handleApiNetworkProbe(AsyncWebServerRequest *request, JsonVariant &json) {
+  if (!authorizeNetworkRequest("probe")) {
+    return sendJsonError(request, 401, "unauthorized");
+  }
+  if (g_probeInFlight) {
+    return sendJsonError(request, 503, "probe already in flight; retry shortly");
+  }
+
+  if (!json.is<JsonObject>()) {
+    return sendJsonError(request, 400, "body must be a JSON object");
+  }
+  JsonObject body = json.as<JsonObject>();
+
+  NetProbeRequest req;
+  req.url = body["url"] | "";
+  req.method = body["method"] | "GET";
+  req.body = body["body"] | "";
+  req.timeoutMs = body["timeout_ms"] | NET_PROBE_TIMEOUT_DEFAULT_MS;
+
+  if (req.url.length() == 0) {
+    return sendJsonError(request, 400, "missing required field 'url'");
+  }
+
+  g_probeInFlight = true;
+  NetProbeResult result = probeHttp(req);
+  g_probeInFlight = false;
+
+  appendProbeAudit(req, result);
+
+  JsonDocument doc;
+  doc["ok"] = result.ok;
+  doc["http_status"] = result.httpStatus;
+  if (result.error.length() > 0) doc["error"] = result.error;
+  doc["body_preview"] = result.bodyPreview;
+  doc["total_body_len"] = result.totalBodyLen;
+  doc["elapsed_ms"] = result.elapsedMs;
+  int code = result.ok ? 200
+             : (result.error.startsWith("target must be")
+                || result.error.startsWith("method must be")) ? 400
+             : 502;  // upstream-ish failure (couldn't reach target, etc.)
+  sendJsonResponse(request, code, doc);
+}
+
+void handleApiNetworkProbeAudit(AsyncWebServerRequest *request) {
+  if (!authorizeNetworkRequest("probe")) {
+    return sendJsonError(request, 401, "unauthorized");
+  }
+  AsyncResponseStream *resp = request->beginResponseStream(F("application/x-ndjson"));
+  setCorsHeaders(request, resp);
+  resp->print(readProbeAudit());
   request->send(resp);
 }
 

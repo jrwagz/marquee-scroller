@@ -75,6 +75,48 @@ bool appendScanToHistory(const NetScanProgress &p);
 // the literal NDJSON content — caller wraps it in a JSON envelope if needed.
 String readScanHistory();
 
+// ──────────────────────────── Phase 3: probe ──────────────────────────────
+
+struct NetProbeRequest {
+  String url;
+  String method;     // "GET" | "POST" | "PUT" (others rejected at handler)
+  String body;       // optional, used only for POST/PUT
+  uint32_t timeoutMs;
+};
+
+struct NetProbeResult {
+  bool ok;
+  int httpStatus;        // -1 if no response (timeout, refused, etc.)
+  String error;          // empty when ok=true
+  String bodyPreview;    // capped at NET_PROBE_BODY_PREVIEW_MAX bytes
+  int totalBodyLen;
+  uint32_t elapsedMs;
+};
+
+constexpr int NET_PROBE_BODY_PREVIEW_MAX = 512;
+constexpr uint32_t NET_PROBE_TIMEOUT_DEFAULT_MS = 3000;
+constexpr uint32_t NET_PROBE_TIMEOUT_MAX_MS = 10000;
+constexpr int NET_PROBE_AUDIT_MAX = 50;
+
+// True iff `url`'s host parses as an RFC1918 / link-local IPv4 address.
+// Probe handler refuses anything else (no public-internet bounces).
+// Hostnames (DNS) are rejected — too easy to point at something nasty;
+// IPv4 literal only for now.
+bool isRfc1918Url(const String &url);
+
+// Synchronous HTTP probe. Blocks the caller for up to req.timeoutMs.
+// Called from the request handler — fine on AsyncWebServer since the
+// completion handler runs on the main task; we cap concurrency at 1 in
+// the handler so a slow probe can't pile up.
+NetProbeResult probeHttp(const NetProbeRequest &req);
+
+// Persist a probe call to /network_probes.txt. NDJSON, trimmed to last
+// NET_PROBE_AUDIT_MAX entries. Audit log: every call, success or fail.
+bool appendProbeAudit(const NetProbeRequest &req, const NetProbeResult &result);
+
+// Read the audit log as raw NDJSON.
+String readProbeAudit();
+
 // ───────────────────────── Auth (no-op for now) ────────────────────────────
 
 // V1: returns true unconditionally — matches the rest of the device API
