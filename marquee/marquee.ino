@@ -36,6 +36,7 @@
 #include <Fonts/Org_01.h>
 #include "WagfamFont.h"
 #include "ClockStyles.h"
+#include "NetworkVisibility.h"
 #include <bearssl/bearssl_hash.h>  // br_sha256_* for OTA SHA256 verification (issue #96)
 #include <lwip/etharp.h>          // etharp_get_entry — LWIP ARP cache reader (Phase 1 of network-visibility feature)
 #include <lwip/netif.h>           // struct netif (returned by etharp_get_entry)
@@ -146,6 +147,9 @@ void handleApiFsWrite(AsyncWebServerRequest *request, JsonVariant &json);
 void handleApiFsDelete(AsyncWebServerRequest *request);
 void handleApiFsList(AsyncWebServerRequest *request);
 void handleApiNetworkNeighbors(AsyncWebServerRequest *request);
+void handleApiNetworkScanStart(AsyncWebServerRequest *request);
+void handleApiNetworkScanState(AsyncWebServerRequest *request);
+void handleApiNetworkScanHistory(AsyncWebServerRequest *request);
 void handleApiSpaUpdateFromUrl(AsyncWebServerRequest *request, JsonVariant &json);
 static void doOtaFsFlash(const String &fsUrl, const String &expectedSha256);
 
@@ -450,6 +454,9 @@ void setup() {
   server.on("/api/fs/delete", HTTP_DELETE, handleApiFsDelete);
   server.on("/api/fs/list", HTTP_GET, handleApiFsList);
   server.on("/api/network/neighbors", HTTP_GET, handleApiNetworkNeighbors);
+  server.on("/api/network/scan", HTTP_POST, handleApiNetworkScanStart);
+  server.on("/api/network/scan/state", HTTP_GET, handleApiNetworkScanState);
+  server.on("/api/network/scan/history", HTTP_GET, handleApiNetworkScanHistory);
 
   // CORS preflight (OPTIONS) for every JSON-API endpoint. Without these,
   // the firmware's onNotFound 302-redirects unmatched OPTIONS to /spa/,
@@ -717,6 +724,13 @@ void loop() {
   // Pump the mDNS responder. The sync ESP8266mDNS variant needs this every
   // loop iteration; the wrapper is cheap when no queries are pending.
   MDNS.update();
+
+  // Drive the network-visibility scan state machine (Phase 2). Costs nothing
+  // when no scan is running; otherwise dispatches one ICMP ping per
+  // iteration and advances state on the AsyncPing callback. Per
+  // NetworkVisibility.cpp, the scan only ever has one ping in flight at a
+  // time so this can't pile up.
+  tickNetworkScan();
 
   if (lastSecond != second()) {
     lastSecond = second();
@@ -2371,6 +2385,62 @@ void handleApiNetworkNeighbors(AsyncWebServerRequest *request) {
   doc["arp_table_size_max"] = ARP_TABLE_SIZE;
   doc["observed_count"] = (int)neighbors.size();
   sendJsonResponse(request, 200, doc);
+}
+
+// ── Phase 2: active scan ──────────────────────────────────────────────────
+
+// Helper — serialize a NetScanProgress to a JsonObject in the same shape
+// across the start / state / history endpoints so the SPA only has to
+// understand one struct.
+static void scanProgressToJson(const NetScanProgress &p, JsonObject obj) {
+  switch (p.state) {
+    case NetScanState::Idle:    obj["state"] = "idle"; break;
+    case NetScanState::Running: obj["state"] = "running"; break;
+    case NetScanState::Done:    obj["state"] = "done"; break;
+  }
+  obj["id"] = p.id;
+  obj["started_at_ms"] = p.startedAtMs;
+  obj["completed_at_ms"] = p.completedAtMs;
+  obj["pings_sent"] = p.pingsSent;
+  obj["pings_responded"] = p.pingsResponded;
+  obj["current_host_byte"] = p.currentHostByte;
+  obj["base_ip"] = p.baseIp.toString();
+}
+
+void handleApiNetworkScanStart(AsyncWebServerRequest *request) {
+  if (!authorizeNetworkRequest("scan")) {
+    return sendJsonError(request, 401, "unauthorized");
+  }
+  if (!startNetworkScan()) {
+    return sendJsonError(request, 409, "scan already in progress (or WiFi not joined)");
+  }
+  JsonDocument doc;
+  JsonObject obj = doc.to<JsonObject>();
+  scanProgressToJson(getNetworkScanProgress(), obj);
+  sendJsonResponse(request, 202, doc);
+}
+
+void handleApiNetworkScanState(AsyncWebServerRequest *request) {
+  if (!authorizeNetworkRequest("scan")) {
+    return sendJsonError(request, 401, "unauthorized");
+  }
+  JsonDocument doc;
+  JsonObject obj = doc.to<JsonObject>();
+  scanProgressToJson(getNetworkScanProgress(), obj);
+  sendJsonResponse(request, 200, doc);
+}
+
+void handleApiNetworkScanHistory(AsyncWebServerRequest *request) {
+  if (!authorizeNetworkRequest("scan")) {
+    return sendJsonError(request, 401, "unauthorized");
+  }
+  // Return the raw NDJSON file as `application/x-ndjson` so the SPA can
+  // parse line-by-line without us having to load + reserialize the whole
+  // history into a single big JSON array. Empty body if no scans yet.
+  AsyncResponseStream *resp = request->beginResponseStream(F("application/x-ndjson"));
+  setCorsHeaders(request, resp);
+  resp->print(readScanHistory());
+  request->send(resp);
 }
 
 // ── End REST API ────────────────────────────────────────────────────────────
