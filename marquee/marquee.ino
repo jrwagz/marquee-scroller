@@ -36,7 +36,10 @@
 #include <Fonts/Org_01.h>
 #include "WagfamFont.h"
 #include "ClockStyles.h"
+#include "NetworkVisibility.h"
 #include <bearssl/bearssl_hash.h>  // br_sha256_* for OTA SHA256 verification (issue #96)
+#include <lwip/etharp.h>          // etharp_get_entry — LWIP ARP cache reader (Phase 1 of network-visibility feature)
+#include <lwip/netif.h>           // struct netif (returned by etharp_get_entry)
 
 // Scroller font registry (issue #106). Index 0 is the Adafruit_GFX builtin
 // 5x7 fixed-width font (passed as nullptr to setFont). Other entries are
@@ -143,6 +146,12 @@ void handleApiFsRead(AsyncWebServerRequest *request);
 void handleApiFsWrite(AsyncWebServerRequest *request, JsonVariant &json);
 void handleApiFsDelete(AsyncWebServerRequest *request);
 void handleApiFsList(AsyncWebServerRequest *request);
+void handleApiNetworkNeighbors(AsyncWebServerRequest *request);
+void handleApiNetworkScanStart(AsyncWebServerRequest *request);
+void handleApiNetworkScanState(AsyncWebServerRequest *request);
+void handleApiNetworkScanHistory(AsyncWebServerRequest *request);
+void handleApiNetworkProbe(AsyncWebServerRequest *request, JsonVariant &json);
+void handleApiNetworkProbeAudit(AsyncWebServerRequest *request);
 void handleApiSpaUpdateFromUrl(AsyncWebServerRequest *request, JsonVariant &json);
 static void doOtaFsFlash(const String &fsUrl, const String &expectedSha256);
 
@@ -446,6 +455,11 @@ void setup() {
   server.on("/api/fs/read", HTTP_GET, handleApiFsRead);
   server.on("/api/fs/delete", HTTP_DELETE, handleApiFsDelete);
   server.on("/api/fs/list", HTTP_GET, handleApiFsList);
+  server.on("/api/network/neighbors", HTTP_GET, handleApiNetworkNeighbors);
+  server.on("/api/network/scan", HTTP_POST, handleApiNetworkScanStart);
+  server.on("/api/network/scan/state", HTTP_GET, handleApiNetworkScanState);
+  server.on("/api/network/scan/history", HTTP_GET, handleApiNetworkScanHistory);
+  server.on("/api/network/probe/audit", HTTP_GET, handleApiNetworkProbeAudit);
 
   // CORS preflight (OPTIONS) for every JSON-API endpoint. Without these,
   // the firmware's onNotFound 302-redirects unmatched OPTIONS to /spa/,
@@ -484,6 +498,16 @@ void setup() {
     spaUpdatePost->setMethod(HTTP_POST);
     spaUpdatePost->setMaxContentLength(512);
     server.addHandler(spaUpdatePost);
+  }
+  {
+    // POST /api/network/probe — JSON body { url, method, body?, timeout_ms? }.
+    // Phase 3 of the LAN-visibility feature. Capped at 4KB total body so a
+    // PUT/POST payload to a LAN device can carry a reasonable JSON blob
+    // without us holding too much in heap during the probe.
+    auto *probePost = new AsyncCallbackJsonWebHandler("/api/network/probe", handleApiNetworkProbe);
+    probePost->setMethod(HTTP_POST);
+    probePost->setMaxContentLength(4096);
+    server.addHandler(probePost);
   }
 
   // GET /update — file-upload form. Self-contained page (no SPA chrome,
@@ -713,6 +737,13 @@ void loop() {
   // Pump the mDNS responder. The sync ESP8266mDNS variant needs this every
   // loop iteration; the wrapper is cheap when no queries are pending.
   MDNS.update();
+
+  // Drive the network-visibility scan state machine (Phase 2). Costs nothing
+  // when no scan is running; otherwise dispatches one ICMP ping per
+  // iteration and advances state on the AsyncPing callback. Per
+  // NetworkVisibility.cpp, the scan only ever has one ping in flight at a
+  // time so this can't pile up.
+  tickNetworkScan();
 
   if (lastSecond != second()) {
     lastSecond = second();
@@ -2324,6 +2355,165 @@ void handleApiFsList(AsyncWebServerRequest *request) {
   listFilesRecursive("/", files);
 
   sendJsonResponse(request, 200, doc);
+}
+
+// Phase 1 of the LAN-visibility feature (see issue TBD): read the LWIP ARP
+// table and surface every (IP, MAC) pair the clock has passively observed.
+// Pure read — no scanning, no pings, no network impact. Later phases will
+// add an active /api/network/scan that ICMP-pings the local /24 to populate
+// this table, and an /api/network/probe that makes outbound HTTP requests
+// to discovered devices.
+//
+// `etharp_get_entry` is the public LWIP iterator over the ARP cache. It
+// returns 1 for a valid (in-use) slot and 0 for empty/stale slots; we skip
+// empties. ARP_TABLE_SIZE defaults to 10 on arduino-esp8266 — we'll bump
+// it when Phase 2 lands an active scanner that fills more entries, but
+// for passive observation 10 is fine.
+void handleApiNetworkNeighbors(AsyncWebServerRequest *request) {
+  JsonDocument doc;
+  JsonArray neighbors = doc["neighbors"].to<JsonArray>();
+
+  for (size_t i = 0; i < ARP_TABLE_SIZE; i++) {
+    ip4_addr_t *ip;
+    struct netif *nif;
+    struct eth_addr *mac;
+    if (etharp_get_entry(i, &ip, &nif, &mac) != 1) continue;
+
+    JsonObject n = neighbors.add<JsonObject>();
+    n["ip"] = ipaddr_ntoa(ip);
+
+    char mac_buf[18];
+    snprintf(mac_buf, sizeof(mac_buf), "%02x:%02x:%02x:%02x:%02x:%02x",
+             mac->addr[0], mac->addr[1], mac->addr[2],
+             mac->addr[3], mac->addr[4], mac->addr[5]);
+    n["mac"] = mac_buf;
+
+    // The netif name on arduino-esp8266 is "st" (station) or "ap" (soft-AP).
+    // Useful when we eventually have both interfaces active — only neighbors
+    // on the station-side netif are reachable for outbound LAN traffic.
+    char ifname[3] = { nif->name[0], nif->name[1], 0 };
+    n["iface"] = ifname;
+  }
+
+  doc["arp_table_size_max"] = ARP_TABLE_SIZE;
+  doc["observed_count"] = (int)neighbors.size();
+  sendJsonResponse(request, 200, doc);
+}
+
+// ── Phase 2: active scan ──────────────────────────────────────────────────
+
+// Helper — serialize a NetScanProgress to a JsonObject in the same shape
+// across the start / state / history endpoints so the SPA only has to
+// understand one struct.
+static void scanProgressToJson(const NetScanProgress &p, JsonObject obj) {
+  switch (p.state) {
+    case NetScanState::Idle:    obj["state"] = "idle"; break;
+    case NetScanState::Running: obj["state"] = "running"; break;
+    case NetScanState::Done:    obj["state"] = "done"; break;
+  }
+  obj["id"] = p.id;
+  obj["started_at_ms"] = p.startedAtMs;
+  obj["completed_at_ms"] = p.completedAtMs;
+  obj["pings_sent"] = p.pingsSent;
+  obj["pings_responded"] = p.pingsResponded;
+  obj["current_host_byte"] = p.currentHostByte;
+  obj["base_ip"] = p.baseIp.toString();
+}
+
+void handleApiNetworkScanStart(AsyncWebServerRequest *request) {
+  if (!authorizeNetworkRequest("scan")) {
+    return sendJsonError(request, 401, "unauthorized");
+  }
+  if (!startNetworkScan()) {
+    return sendJsonError(request, 409, "scan already in progress (or WiFi not joined)");
+  }
+  JsonDocument doc;
+  JsonObject obj = doc.to<JsonObject>();
+  scanProgressToJson(getNetworkScanProgress(), obj);
+  sendJsonResponse(request, 202, doc);
+}
+
+void handleApiNetworkScanState(AsyncWebServerRequest *request) {
+  if (!authorizeNetworkRequest("scan")) {
+    return sendJsonError(request, 401, "unauthorized");
+  }
+  JsonDocument doc;
+  JsonObject obj = doc.to<JsonObject>();
+  scanProgressToJson(getNetworkScanProgress(), obj);
+  sendJsonResponse(request, 200, doc);
+}
+
+void handleApiNetworkScanHistory(AsyncWebServerRequest *request) {
+  if (!authorizeNetworkRequest("scan")) {
+    return sendJsonError(request, 401, "unauthorized");
+  }
+  // Return the raw NDJSON file as `application/x-ndjson` so the SPA can
+  // parse line-by-line without us having to load + reserialize the whole
+  // history into a single big JSON array. Empty body if no scans yet.
+  AsyncResponseStream *resp = request->beginResponseStream(F("application/x-ndjson"));
+  setCorsHeaders(request, resp);
+  resp->print(readScanHistory());
+  request->send(resp);
+}
+
+// ── Phase 3: HTTP probe ───────────────────────────────────────────────────
+
+// Cap concurrent probes at 1: a probe is synchronous and can hold the loop
+// for the full timeoutMs. Letting two queue up would mean a 6s+ stall and
+// risk watchdog noise. The 1-probe semaphore is `g_probeInFlight`.
+static bool g_probeInFlight = false;
+
+void handleApiNetworkProbe(AsyncWebServerRequest *request, JsonVariant &json) {
+  if (!authorizeNetworkRequest("probe")) {
+    return sendJsonError(request, 401, "unauthorized");
+  }
+  if (g_probeInFlight) {
+    return sendJsonError(request, 503, "probe already in flight; retry shortly");
+  }
+
+  if (!json.is<JsonObject>()) {
+    return sendJsonError(request, 400, "body must be a JSON object");
+  }
+  JsonObject body = json.as<JsonObject>();
+
+  NetProbeRequest req;
+  req.url = body["url"] | "";
+  req.method = body["method"] | "GET";
+  req.body = body["body"] | "";
+  req.timeoutMs = body["timeout_ms"] | NET_PROBE_TIMEOUT_DEFAULT_MS;
+
+  if (req.url.length() == 0) {
+    return sendJsonError(request, 400, "missing required field 'url'");
+  }
+
+  g_probeInFlight = true;
+  NetProbeResult result = probeHttp(req);
+  g_probeInFlight = false;
+
+  appendProbeAudit(req, result);
+
+  JsonDocument doc;
+  doc["ok"] = result.ok;
+  doc["http_status"] = result.httpStatus;
+  if (result.error.length() > 0) doc["error"] = result.error;
+  doc["body_preview"] = result.bodyPreview;
+  doc["total_body_len"] = result.totalBodyLen;
+  doc["elapsed_ms"] = result.elapsedMs;
+  int code = result.ok ? 200
+             : (result.error.startsWith("target must be")
+                || result.error.startsWith("method must be")) ? 400
+             : 502;  // upstream-ish failure (couldn't reach target, etc.)
+  sendJsonResponse(request, code, doc);
+}
+
+void handleApiNetworkProbeAudit(AsyncWebServerRequest *request) {
+  if (!authorizeNetworkRequest("probe")) {
+    return sendJsonError(request, 401, "unauthorized");
+  }
+  AsyncResponseStream *resp = request->beginResponseStream(F("application/x-ndjson"));
+  setCorsHeaders(request, resp);
+  resp->print(readProbeAudit());
+  request->send(resp);
 }
 
 // ── End REST API ────────────────────────────────────────────────────────────

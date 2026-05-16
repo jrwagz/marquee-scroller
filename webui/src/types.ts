@@ -116,3 +116,44 @@ export interface ConfigData {
   auto_update_enabled?: boolean;
   auto_update_compile_disabled?: boolean;
 }
+
+// ── LAN-visibility feature ─────────────────────────────────────────────────
+
+export interface Neighbor {
+  ip: string;
+  mac: string;
+  iface: string;
+}
+
+export interface NeighborsData {
+  neighbors: Neighbor[];
+  arp_table_size_max: number;
+  observed_count: number;
+}
+
+export interface ScanProgress {
+  state: "idle" | "running" | "done";
+  id: number;
+  started_at_ms: number;
+  completed_at_ms: number;
+  pings_sent: number;
+  pings_responded: number;
+  current_host_byte: number;
+  base_ip: string;
+}
+
+export interface ProbeRequest {
+  url: string;
+  method: "GET" | "POST" | "PUT";
+  body?: string;
+  timeout_ms?: number;
+}
+
+export interface ProbeResult {
+  ok: boolean;
+  http_status: number;
+  error?: string;
+  body_preview: string;
+  total_body_len: number;
+  elapsed_ms: number;
+}
