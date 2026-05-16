@@ -37,6 +37,8 @@
 #include "WagfamFont.h"
 #include "ClockStyles.h"
 #include <bearssl/bearssl_hash.h>  // br_sha256_* for OTA SHA256 verification (issue #96)
+#include <lwip/etharp.h>          // etharp_get_entry — LWIP ARP cache reader (Phase 1 of network-visibility feature)
+#include <lwip/netif.h>           // struct netif (returned by etharp_get_entry)
 
 // Scroller font registry (issue #106). Index 0 is the Adafruit_GFX builtin
 // 5x7 fixed-width font (passed as nullptr to setFont). Other entries are
@@ -143,6 +145,7 @@ void handleApiFsRead(AsyncWebServerRequest *request);
 void handleApiFsWrite(AsyncWebServerRequest *request, JsonVariant &json);
 void handleApiFsDelete(AsyncWebServerRequest *request);
 void handleApiFsList(AsyncWebServerRequest *request);
+void handleApiNetworkNeighbors(AsyncWebServerRequest *request);
 void handleApiSpaUpdateFromUrl(AsyncWebServerRequest *request, JsonVariant &json);
 static void doOtaFsFlash(const String &fsUrl, const String &expectedSha256);
 
@@ -446,6 +449,7 @@ void setup() {
   server.on("/api/fs/read", HTTP_GET, handleApiFsRead);
   server.on("/api/fs/delete", HTTP_DELETE, handleApiFsDelete);
   server.on("/api/fs/list", HTTP_GET, handleApiFsList);
+  server.on("/api/network/neighbors", HTTP_GET, handleApiNetworkNeighbors);
 
   // CORS preflight (OPTIONS) for every JSON-API endpoint. Without these,
   // the firmware's onNotFound 302-redirects unmatched OPTIONS to /spa/,
@@ -2323,6 +2327,49 @@ void handleApiFsList(AsyncWebServerRequest *request) {
 
   listFilesRecursive("/", files);
 
+  sendJsonResponse(request, 200, doc);
+}
+
+// Phase 1 of the LAN-visibility feature (see issue TBD): read the LWIP ARP
+// table and surface every (IP, MAC) pair the clock has passively observed.
+// Pure read — no scanning, no pings, no network impact. Later phases will
+// add an active /api/network/scan that ICMP-pings the local /24 to populate
+// this table, and an /api/network/probe that makes outbound HTTP requests
+// to discovered devices.
+//
+// `etharp_get_entry` is the public LWIP iterator over the ARP cache. It
+// returns 1 for a valid (in-use) slot and 0 for empty/stale slots; we skip
+// empties. ARP_TABLE_SIZE defaults to 10 on arduino-esp8266 — we'll bump
+// it when Phase 2 lands an active scanner that fills more entries, but
+// for passive observation 10 is fine.
+void handleApiNetworkNeighbors(AsyncWebServerRequest *request) {
+  JsonDocument doc;
+  JsonArray neighbors = doc["neighbors"].to<JsonArray>();
+
+  for (size_t i = 0; i < ARP_TABLE_SIZE; i++) {
+    ip4_addr_t *ip;
+    struct netif *nif;
+    struct eth_addr *mac;
+    if (etharp_get_entry(i, &ip, &nif, &mac) != 1) continue;
+
+    JsonObject n = neighbors.add<JsonObject>();
+    n["ip"] = ipaddr_ntoa(ip);
+
+    char mac_buf[18];
+    snprintf(mac_buf, sizeof(mac_buf), "%02x:%02x:%02x:%02x:%02x:%02x",
+             mac->addr[0], mac->addr[1], mac->addr[2],
+             mac->addr[3], mac->addr[4], mac->addr[5]);
+    n["mac"] = mac_buf;
+
+    // The netif name on arduino-esp8266 is "st" (station) or "ap" (soft-AP).
+    // Useful when we eventually have both interfaces active — only neighbors
+    // on the station-side netif are reachable for outbound LAN traffic.
+    char ifname[3] = { nif->name[0], nif->name[1], 0 };
+    n["iface"] = ifname;
+  }
+
+  doc["arp_table_size_max"] = ARP_TABLE_SIZE;
+  doc["observed_count"] = (int)neighbors.size();
   sendJsonResponse(request, 200, doc);
 }
 
