@@ -4,6 +4,10 @@ import type {
   WeatherData,
   EventsData,
   ActionAck,
+  NeighborsData,
+  ScanProgress,
+  ProbeRequest,
+  ProbeResult,
 } from "./types";
 
 const POST_HEADERS = {
@@ -70,3 +74,39 @@ export const postSpaUpdateFromUrl = (url: string): Promise<ActionAck> =>
     headers: POST_HEADERS,
     body: JSON.stringify({ url }),
   });
+
+// ── LAN-visibility ─────────────────────────────────────────────────────────
+
+export const getNetworkNeighbors = (): Promise<NeighborsData> =>
+  apiFetch<NeighborsData>("/api/network/neighbors");
+
+export const postNetworkScan = (): Promise<ScanProgress> =>
+  apiFetch<ScanProgress>("/api/network/scan", {
+    method: "POST",
+    headers: POST_HEADERS,
+  });
+
+export const getNetworkScanState = (): Promise<ScanProgress> =>
+  apiFetch<ScanProgress>("/api/network/scan/state");
+
+// Returns the raw NDJSON history file (one scan summary per line). Caller
+// splits and JSON-parses each non-empty line. Empty string if no scans yet.
+export const getNetworkScanHistory = async (): Promise<string> => {
+  const res = await fetch("/api/network/scan/history");
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.text();
+};
+
+export const postNetworkProbe = (req: ProbeRequest): Promise<ProbeResult> =>
+  apiFetch<ProbeResult>("/api/network/probe", {
+    method: "POST",
+    headers: POST_HEADERS,
+    body: JSON.stringify(req),
+  });
+
+// Same NDJSON-as-text contract as scan history.
+export const getNetworkProbeAudit = async (): Promise<string> => {
+  const res = await fetch("/api/network/probe/audit");
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.text();
+};

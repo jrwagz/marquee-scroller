@@ -484,3 +484,60 @@ input[type="checkbox"].toggle:checked::after {
   color: var(--muted);
   margin-top: 0.5rem;
 }
+
+/* ── LAN-visibility (Network tab) ──────────────────────────────────────── */
+
+.network-page { display: flex; flex-direction: column; gap: 1.25rem; }
+
+.network-page .card-header {
+  display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem;
+}
+.network-page .card-header h2 { margin: 0; flex: 1; }
+
+.net-table {
+  width: 100%; border-collapse: collapse; font-size: 0.95rem; margin: 0.5rem 0;
+}
+.net-table th, .net-table td {
+  text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--border);
+}
+.net-table th { font-weight: 600; color: var(--muted); font-size: 0.85rem; }
+.net-table code { background: transparent; padding: 0; }
+
+.scan-progress {
+  font-size: 0.9rem; padding: 0.5rem 0.75rem; background: var(--bg-alt, #f5f5f5);
+  border-radius: var(--radius); margin: 0.5rem 0;
+}
+
+.history { margin-top: 0.75rem; font-size: 0.9rem; }
+.history summary { cursor: pointer; user-select: none; }
+
+.scan-history, .probe-audit { list-style: none; padding: 0; margin: 0.5rem 0; }
+.scan-history li, .probe-audit li {
+  padding: 0.3rem 0; border-bottom: 1px solid var(--border); font-size: 0.9rem;
+}
+.probe-audit li.bad { color: var(--red, #b00020); }
+.probe-audit code { background: transparent; padding: 0; }
+
+.probe-form {
+  display: grid; grid-template-columns: 1fr auto auto; gap: 0.5rem 0.75rem;
+  align-items: end; margin: 0.5rem 0;
+}
+.probe-form label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85rem; }
+.probe-form label.full { grid-column: 1 / -1; }
+.probe-form button { grid-column: 1 / -1; }
+
+.probe-result {
+  margin-top: 0.75rem; padding: 0.5rem 0.75rem; border-radius: var(--radius);
+  border-left: 3px solid var(--green, #2e7d32);
+  background: var(--bg-alt, #f5f5f5);
+}
+.probe-result.bad { border-left-color: var(--red, #b00020); }
+.probe-result-summary { font-size: 0.9rem; }
+.probe-body-preview {
+  margin-top: 0.5rem; padding: 0.5rem; font-size: 0.8rem;
+  background: var(--bg, #fff); border: 1px solid var(--border); border-radius: 4px;
+  max-height: 12rem; overflow: auto; white-space: pre-wrap;
+}
+.error-inline { color: var(--red, #b00020); }
+.link-btn { background: none; border: none; color: var(--accent, #0066cc); cursor: pointer; padding: 0; font: inherit; }
+.link-btn:hover { text-decoration: underline; }
