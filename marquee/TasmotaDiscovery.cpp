@@ -64,20 +64,34 @@ constexpr uint16_t HTTP_PROBE_TIMEOUT_MS = 1000;
 
 // ── ARP capture ───────────────────────────────────────────────────────────
 //
-// Called from the ping callback when a host replies. Looks up the just-
-// pinged IP in lwIP's ARP cache and copies the MAC into our in-RAM
-// snapshot. Walking the global ARP table at end-of-scan doesn't work
-// because ETHARP_TABLE_SIZE defaults to 10 — earlier replies get evicted
-// long before tick() reaches Done. Per-reply capture sidesteps that.
+// Called from the ping callback when a host replies. Prefers the MAC the
+// AsyncPing library already captured from its own etharp_find_addr at
+// ICMP-reply time (resp.mac in the AsyncPingResponse) — that lookup
+// happens ~1 ms earlier than our user callback fires, so the ARP cache
+// is one fewer ping-cycle stale. Falls back to a fresh etharp_find_addr
+// if the library failed to capture (resp.mac was NULL).
+//
+// Walking the global ARP table at end-of-scan doesn't work because
+// ETHARP_TABLE_SIZE defaults to 10 — earlier replies get evicted long
+// before tick() reaches Done. Per-reply capture sidesteps that, and
+// reading resp.mac sidesteps the 1ms eviction window our own lookup
+// would otherwise sit on top of.
 
-void captureArpForIp(const IPAddress &ip) {
+void captureArpForIp(const IPAddress &ip, const struct eth_addr *libMac) {
   if (g_arpCount >= MAX_ARP_ENTRIES) return;
 
-  ip4_addr_t target;
-  IP4_ADDR(&target, ip[0], ip[1], ip[2], ip[3]);
-  struct eth_addr *mac = nullptr;
-  const ip4_addr_t *resolved = nullptr;
-  if (etharp_find_addr(netif_default, &target, &mac, &resolved) < 0) return;
+  const struct eth_addr *mac = libMac;
+
+  // Fallback: AsyncPing's lookup failed at packet-arrival time. Try once
+  // more from our callback context — better than dropping the entry.
+  struct eth_addr *fallback = nullptr;
+  if (!mac) {
+    ip4_addr_t target;
+    IP4_ADDR(&target, ip[0], ip[1], ip[2], ip[3]);
+    const ip4_addr_t *resolved = nullptr;
+    if (etharp_find_addr(netif_default, &target, &fallback, &resolved) < 0) return;
+    mac = fallback;
+  }
   if (!mac) return;
 
   ArpEntry &e = g_arp[g_arpCount];
@@ -322,7 +336,7 @@ void tick() {
       g_progress.pingsResponded++;
       g_pendingProbeIp = target;
       g_hasPendingProbe = true;
-      captureArpForIp(target);
+      captureArpForIp(target, resp.mac);
     }
     g_progress.currentHostByte++;
     g_pingInFlight = false;
