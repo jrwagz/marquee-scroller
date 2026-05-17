@@ -5,13 +5,13 @@ Injects a BUILD_SUFFIX C preprocessor define so the firmware's VERSION macro
 includes build provenance at compile time:
 
   Local builds:  BASE_VERSION-<username>-<YYYYMMDD>-<hash>
-                 e.g. 3.08.0-wagfam-justin-20260426-a1b2c3d
+                 e.g. 4.7.0-justin-20260517-a1b2c3d
   CI builds:     BASE_VERSION-<hash>
-                 e.g. 3.08.0-wagfam-a1b2c3d
+                 e.g. 4.7.0-a1b2c3d
 
 BUILD_SUFFIX is consumed by marquee/marquee.ino via adjacent C string concatenation:
 
-    #define BASE_VERSION "3.08.0-wagfam"
+    #define BASE_VERSION "4.7.0"
     #ifdef BUILD_SUFFIX
     #define VERSION BASE_VERSION BUILD_SUFFIX
     #else

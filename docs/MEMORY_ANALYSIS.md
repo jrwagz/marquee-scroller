@@ -2,7 +2,7 @@
 
 > **Platform:** Wemos D1 Mini (ESP8266) — analysis originally captured against
 > v3.08.0-wagfam. The "Done" items below have been carried into every version since
-> (current: v4.0.1-wagfam).
+> (current: v4.7.0).
 >
 > This document identifies the most RAM-intensive features and flows in the firmware,
 > ranks them by impact, and recommends specific reductions to open headroom for new features.

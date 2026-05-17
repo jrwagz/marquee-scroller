@@ -106,7 +106,7 @@ class TestWriteSpaVersion:
         try:
             with patch("build_version.get_git_hash", return_value="abc1234"):
                 result = write_spa_version.write_spa_version(out_file=out_file)
-            assert re.match(r"^\d+\.\d+\.\d+-wagfam-abc1234$", result)
+            assert re.match(r"^\d+\.\d+\.\d+-abc1234$", result)
         finally:
             out_file.unlink(missing_ok=True)
 
