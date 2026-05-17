@@ -19,6 +19,13 @@ export interface StatusData {
   heap_fragmentation: number;
   chip_id: string;
   device_name: string;
+  // Family tag from the wagfam-server check-in response. `family` is the
+  // lowercase wire form ("butterfield" | "wagner" | ""); `family_display`
+  // is the firmware-mapped capitalized form rendered directly by the SPA.
+  // Both optional so the SPA still renders against firmware that predates
+  // them — fields are absent rather than empty in that case.
+  family?: string;
+  family_display?: string;
   flash_size: number;
   sketch_size: number;
   free_sketch_space: number;
@@ -106,6 +113,10 @@ export interface ConfigData {
   show_highlow: boolean;
   ota_safe_url: string;
   device_name: string;
+  // Read-only — set by the server, persisted on the device. The SPA shows
+  // it but cannot change it (no PATCH path for `family` on /api/config).
+  family?: string;
+  family_display?: string;
   // Issue #95: runtime auto-update toggle. `auto_update_enabled` is the
   // user-controllable boolean (default true) shown in Settings. The
   // optional `auto_update_compile_disabled` is read-only metadata: when

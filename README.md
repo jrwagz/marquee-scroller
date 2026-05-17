@@ -244,6 +244,7 @@ and tolerates missing ones:
 | --- | --- |
 | `eventToday` | `1` enables an animated dot border around the clock display for the day |
 | `deviceName` | Stored on the device and shown in the SPA |
+| `family` | Lowercase family tag (`"butterfield"` / `"wagner"` / `null`). When set, personalizes the bootup welcome message and the SPA header. Unknown values are logged and ignored |
 | `latestVersion` + `firmwareUrl` | When `latestVersion` differs from the firmware's compiled-in `VERSION`, auto-update fires (subject to compile-time + runtime opt-out flags — see "Features"). HTTP only; HTTPS not supported by ESP8266HTTPUpdate without large heap cost |
 | `latestSpaVersion` + `spaFsUrl` | Same model as firmware, but for the LittleFS partition (SPA bundle). `/conf.txt` is preserved across the flash |
 | `trollMessage` | When non-empty the clock displays *only* this string and ignores calendar messages. RAM-only on the clock — a power cycle clears it. Issue #99 |

@@ -197,6 +197,9 @@ export function StatusPage() {
       {d && (
         <div class="stat-grid">
           <StatCard label="Device" value={d.device_name || d.chip_id} />
+          {d.family_display && (
+            <StatCard label="Family" value={d.family_display} />
+          )}
           <StatCard label="Version" value={d.version} />
           {d.spa_version && (
             <StatCard label="SPA Version" value={d.spa_version} />
