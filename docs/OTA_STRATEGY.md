@@ -1,7 +1,9 @@
 # OTA Update Strategy
 
 > **Platform:** Wemos D1 Mini (ESP8266) — strategy adopted in v3.08.0-wagfam and still
-> in effect (current: v4.0.1-wagfam).
+> in effect (current: v4.7.0; the `-wagfam` tag was dropped in 4.7.0 as part of
+> consolidating on a single release for all families — family targeting is now pushed
+> from the server at runtime).
 >
 > This document explains why ArduinoOTA was removed, how the boot-confirmation rollback
 > system works, and how the calendar JSON channel drives remote auto-updates across
@@ -128,8 +130,8 @@ and `firmwareUrl` in the `config` block:
 [
   {
     "config": {
-      "latestVersion": "3.08.0-wagfam",
-      "firmwareUrl": "http://example.com/marquee-v3.08.0.bin",
+      "latestVersion": "4.7.0",
+      "firmwareUrl": "http://example.com/marquee-v4.7.0.bin",
       "firmwareSha256": "deadbeef…64-hex-chars…00ff"
     }
   },

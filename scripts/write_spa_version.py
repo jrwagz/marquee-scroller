@@ -9,9 +9,9 @@ planned in issue #72.
 The version string format mirrors the firmware VERSION macro:
 
   Local builds:  BASE_VERSION-<username>-<YYYYMMDD>-<hash>
-                 e.g. 3.10.0-wagfam-justin-20260503-c0c7879
+                 e.g. 4.7.0-justin-20260517-c0c7879
   CI builds:     BASE_VERSION-<hash>
-                 e.g. 3.10.0-wagfam-c0c7879
+                 e.g. 4.7.0-c0c7879
 
 Environment variables (same as build_version.py):
   CI              Non-empty → CI-style suffix (hash only).
@@ -51,8 +51,8 @@ def write_spa_version(
 
     Returns:
         The full version string that was written, e.g.
-        ``"3.10.0-wagfam-c0c7879"`` (CI) or
-        ``"3.10.0-wagfam-justin-20260503-c0c7879"`` (local).
+        ``"4.7.0-c0c7879"`` (CI) or
+        ``"4.7.0-justin-20260517-c0c7879"`` (local).
     """
     # Import helpers from the sibling build_version.py script.
     # sys.path already contains scripts/ when run from the project root

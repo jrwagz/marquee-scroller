@@ -72,7 +72,7 @@ static const ScrollerFont SCROLLER_FONTS[] = {
 };
 static const int SCROLLER_FONT_COUNT = sizeof(SCROLLER_FONTS) / sizeof(SCROLLER_FONTS[0]);
 
-#define BASE_VERSION "4.6.0-wagfam"
+#define BASE_VERSION "4.7.0"
 #ifdef BUILD_SUFFIX
 #define VERSION BASE_VERSION BUILD_SUFFIX
 #else

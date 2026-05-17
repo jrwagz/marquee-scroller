@@ -30,7 +30,7 @@ via Docker Buildx:
 
 ```dockerfile
 FROM jrwagz/simple-web-server:latest
-COPY marquee-scroller-3.08.0-wagfam-cbb4daa.bin /usr/local/apache2/htdocs/marquee-scroller-3.08.0-wagfam-cbb4daa.bin
+COPY marquee-scroller-4.7.0-cbb4daa.bin /usr/local/apache2/htdocs/marquee-scroller-4.7.0-cbb4daa.bin
 ```
 
 Because Docker images are layered, every prior binary remains in the image across releases.
@@ -44,7 +44,7 @@ The build step pushes **two tags** for every release:
 
 - `jrwagz/simple-web-server:latest` — always points to the most recent release
 - `jrwagz/simple-web-server:<VERSION>` — immutable tag for that specific release
-  (e.g. `jrwagz/simple-web-server:3.08.0-wagfam-cbb4daa`)
+  (e.g. `jrwagz/simple-web-server:4.7.0-cbb4daa`)
 
 The Azure App Service is configured to pull the versioned tag (not `:latest`). This is
 intentional: `azure/webapps-deploy@v3` only triggers a real container restart when the
@@ -61,11 +61,11 @@ Binaries are named using the full CI build version string from `artifacts/VERSIO
 marquee-scroller-<VERSION>.bin
 ```
 
-`build_version.py` (the PlatformIO pre-build script) sets VERSION to `<base>-wagfam-<git-hash>`
+`build_version.py` (the PlatformIO pre-build script) sets VERSION to `<base>-<git-hash>`
 on CI builds, e.g.:
 
 ```text
-marquee-scroller-3.08.0-wagfam-cbb4daa.bin
+marquee-scroller-4.7.0-cbb4daa.bin
 ```
 
 ---
@@ -112,8 +112,8 @@ including `latestVersion` and `firmwareUrl` in its calendar JSON response:
 ```json
 {
   "config": {
-    "latestVersion": "3.08.0-wagfam-cbb4daa",
-    "firmwareUrl": "http://files-jrwagz.azurewebsites.net/marquee-scroller-3.08.0-wagfam-cbb4daa.bin"
+    "latestVersion": "4.7.0-cbb4daa",
+    "firmwareUrl": "http://files-jrwagz.azurewebsites.net/marquee-scroller-4.7.0-cbb4daa.bin"
   }
 }
 ```

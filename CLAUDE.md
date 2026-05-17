@@ -367,7 +367,7 @@ Expected JSON format:
       "eventToday": "1",
       "dataSourceUrl": "...",
       "apiKey": "...",
-      "latestVersion": "3.08.0-wagfam",
+      "latestVersion": "4.7.0",
       "firmwareUrl": "http://example.com/firmware.bin",
       "deviceName": "Kitchen Clock"
     }
@@ -390,7 +390,7 @@ Expected JSON format:
 Each calendar fetch includes device telemetry as query parameters:
 
 ```text
-GET /data_source.json?chip_id=5fc8ad&version=3.08.0-wagfam&uptime=1234567&heap=32496&rssi=-62&utc_offset_sec=-21600
+GET /data_source.json?chip_id=5fc8ad&version=4.7.0-cbb4daa&uptime=1234567&heap=32496&rssi=-62&utc_offset_sec=-21600
 ```
 
 The `utc_offset_sec` param is the UTC offset in seconds derived from the OWM weather response
@@ -499,7 +499,7 @@ See `docs/CODE_REVIEW.md` for the full open-issues list. Top remaining item:
 
 - `cleanText()` does 35+ sequential `replace()` calls — heap fragmentation risk on long strings
 
-Several earlier items have been resolved in master (current as of v4.0.1-wagfam):
+Several earlier items have been resolved in master (current as of v4.7.0):
 
 - `getWindDirectionText()` now uses a `PROGMEM` array (no per-call `String` allocations)
 - `savePersistentConfig()` no longer tail-calls `readPersistentConfig()`
@@ -530,8 +530,8 @@ These are tested in `tests/native/test_security_helpers/`.
 `extra_scripts = pre:scripts/build_version.py`) that injects a `BUILD_SUFFIX` into the
 firmware `VERSION` macro at compile time:
 
-- Local builds: `3.08.0-wagfam-<username>-<YYYYMMDD>-<hash>`
-- CI builds: `3.08.0-wagfam-<hash>`
+- Local builds: `4.7.0-<username>-<YYYYMMDD>-<hash>`
+- CI builds: `4.7.0-<hash>`
 - Arduino IDE (no script): falls back to `BASE_VERSION` alone
 
 Tested in `tests/scripts/test_build_version.py` with 100% coverage enforced by CI.

@@ -64,7 +64,7 @@ class TestGetBaseVersion:
 
     def test_real_sketch_returns_expected(self):
         import re
-        assert re.match(r"^\d+\.\d+\.\d+-wagfam$", build_version.get_base_version())
+        assert re.match(r"^\d+\.\d+\.\d+$", build_version.get_base_version())
 
 
 # ── compute_suffix ────────────────────────────────────────────────────────────
