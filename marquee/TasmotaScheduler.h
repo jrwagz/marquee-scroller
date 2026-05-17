@@ -65,8 +65,12 @@ bool runCronSelfTest();
 
 // ── schedule model ────────────────────────────────────────────────────────
 
-constexpr int MAX_DEVICES = 16;
-constexpr int MAX_SCHEDULES = 32;
+// Bound RAM aggressively: each entry is ~150 bytes for a schedule (with
+// CronMask + char buffers) and ~50 bytes for a device. Combined with the
+// discovery results array (TasmotaDiscovery::MAX_RESULTS) we want to stay
+// well under 5 KB total static — heap headroom is the squeeze point.
+constexpr int MAX_DEVICES = 8;
+constexpr int MAX_SCHEDULES = 8;
 constexpr int CRON_STR_MAX = 64;
 constexpr int IP_STR_MAX = 16;
 constexpr int NAME_STR_MAX = 32;
@@ -137,18 +141,57 @@ bool deleteSchedule(uint32_t id);
 
 // Fire a schedule's action immediately (for the SPA's "Test" button).
 // Returns the HTTP status code from the Tasmota, or -1 on transport error.
+// **Internal: blocks on HTTP. Safe from main loop only.** Handler context
+// should call queueRunSchedule() + drainPendingAction() instead.
 int runScheduleNow(uint32_t id);
 
+// Handler-safe variant: queues an immediate-fire request for `id`. Result
+// (last-action-result) lives in the same ProbeCache once the main loop
+// drainPendingAction() picks it up.
+bool queueRunSchedule(uint32_t id);
+void drainPendingAction();
+
 // ── direct HTTP probe (no schedule lookup) ────────────────────────────────
+//
+// These both block the caller for the full HTTP round-trip (~1s typical).
+// They are safe to call from the main loop (tickMinute, the deferred probe
+// drain — see below), but **NOT** from inside an AsyncWebServer handler,
+// where blocking causes watchdog resets / heap exhaustion. Use the
+// queueProbe / drainPendingProbe pair below for handler-context calls.
 
 // Issue a Power command to a Tasmota device. `action` accepts "ON", "OFF",
 // "TOGGLE". Returns the parsed POWER state from the response ("ON" / "OFF")
-// on success, empty string on failure. Used by both the schedule executor
-// and the SPA's "device state probe" button.
+// on success, empty string on failure.
 String setTasmotaPower(const char *ip, const char *action);
 
 // Read the current POWER state of a Tasmota at the given IP. Returns
 // "ON" / "OFF" on success, empty on failure. Wraps GET /cm?cmnd=Power.
 String readTasmotaPower(const char *ip);
+
+// ── deferred power-state probe (for HTTP handlers) ────────────────────────
+//
+// The /api/tasmota/power handler queues a probe via queueProbe(); the main
+// loop calls drainPendingProbe() each iteration to actually execute it.
+// The result is cached in lastProbe* and read back by the handler on a
+// subsequent poll. Polling cadence on the SPA side is typically 1-2s, so
+// the handler-context call returns "pending" once and the result on the
+// next poll. Same pattern the firmware uses for OTA-from-URL (see
+// pendingOtaUrl / otaFromUrlRequested in marquee.ino).
+//
+// Returns false if a different IP is currently pending (one in-flight at a
+// time keeps the loop blocking-budget bounded).
+bool queueProbe(const char *ip);
+void drainPendingProbe();  // call from main loop
+
+// Read the most recent probe result. ip will be empty until queueProbe()
+// has been called at least once and drained.
+struct ProbeCache {
+  String ip;
+  String power;        // "ON" | "OFF" | "" if unreachable
+  bool reachable;
+  bool pending;
+  uint32_t lastUpdatedMs;
+};
+const ProbeCache &getProbeCache();
 
 }  // namespace TasmotaScheduler

@@ -258,6 +258,72 @@ String readTasmotaPower(const char *ip) {
   return doc["POWER"].as<String>();
 }
 
+// ── deferred probe ────────────────────────────────────────────────────────
+
+namespace {
+ProbeCache g_probe = { String(), String(), false, false, 0 };
+String g_pendingIp;
+bool g_pending = false;
+}  // namespace
+
+bool queueProbe(const char *ip) {
+  if (g_pending) {
+    // Already a different request in flight — refuse to clobber.
+    if (g_pendingIp != ip) return false;
+    return true;  // same IP, idempotent
+  }
+  g_pendingIp = ip;
+  g_pending = true;
+  g_probe.pending = true;
+  return true;
+}
+
+void drainPendingProbe() {
+  if (!g_pending) return;
+  // Snapshot the IP and clear the pending flag BEFORE the (~1s) HTTP call.
+  // If the call crashes / watchdogs anyway we don't want to come back and
+  // immediately retry the same probe on next boot.
+  String ip = g_pendingIp;
+  g_pending = false;
+
+  String state = readTasmotaPower(ip.c_str());
+  g_probe.ip = ip;
+  g_probe.power = state;
+  g_probe.reachable = state.length() > 0;
+  g_probe.pending = false;
+  g_probe.lastUpdatedMs = millis();
+}
+
+const ProbeCache &getProbeCache() { return g_probe; }
+
+namespace {
+uint32_t g_pendingActionScheduleId = 0;  // 0 = none queued
+}  // namespace
+
+bool queueRunSchedule(uint32_t id) {
+  if (g_pendingActionScheduleId != 0) return false;  // one in flight at a time
+  // Walk schedules inline rather than use the anonymous-namespace helper,
+  // which isn't reachable from this translation-unit-public function.
+  bool found = false;
+  for (int i = 0; i < g_scheduleCount; i++) {
+    if (g_schedules[i].id == id) { found = true; break; }
+  }
+  if (!found) return false;
+  g_pendingActionScheduleId = id;
+  return true;
+}
+
+void drainPendingAction() {
+  if (g_pendingActionScheduleId == 0) return;
+  uint32_t id = g_pendingActionScheduleId;
+  g_pendingActionScheduleId = 0;  // clear before HTTP so a crash doesn't loop
+  Serial.printf_P(PSTR("[tasmota] handler-deferred run for schedule #%u\n"),
+                  (unsigned)id);
+  runScheduleNow(id);  // result feeds into the schedule's own state +
+                       // serial log; the SPA can poll Power separately to
+                       // confirm the action took effect
+}
+
 // ── persistence ───────────────────────────────────────────────────────────
 
 void loadFromDisk() {

@@ -32,7 +32,7 @@
 
 namespace TasmotaDiscovery {
 
-constexpr int MAX_RESULTS = 32;
+constexpr int MAX_RESULTS = 16;
 constexpr int NAME_STR_MAX = 32;
 constexpr int IP_STR_MAX = 16;
 constexpr int HOST_STR_MAX = 32;

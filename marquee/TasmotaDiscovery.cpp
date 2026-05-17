@@ -36,8 +36,12 @@ bool g_pingInFlight = false;
 IPAddress g_pendingProbeIp = IPAddress(0u);
 bool g_hasPendingProbe = false;
 
-constexpr uint16_t PING_TIMEOUT_MS = 200;
-constexpr uint16_t HTTP_PROBE_TIMEOUT_MS = 500;
+// Originally 200ms — empirically that was too aggressive over WiFi; pings
+// to known-alive hosts (gateway, Tasmota at .241, Mac at .198) all reported
+// as timeouts. Bumping to 500ms catches typical LAN reply latency
+// (~5-50ms) plus the ESP8266 WiFi-stack queue delay.
+constexpr uint16_t PING_TIMEOUT_MS = 500;
+constexpr uint16_t HTTP_PROBE_TIMEOUT_MS = 1000;
 
 // ── HTTP probe ────────────────────────────────────────────────────────────
 //
@@ -241,7 +245,11 @@ void tick() {
   g_progress.pingsSent++;
 
   g_pinger.on(true, [target](const AsyncPingResponse &resp) -> bool {
-    if (!resp.timeout && resp.total_recv > 0) {
+    // resp.answer is the "got a reply this round" boolean. resp.timeout is
+    // the configured timeout in ms (poorly named in the library — it is
+    // *not* a "did we time out" flag), so checking it was a no-op bug that
+    // made every ping look like a failure.
+    if (resp.answer) {
       g_progress.pingsResponded++;
       g_pendingProbeIp = target;
       g_hasPendingProbe = true;

@@ -777,6 +777,15 @@ void loop() {
   // one ICMP ping (or one deferred HTTP probe) per call when running.
   TasmotaDiscovery::tick();
 
+  // Drain a deferred Tasmota power-state probe queued by the
+  // /api/tasmota/power handler. The actual HTTP call (~1s blocking) happens
+  // here on the main task — safe because the loop already tolerates ~1s of
+  // blocking work (display scroll, calendar fetch, etc.) but unsafe to do
+  // from an AsyncWebServer handler context.
+  TasmotaScheduler::drainPendingProbe();
+  // Same defer pattern for "Test now" schedule fires from /api/tasmota/schedule/run.
+  TasmotaScheduler::drainPendingAction();
+
   if (lastSecond != second()) {
     lastSecond = second();
     displayTime = hourMinutes(false); // rebuild once per second, not every frame
@@ -2545,28 +2554,54 @@ void handleApiTasmotaScheduleDelete(AsyncWebServerRequest *request) {
   sendJsonOk(request, "deleted");
 }
 
+// Handler-context "Test now" — queue an immediate fire of the schedule and
+// return 202. Main loop's drainPendingAction() does the HTTP call. SPA
+// confirms the action took effect by polling /api/tasmota/power for the
+// target IP afterward.
 void handleApiTasmotaScheduleRun(AsyncWebServerRequest *request) {
   if (!request->hasParam("id")) {
     return sendJsonError(request, 400, "missing ?id=N");
   }
   uint32_t id = (uint32_t)request->getParam("id")->value().toInt();
-  int rc = TasmotaScheduler::runScheduleNow(id);
-  if (rc < 0) {
-    return sendJsonError(request, 502, "schedule not found or Tasmota unreachable");
+  if (!TasmotaScheduler::queueRunSchedule(id)) {
+    return sendJsonError(request, 409, "schedule not found, or another fire is in flight");
   }
-  sendJsonOk(request, "fired");
+  JsonDocument doc;
+  doc["status"] = "queued";
+  doc["schedule_id"] = id;
+  sendJsonResponse(request, 202, doc);
 }
 
+// /api/tasmota/power?ip=X — request the live power state. The handler
+// queues a deferred probe and returns the cached state immediately
+// (could be stale or empty on the very first call). The main loop's
+// drainPendingProbe() does the actual HTTP round-trip on the next tick
+// and the result is visible to subsequent GET calls. SPA polls this
+// every 1-2 s, so the user sees the updated state shortly after their
+// click. This deferral pattern is required: doing the HTTP call directly
+// in the handler causes watchdog/exception resets when heap is tight
+// (see feedback_async_handlers_must_not_block; also OTA-from-URL).
 void handleApiTasmotaPower(AsyncWebServerRequest *request) {
   if (!request->hasParam("ip")) {
     return sendJsonError(request, 400, "missing ?ip=X");
   }
   String ip = request->getParam("ip")->value();
-  String state = TasmotaScheduler::readTasmotaPower(ip.c_str());
+  bool queued = TasmotaScheduler::queueProbe(ip.c_str());
+  const auto &cache = TasmotaScheduler::getProbeCache();
   JsonDocument doc;
   doc["ip"] = ip;
-  doc["power"] = state;
-  doc["reachable"] = state.length() > 0;
+  doc["queued"] = queued;
+  // Surface the most recent cached result if it's for the same IP, else
+  // mark "no data yet" so the SPA knows to keep polling.
+  if (cache.ip == ip && cache.lastUpdatedMs > 0) {
+    doc["power"] = cache.power;
+    doc["reachable"] = cache.reachable;
+    doc["last_updated_ms_ago"] = (uint32_t)(millis() - cache.lastUpdatedMs);
+  } else {
+    doc["power"] = "";
+    doc["reachable"] = false;
+  }
+  doc["pending"] = cache.pending || queued;
   sendJsonResponse(request, 200, doc);
 }
 
