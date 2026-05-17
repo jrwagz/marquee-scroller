@@ -297,6 +297,45 @@ void drainPendingProbe() {
 const ProbeCache &getProbeCache() { return g_probe; }
 
 namespace {
+String g_pendingSetPowerIp;
+String g_pendingSetPowerAction;
+}  // namespace
+
+bool queueSetPower(const char *ip, const char *action) {
+  if (!ip || !*ip || !action || !*action) return false;
+  if (strcasecmp(action, "ON") && strcasecmp(action, "OFF") &&
+      strcasecmp(action, "TOGGLE")) {
+    return false;
+  }
+  if (g_pendingSetPowerIp.length() > 0) return false;
+  g_pendingSetPowerIp = ip;
+  g_pendingSetPowerAction = action;
+  // Show "pending" on the same IP so the SPA's existing /api/tasmota/power
+  // polling reflects the in-flight action.
+  g_probe.ip = g_pendingSetPowerIp;
+  g_probe.pending = true;
+  return true;
+}
+
+void drainPendingSetPower() {
+  if (g_pendingSetPowerIp.length() == 0) return;
+  String ip = g_pendingSetPowerIp;
+  String action = g_pendingSetPowerAction;
+  g_pendingSetPowerIp = String();
+  g_pendingSetPowerAction = String();
+
+  String state = setTasmotaPower(ip.c_str(), action.c_str());
+  g_probe.ip = ip;
+  g_probe.power = state;
+  g_probe.reachable = state.length() > 0;
+  g_probe.pending = false;
+  g_probe.lastUpdatedMs = millis();
+  Serial.printf_P(PSTR("[tasmota] handler-deferred Power %s → %s = %s\n"),
+                  action.c_str(), ip.c_str(),
+                  state.length() ? state.c_str() : "(unreachable)");
+}
+
+namespace {
 uint32_t g_pendingActionScheduleId = 0;  // 0 = none queued
 }  // namespace
 

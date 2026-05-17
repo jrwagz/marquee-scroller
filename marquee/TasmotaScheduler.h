@@ -183,6 +183,17 @@ String readTasmotaPower(const char *ip);
 bool queueProbe(const char *ip);
 void drainPendingProbe();  // call from main loop
 
+// Handler-safe variant of setTasmotaPower(). Queues an ON/OFF/TOGGLE for the
+// given IP; the main loop's drainPendingSetPower() does the blocking HTTP
+// call and writes the resulting POWER state back into the same ProbeCache
+// the GET /api/tasmota/power endpoint reads. Action is one of "ON" / "OFF"
+// / "TOGGLE" (case-insensitive). Used by the SPA's per-device control
+// buttons so the user can identify which physical switch each entry is.
+// Returns false if another power action is already queued, or the action
+// string is not one of the three accepted values.
+bool queueSetPower(const char *ip, const char *action);
+void drainPendingSetPower();  // call from main loop
+
 // Read the most recent probe result. ip will be empty until queueProbe()
 // has been called at least once and drained.
 struct ProbeCache {

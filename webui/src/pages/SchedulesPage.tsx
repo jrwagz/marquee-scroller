@@ -27,6 +27,7 @@ import {
   deleteTasmotaSchedule,
   runTasmotaScheduleNow,
   getTasmotaPower,
+  postTasmotaPower,
   startTasmotaDiscovery,
   getTasmotaDiscoveryState,
 } from "../api";
@@ -98,6 +99,41 @@ async function probePower(ip: string) {
   } catch {
     livePower.value = { ...livePower.value, [ip]: "—" };
   }
+}
+
+// Fire a power action against a Tasmota by IP, then re-probe so the cached
+// state row updates. Used by the per-device control buttons — lets the user
+// physically identify which switch each entry is when setting up schedules
+// (click ON, see which light comes on across the room).
+async function controlPower(ip: string, action: "ON" | "OFF" | "TOGGLE") {
+  livePower.value = { ...livePower.value, [ip]: "…" };
+  try {
+    await postTasmotaPower(ip, action);
+  } catch (e) {
+    livePower.value = { ...livePower.value, [ip]: "err" };
+    alert(`Power ${action} failed: ${(e as Error).message}`);
+    return;
+  }
+  // Backend queues the HTTP call and the main loop drains it on its next
+  // tick; the new POWER state lands in the same probe cache. Poll a couple
+  // of times until "pending" clears or we time out.
+  for (let i = 0; i < 6; i++) {
+    await new Promise((r) => setTimeout(r, 600));
+    try {
+      const data = await getTasmotaPower(ip);
+      if (!data.pending) {
+        livePower.value = {
+          ...livePower.value,
+          [ip]: data.reachable ? data.power : "—",
+        };
+        return;
+      }
+    } catch {
+      // keep polling
+    }
+  }
+  // Timed out — leave a hint that something is off rather than wedging "…".
+  livePower.value = { ...livePower.value, [ip]: "?" };
 }
 
 async function saveDevices() {
@@ -261,6 +297,39 @@ export function SchedulesPage() {
   );
 }
 
+// Per-device power control buttons. Used in both the Devices table (post-
+// import) and the Auto-detect results table (pre-import) so the user can
+// identify which physical switch each entry maps to before committing it
+// to a schedule.
+function PowerControls({ ip, disabled }: { ip: string; disabled?: boolean }) {
+  const off = disabled || !ip;
+  return (
+    <span class="power-controls">
+      <button
+        class="link-btn"
+        disabled={off}
+        onClick={() => void controlPower(ip, "ON")}
+      >
+        ON
+      </button>{" "}
+      <button
+        class="link-btn"
+        disabled={off}
+        onClick={() => void controlPower(ip, "OFF")}
+      >
+        OFF
+      </button>{" "}
+      <button
+        class="link-btn"
+        disabled={off}
+        onClick={() => void controlPower(ip, "TOGGLE")}
+      >
+        TOGGLE
+      </button>
+    </span>
+  );
+}
+
 function DevicesCard() {
   const list = devices.value;
   return (
@@ -272,7 +341,9 @@ function DevicesCard() {
       </header>
       <p class="muted">
         IPs the clock controls. Schedules reference these by IP. Power state
-        is probed live (✓ = reachable + state, "—" = no response).
+        is probed live (✓ = reachable + state, "—" = no response). Use the
+        ON / OFF / TOGGLE buttons to identify which physical switch each
+        entry maps to before scheduling.
       </p>
 
       {devicesError.value && <p class="error">{devicesError.value}</p>}
@@ -283,6 +354,7 @@ function DevicesCard() {
             <th>IP</th>
             <th>Name</th>
             <th>State</th>
+            <th>Control</th>
             <th />
           </tr>
         </thead>
@@ -320,6 +392,9 @@ function DevicesCard() {
                 <button class="link-btn" onClick={() => void probePower(d.ip)}>
                   probe
                 </button>
+              </td>
+              <td>
+                <PowerControls ip={d.ip} disabled={!d.ip} />
               </td>
               <td>
                 <button
@@ -406,6 +481,10 @@ function DiscoveryCard() {
 
       {data && data.results.length > 0 && (
         <>
+          <p class="muted small">
+            Tip: use the ON / OFF / TOGGLE buttons to identify each device
+            before importing.
+          </p>
           <table class="net-table">
             <thead>
               <tr>
@@ -414,6 +493,7 @@ function DiscoveryCard() {
                 <th>Name</th>
                 <th>Hostname</th>
                 <th>Source</th>
+                <th>Control</th>
               </tr>
             </thead>
             <tbody>
@@ -436,6 +516,9 @@ function DiscoveryCard() {
                     <td>
                       <span class={`tag tag-${d.source}`}>{d.source}</span>
                       {already && <span class="muted small"> · already added</span>}
+                    </td>
+                    <td>
+                      <PowerControls ip={d.ip} />
                     </td>
                   </tr>
                 );

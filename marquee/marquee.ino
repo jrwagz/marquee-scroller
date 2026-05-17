@@ -71,7 +71,7 @@ static const ScrollerFont SCROLLER_FONTS[] = {
 };
 static const int SCROLLER_FONT_COUNT = sizeof(SCROLLER_FONTS) / sizeof(SCROLLER_FONTS[0]);
 
-#define BASE_VERSION "4.4.2-wagfam"
+#define BASE_VERSION "4.5.0-wagfam"
 #ifdef BUILD_SUFFIX
 #define VERSION BASE_VERSION BUILD_SUFFIX
 #else
@@ -156,6 +156,7 @@ void handleApiTasmotaSchedulePut(AsyncWebServerRequest *request, JsonVariant &js
 void handleApiTasmotaScheduleDelete(AsyncWebServerRequest *request);
 void handleApiTasmotaScheduleRun(AsyncWebServerRequest *request);
 void handleApiTasmotaPower(AsyncWebServerRequest *request);
+void handleApiTasmotaPowerSet(AsyncWebServerRequest *request);
 void handleApiTasmotaDiscoverStart(AsyncWebServerRequest *request);
 void handleApiTasmotaDiscoverState(AsyncWebServerRequest *request);
 void handleApiTasmotaDiscoverProbe(AsyncWebServerRequest *request);
@@ -478,6 +479,7 @@ void setup() {
   server.on("/api/tasmota/schedules", HTTP_DELETE, handleApiTasmotaScheduleDelete);  // ?id=N
   server.on("/api/tasmota/schedule/run", HTTP_POST, handleApiTasmotaScheduleRun);    // ?id=N
   server.on("/api/tasmota/power", HTTP_GET, handleApiTasmotaPower);                  // ?ip=X
+  server.on("/api/tasmota/power", HTTP_POST, handleApiTasmotaPowerSet);               // ?ip=X&action=ON|OFF|TOGGLE
   server.on("/api/tasmota/discover", HTTP_POST, handleApiTasmotaDiscoverStart);
   server.on("/api/tasmota/discover/state", HTTP_GET, handleApiTasmotaDiscoverState);
   server.on("/api/tasmota/discover/probe", HTTP_GET, handleApiTasmotaDiscoverProbe);  // ?ip=X
@@ -785,6 +787,8 @@ void loop() {
   TasmotaScheduler::drainPendingProbe();
   // Same defer pattern for "Test now" schedule fires from /api/tasmota/schedule/run.
   TasmotaScheduler::drainPendingAction();
+  // Same defer pattern for direct power-control buttons (POST /api/tasmota/power).
+  TasmotaScheduler::drainPendingSetPower();
 
   if (lastSecond != second()) {
     lastSecond = second();
@@ -2603,6 +2607,30 @@ void handleApiTasmotaPower(AsyncWebServerRequest *request) {
   }
   doc["pending"] = cache.pending || queued;
   sendJsonResponse(request, 200, doc);
+}
+
+// POST /api/tasmota/power?ip=X&action=ON|OFF|TOGGLE — user-triggered switch
+// control. Same deferred pattern as the GET probe: queue, return 202, drain
+// from the main loop. The resulting POWER state lands in the same ProbeCache
+// the GET endpoint reads, so the SPA's existing live-state polling reflects
+// the new state automatically. Used by the per-device buttons in the SPA so
+// the user can identify which physical switch each entry is when setting up
+// schedules.
+void handleApiTasmotaPowerSet(AsyncWebServerRequest *request) {
+  if (!request->hasParam("ip") || !request->hasParam("action")) {
+    return sendJsonError(request, 400, "missing ?ip=X&action=ON|OFF|TOGGLE");
+  }
+  String ip = request->getParam("ip")->value();
+  String action = request->getParam("action")->value();
+  if (!TasmotaScheduler::queueSetPower(ip.c_str(), action.c_str())) {
+    return sendJsonError(request, 409,
+                         "another power action is queued, or action is not ON/OFF/TOGGLE");
+  }
+  JsonDocument doc;
+  doc["status"] = "queued";
+  doc["ip"] = ip;
+  doc["action"] = action;
+  sendJsonResponse(request, 202, doc);
 }
 
 // ── Tasmota auto-discovery ────────────────────────────────────────────────

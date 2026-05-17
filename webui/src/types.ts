@@ -158,6 +158,11 @@ export interface TasmotaPowerProbeData {
   ip: string;
   power: string;       // "ON" | "OFF" | "" if unreachable
   reachable: boolean;
+  // Both fields below are set by the firmware (≥ this PR). Optional so the
+  // SPA still typechecks against older /api/tasmota/power responses.
+  pending?: boolean;
+  queued?: boolean;
+  last_updated_ms_ago?: number;
 }
 
 export interface TasmotaDiscoveryProgress {

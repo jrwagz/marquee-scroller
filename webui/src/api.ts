@@ -125,6 +125,15 @@ export const runTasmotaScheduleNow = (id: number): Promise<ActionAck> =>
 export const getTasmotaPower = (ip: string): Promise<TasmotaPowerProbeData> =>
   apiFetch<TasmotaPowerProbeData>(`/api/tasmota/power?ip=${encodeURIComponent(ip)}`);
 
+export const postTasmotaPower = (
+  ip: string,
+  action: "ON" | "OFF" | "TOGGLE",
+): Promise<ActionAck> =>
+  apiFetch<ActionAck>(
+    `/api/tasmota/power?ip=${encodeURIComponent(ip)}&action=${action}`,
+    { method: "POST", headers: POST_HEADERS },
+  );
+
 export const startTasmotaDiscovery = (): Promise<unknown> =>
   apiFetch<unknown>("/api/tasmota/discover", {
     method: "POST",
