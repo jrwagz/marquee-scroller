@@ -7,6 +7,8 @@
 #include <ESP8266mDNS.h>
 #include <LittleFS.h>
 #include <TimeLib.h>
+#include <lwip/etharp.h>
+#include <lwip/netif.h>
 
 namespace TasmotaDiscovery {
 
@@ -29,6 +31,23 @@ DiscoveredDevice g_results[MAX_RESULTS];
 int g_resultCount = 0;
 uint32_t g_idCounter = 0;
 
+// Belt-and-suspenders accounting: capture (IP, MAC) pairs *as the ping
+// sweep produces them*, not by walking lwIP's ARP cache at the end. The
+// ESP8266's ETHARP_TABLE_SIZE defaults to 10, so by the time a /24 sweep
+// finishes the cache has evicted ~80% of the entries. Snapshotting on
+// every ping reply is the only way to record them all without rebuilding
+// lwIP with a bigger table. Sized for typical home LANs (64 hosts);
+// extras past this cap are silently dropped.
+constexpr int MAX_ARP_ENTRIES = 64;
+constexpr int MAC_STR_MAX = 18;  // "xx:xx:xx:xx:xx:xx" + null
+
+struct ArpEntry {
+  char ip[IP_STR_MAX];
+  char mac[MAC_STR_MAX];
+};
+ArpEntry g_arp[MAX_ARP_ENTRIES];
+int g_arpCount = 0;
+
 AsyncPing g_pinger;
 bool g_pingInFlight = false;
 // When a ping completes successfully, we stash the IP here so the next
@@ -42,6 +61,67 @@ bool g_hasPendingProbe = false;
 // (~5-50ms) plus the ESP8266 WiFi-stack queue delay.
 constexpr uint16_t PING_TIMEOUT_MS = 500;
 constexpr uint16_t HTTP_PROBE_TIMEOUT_MS = 1000;
+
+// ── ARP capture ───────────────────────────────────────────────────────────
+//
+// Called from the ping callback when a host replies. Prefers the MAC the
+// AsyncPing library already captured from its own etharp_find_addr at
+// ICMP-reply time (resp.mac in the AsyncPingResponse) — that lookup
+// happens ~1 ms earlier than our user callback fires, so the ARP cache
+// is one fewer ping-cycle stale. Falls back to a fresh etharp_find_addr
+// if the library failed to capture (resp.mac was NULL).
+//
+// Walking the global ARP table at end-of-scan doesn't work because
+// ETHARP_TABLE_SIZE defaults to 10 — earlier replies get evicted long
+// before tick() reaches Done. Per-reply capture sidesteps that, and
+// reading resp.mac sidesteps the 1ms eviction window our own lookup
+// would otherwise sit on top of.
+
+void captureArpForIp(const IPAddress &ip, const struct eth_addr *libMac) {
+  if (g_arpCount >= MAX_ARP_ENTRIES) return;
+
+  const struct eth_addr *mac = libMac;
+
+  // Fallback: AsyncPing's lookup failed at packet-arrival time. Try once
+  // more from our callback context — better than dropping the entry.
+  struct eth_addr *fallback = nullptr;
+  if (!mac) {
+    ip4_addr_t target;
+    IP4_ADDR(&target, ip[0], ip[1], ip[2], ip[3]);
+    const ip4_addr_t *resolved = nullptr;
+    if (etharp_find_addr(netif_default, &target, &fallback, &resolved) < 0) return;
+    mac = fallback;
+  }
+  if (!mac) return;
+
+  ArpEntry &e = g_arp[g_arpCount];
+  snprintf(e.ip, sizeof(e.ip), "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
+  snprintf(e.mac, sizeof(e.mac), "%02x:%02x:%02x:%02x:%02x:%02x",
+           mac->addr[0], mac->addr[1], mac->addr[2],
+           mac->addr[3], mac->addr[4], mac->addr[5]);
+  g_arpCount++;
+}
+
+void writeArpFile(uint32_t scan_id) {
+  File f = LittleFS.open(ARP_FILE, "w");
+  if (!f) {
+    Serial.println(F("[discover] FAILED to open ARP file for write"));
+    return;
+  }
+  JsonDocument doc;
+  doc["scan_id"] = scan_id;
+  doc["completed_at_unix"] = (uint32_t)now();
+  JsonArray arr = doc["entries"].to<JsonArray>();
+  for (int i = 0; i < g_arpCount; i++) {
+    JsonObject o = arr.add<JsonObject>();
+    o["ip"] = g_arp[i].ip;
+    o["mac"] = g_arp[i].mac;
+  }
+  serializeJson(doc, f);
+  f.close();
+  Serial.printf_P(PSTR("[discover] wrote %d ARP entr(y/ies) to %s\n"),
+                  g_arpCount, ARP_FILE);
+}
 
 // ── HTTP probe ────────────────────────────────────────────────────────────
 //
@@ -153,6 +233,7 @@ bool start() {
   if (local == IPAddress(0u)) return false;
 
   g_resultCount = 0;
+  g_arpCount = 0;
   g_progress.state = DiscoveryState::MdnsQuery;
   g_progress.id = ++g_idCounter;
   g_progress.startedAtMs = millis();
@@ -230,6 +311,8 @@ void tick() {
     } else {
       Serial.println(F("[discover] FAILED to open discovered file for write"));
     }
+
+    writeArpFile(g_progress.id);
     return;
   }
 
@@ -253,6 +336,7 @@ void tick() {
       g_progress.pingsResponded++;
       g_pendingProbeIp = target;
       g_hasPendingProbe = true;
+      captureArpForIp(target, resp.mac);
     }
     g_progress.currentHostByte++;
     g_pingInFlight = false;
@@ -276,6 +360,14 @@ bool probeOne(const char *ip, DiscoveredDevice *out) {
 
 String readPersistedResults() {
   File f = LittleFS.open(DISCOVERED_FILE, "r");
+  if (!f) return String();
+  String s = f.readString();
+  f.close();
+  return s;
+}
+
+String readPersistedArpTable() {
+  File f = LittleFS.open(ARP_FILE, "r");
   if (!f) return String();
   String s = f.readString();
   f.close();

@@ -161,6 +161,7 @@ void handleApiTasmotaDiscoverStart(AsyncWebServerRequest *request);
 void handleApiTasmotaDiscoverState(AsyncWebServerRequest *request);
 void handleApiTasmotaDiscoverProbe(AsyncWebServerRequest *request);
 void handleApiTasmotaDiscoveredGet(AsyncWebServerRequest *request);
+void handleApiTasmotaArpGet(AsyncWebServerRequest *request);
 
 // LED Settings
 int spacer = 1;  // dots between letters
@@ -487,6 +488,11 @@ void setup() {
   // Designed for a future server-side fetcher that snapshots this per-clock
   // so a replacement clock can have its inventory restored.
   server.on("/api/tasmota/discovered", HTTP_GET, handleApiTasmotaDiscoveredGet);
+  // /api/tasmota/arp returns the ARP-cache dump written at the end of each
+  // scan (from /lan_arp.json). Superset of /discovered — every host that
+  // answered ARP, with MAC. Used as a fallback inventory when HTTP probes
+  // failed to identify a known Tasmota.
+  server.on("/api/tasmota/arp", HTTP_GET, handleApiTasmotaArpGet);
 
   // CORS preflight (OPTIONS) for every JSON-API endpoint. Without these,
   // the firmware's onNotFound 302-redirects unmatched OPTIONS to /spa/,
@@ -2713,6 +2719,21 @@ void handleApiTasmotaDiscoveredGet(AsyncWebServerRequest *request) {
   String body = TasmotaDiscovery::readPersistedResults();
   if (body.length() == 0) {
     resp->print("{\"results\":[],\"scan_id\":0}");
+  } else {
+    resp->print(body);
+  }
+  request->send(resp);
+}
+
+// Returns the raw /lan_arp.json file. Dumped at the end of every
+// discovery scan; superset of /tasmota_discovered.json carrying every
+// (IP, MAC) the ESP saw answer ARP during the ping sweep.
+void handleApiTasmotaArpGet(AsyncWebServerRequest *request) {
+  AsyncResponseStream *resp = request->beginResponseStream(F("application/json"));
+  setCorsHeaders(request, resp);
+  String body = TasmotaDiscovery::readPersistedArpTable();
+  if (body.length() == 0) {
+    resp->print("{\"entries\":[],\"scan_id\":0}");
   } else {
     resp->print(body);
   }

@@ -101,4 +101,17 @@ constexpr const char *DISCOVERED_FILE = "/tasmota_discovered.json";
 // scan has been written yet. Caller passes to the SPA as-is.
 String readPersistedResults();
 
+// At the end of each scan we also dump the lwIP ARP table to a separate
+// file. The ping sweep populates ARP as a side effect, so this is "every
+// IP on the /24 that answered ARP, plus a MAC for each" — a superset of
+// the Tasmota-identified results in DISCOVERED_FILE. Used as a
+// belt-and-suspenders accounting layer: if a Tasmota's HTTP probe fails
+// (busy, momentarily wedged, firewalled) it's still in ARP via the ping,
+// and a future restore flow can correlate by MAC even when IPs shift.
+constexpr const char *ARP_FILE = "/lan_arp.json";
+
+// Read the persisted ARP dump (raw JSON). Returns empty string if no
+// scan has been written yet.
+String readPersistedArpTable();
+
 }  // namespace TasmotaDiscovery
