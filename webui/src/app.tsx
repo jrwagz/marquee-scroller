@@ -4,6 +4,7 @@ import { StatusPage } from "./pages/StatusPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { ActionsPage } from "./pages/ActionsPage";
 import { SchedulesPage } from "./pages/SchedulesPage";
+import { Footer } from "./pages/Footer";
 
 type Tab = "home" | "status" | "settings" | "actions" | "schedules";
 
@@ -39,6 +40,7 @@ export function App() {
       {activeTab.value === "settings" && <SettingsPage />}
       {activeTab.value === "actions" && <ActionsPage />}
       {activeTab.value === "schedules" && <SchedulesPage />}
+      <Footer />
     </main>
   );
 }
