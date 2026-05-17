@@ -3,8 +3,10 @@ import { HomePage } from "./pages/HomePage";
 import { StatusPage } from "./pages/StatusPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { ActionsPage } from "./pages/ActionsPage";
+import { SchedulesPage } from "./pages/SchedulesPage";
+import { Footer } from "./pages/Footer";
 
-type Tab = "home" | "status" | "settings" | "actions";
+type Tab = "home" | "status" | "settings" | "actions" | "schedules";
 
 const activeTab = signal<Tab>("home");
 
@@ -13,6 +15,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "status", label: "Status" },
   { id: "settings", label: "Settings" },
   { id: "actions", label: "Actions" },
+  { id: "schedules", label: "Schedules" },
 ];
 
 export function App() {
@@ -36,6 +39,8 @@ export function App() {
       {activeTab.value === "status" && <StatusPage />}
       {activeTab.value === "settings" && <SettingsPage />}
       {activeTab.value === "actions" && <ActionsPage />}
+      {activeTab.value === "schedules" && <SchedulesPage />}
+      <Footer />
     </main>
   );
 }

@@ -484,3 +484,134 @@ input[type="checkbox"].toggle:checked::after {
   color: var(--muted);
   margin-top: 0.5rem;
 }
+
+/* ── Schedules tab ─────────────────────────────────────────────────────── */
+
+.schedules-page { display: flex; flex-direction: column; gap: 1.25rem; }
+.schedules-page .card-header {
+  display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem;
+}
+.schedules-page .card-header h2 { margin: 0; flex: 1; }
+
+.card-actions {
+  display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.75rem;
+}
+.card-actions .primary { font-weight: 600; }
+
+.net-table {
+  width: 100%; border-collapse: collapse; font-size: 0.95rem; margin: 0.5rem 0;
+}
+.net-table th, .net-table td {
+  text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--border);
+}
+.net-table th { font-weight: 600; color: var(--muted); font-size: 0.85rem; }
+.net-table input { width: 100%; box-sizing: border-box; }
+.net-table .row-bad { background: rgba(255, 80, 80, 0.06); }
+
+.schedule-form { display: flex; flex-direction: column; gap: 0.75rem; }
+.schedule-form label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85rem; }
+.schedule-form label.inline {
+  flex-direction: row; align-items: center; gap: 0.4rem; font-size: 0.95rem;
+}
+.schedule-form input, .schedule-form select { padding: 0.4rem; }
+.schedule-form .row { display: flex; gap: 0.75rem; }
+.schedule-form .row label { flex: 1; }
+
+.cron-picker { padding: 0.5rem; border: 1px dashed var(--border); border-radius: 6px; }
+.cron-header { display: flex; align-items: center; gap: 1rem; font-size: 0.9rem; margin-bottom: 0.5rem; }
+.dow-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.5rem 0; }
+.dow-chip {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  padding: 0.25rem 0.5rem; border: 1px solid var(--border); border-radius: 999px;
+  font-size: 0.85rem;
+}
+.presets { display: flex; gap: 0.4rem; }
+.presets button { font-size: 0.85rem; padding: 0.3rem 0.75rem; }
+
+.error-inline { color: var(--red, #b00020); font-size: 0.85em; }
+.link-btn { background: none; border: none; color: var(--accent, #0066cc); cursor: pointer; padding: 0; font: inherit; }
+.link-btn:hover { text-decoration: underline; }
+
+/* ── Discovery card ─────────────────────────────────────────────────────── */
+
+.progress-bar {
+  height: 6px; background: var(--border); border-radius: 3px;
+  overflow: hidden; margin-top: 0.5rem;
+}
+.progress-fill {
+  height: 100%; background: var(--accent, #0066cc); transition: width 0.3s;
+}
+.scan-progress {
+  font-size: 0.9rem; padding: 0.5rem 0.75rem;
+  background: var(--bg-elev, rgba(0, 0, 0, 0.03));
+  border-radius: 4px; margin: 0.5rem 0;
+}
+.net-table .row-muted { opacity: 0.5; }
+.tag {
+  display: inline-block; padding: 0.1rem 0.4rem; border-radius: 999px;
+  font-size: 0.75rem; background: var(--border);
+}
+.tag-mdns { background: rgba(102, 187, 106, 0.2); color: #2e7d32; }
+.tag-scan { background: rgba(96, 165, 250, 0.2); color: #1565c0; }
+.tag-manual { background: rgba(245, 158, 11, 0.2); color: #b45309; }
+
+/* ── SPA footer ── */
+
+.spa-footer {
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid color-mix(in srgb, var(--muted) 20%, transparent);
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.spa-footer .footer-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.5rem;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.spa-footer code {
+  font-size: 0.85rem;
+  color: var(--fg);
+}
+
+.version-mismatch {
+  margin-bottom: 0.75rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid color-mix(in srgb, #d97706 40%, transparent);
+  background: color-mix(in srgb, #fbbf24 12%, transparent);
+  border-radius: var(--radius);
+  color: var(--fg);
+}
+
+.version-mismatch p { margin: 0 0 0.5rem 0; }
+
+.refresh-instructions summary {
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.refresh-instructions ul {
+  margin: 0.5rem 0 0 0;
+  padding-left: 1.25rem;
+}
+
+.refresh-instructions li { margin: 0.25rem 0; }
+
+.refresh-instructions .primary-platform {
+  list-style: "→ ";
+  font-weight: 500;
+}
+
+.refresh-instructions kbd {
+  display: inline-block;
+  padding: 0.05rem 0.35rem;
+  border: 1px solid color-mix(in srgb, var(--muted) 40%, transparent);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--muted) 8%, transparent);
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+}

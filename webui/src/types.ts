@@ -116,3 +116,76 @@ export interface ConfigData {
   auto_update_enabled?: boolean;
   auto_update_compile_disabled?: boolean;
 }
+
+// ── Tasmota scheduler ──────────────────────────────────────────────────────
+
+export interface TasmotaDevice {
+  ip: string;
+  name: string;
+}
+
+export interface TasmotaDevicesData {
+  devices: TasmotaDevice[];
+  max: number;
+}
+
+export type TasmotaActionStr = "ON" | "OFF" | "TOGGLE";
+
+export interface TasmotaSchedule {
+  id: number;
+  ip: string;
+  cron: string;
+  action: TasmotaActionStr;
+  enabled: boolean;
+  name: string;
+  cron_valid: boolean;
+}
+
+export interface TasmotaSchedulesData {
+  schedules: TasmotaSchedule[];
+  max: number;
+}
+
+export interface TasmotaScheduleInput {
+  ip: string;
+  cron: string;
+  action: TasmotaActionStr;
+  enabled?: boolean;
+  name?: string;
+}
+
+export interface TasmotaPowerProbeData {
+  ip: string;
+  power: string;       // "ON" | "OFF" | "" if unreachable
+  reachable: boolean;
+  // Both fields below are set by the firmware (≥ this PR). Optional so the
+  // SPA still typechecks against older /api/tasmota/power responses.
+  pending?: boolean;
+  queued?: boolean;
+  last_updated_ms_ago?: number;
+}
+
+export interface TasmotaDiscoveryProgress {
+  state: "idle" | "mdns" | "scanning" | "done";
+  id: number;
+  started_at_ms: number;
+  completed_at_ms: number;
+  pings_sent: number;
+  pings_responded: number;
+  http_probed: number;
+  tasmota_found: number;
+  current_host_byte: number;
+  base_ip: string;
+}
+
+export interface TasmotaDiscoveredDevice {
+  ip: string;
+  name: string;
+  hostname: string;
+  source: "mdns" | "scan" | "manual";
+}
+
+export interface TasmotaDiscoveryData {
+  progress: TasmotaDiscoveryProgress;
+  results: TasmotaDiscoveredDevice[];
+}

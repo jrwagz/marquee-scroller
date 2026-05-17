@@ -4,6 +4,12 @@ import type {
   WeatherData,
   EventsData,
   ActionAck,
+  TasmotaDevicesData,
+  TasmotaDevice,
+  TasmotaSchedulesData,
+  TasmotaScheduleInput,
+  TasmotaPowerProbeData,
+  TasmotaDiscoveryData,
 } from "./types";
 
 const POST_HEADERS = {
@@ -70,3 +76,69 @@ export const postSpaUpdateFromUrl = (url: string): Promise<ActionAck> =>
     headers: POST_HEADERS,
     body: JSON.stringify({ url }),
   });
+
+// ── Tasmota scheduler ──────────────────────────────────────────────────────
+
+export const getTasmotaDevices = (): Promise<TasmotaDevicesData> =>
+  apiFetch<TasmotaDevicesData>("/api/tasmota/devices");
+
+export const putTasmotaDevices = (
+  devices: TasmotaDevice[],
+): Promise<TasmotaDevicesData> =>
+  apiFetch<TasmotaDevicesData>("/api/tasmota/devices", {
+    method: "PUT",
+    headers: POST_HEADERS,
+    body: JSON.stringify(devices),
+  });
+
+export const getTasmotaSchedules = (): Promise<TasmotaSchedulesData> =>
+  apiFetch<TasmotaSchedulesData>("/api/tasmota/schedules");
+
+export const createTasmotaSchedule = (
+  s: TasmotaScheduleInput,
+): Promise<{ id: number }> =>
+  apiFetch<{ id: number }>("/api/tasmota/schedules", {
+    method: "POST",
+    headers: POST_HEADERS,
+    body: JSON.stringify(s),
+  });
+
+export const updateTasmotaSchedule = (
+  id: number,
+  s: TasmotaScheduleInput,
+): Promise<ActionAck> =>
+  apiFetch<ActionAck>(`/api/tasmota/schedules?id=${id}`, {
+    method: "PUT",
+    headers: POST_HEADERS,
+    body: JSON.stringify(s),
+  });
+
+export const deleteTasmotaSchedule = (id: number): Promise<ActionAck> =>
+  apiFetch<ActionAck>(`/api/tasmota/schedules?id=${id}`, { method: "DELETE" });
+
+export const runTasmotaScheduleNow = (id: number): Promise<ActionAck> =>
+  apiFetch<ActionAck>(`/api/tasmota/schedule/run?id=${id}`, {
+    method: "POST",
+    headers: POST_HEADERS,
+  });
+
+export const getTasmotaPower = (ip: string): Promise<TasmotaPowerProbeData> =>
+  apiFetch<TasmotaPowerProbeData>(`/api/tasmota/power?ip=${encodeURIComponent(ip)}`);
+
+export const postTasmotaPower = (
+  ip: string,
+  action: "ON" | "OFF" | "TOGGLE",
+): Promise<ActionAck> =>
+  apiFetch<ActionAck>(
+    `/api/tasmota/power?ip=${encodeURIComponent(ip)}&action=${action}`,
+    { method: "POST", headers: POST_HEADERS },
+  );
+
+export const startTasmotaDiscovery = (): Promise<unknown> =>
+  apiFetch<unknown>("/api/tasmota/discover", {
+    method: "POST",
+    headers: POST_HEADERS,
+  });
+
+export const getTasmotaDiscoveryState = (): Promise<TasmotaDiscoveryData> =>
+  apiFetch<TasmotaDiscoveryData>("/api/tasmota/discover/state");

@@ -278,6 +278,12 @@ webui/node_modules/.installed: webui/package.json
 
 .PHONY: webui
 webui: .passwd webui/node_modules/.installed
+	# Stamp the JS bundle with its version. write_spa_version.py writes
+	# data/spa/version.json; vite.config.ts reads it and injects the value
+	# as __SPA_VERSION__ into the bundle. The Footer in app.tsx compares
+	# this baked-in value against /api/status.spa_version so a stale
+	# browser cache is visible at a glance.
+	python3 scripts/write_spa_version.py
 	docker run \
 		--rm $(DOCKER_TTY_ARGS) \
 		-v ${PWD}:${PWD} \
@@ -288,6 +294,10 @@ webui: .passwd webui/node_modules/.installed
 		-e npm_config_cache=${PWD}/webui/.npm-cache \
 		$(NODE_IMAGE) \
 		npm run build
+	# vite's emptyOutDir wiped data/spa/version.json — restore it so the
+	# device's boot-time read_spa_version() and /api/status both report
+	# the same string baked into the bundle above.
+	python3 scripts/write_spa_version.py
 	@echo ""
 	@echo "SPA bundle written to data/spa/. Sizes:"
 	@cd data/spa && find . -type f \( -name '*.js' -o -name '*.css' -o -name '*.html' \) -exec ls -l {} \; | awk '{printf "  %8d  %s\n", $$5, $$NF}'
