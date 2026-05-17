@@ -159,6 +159,7 @@ void WagFamBdayClient::whitespace(char c) {
 //       "latestVersion": "3.08.0-wagfam",
 //       "firmwareUrl": "http://example.com/marquee-v3.08.0.bin",
 //       "deviceName": "Kitchen Clock",
+//       "family": "wagner",
 //       "latestSpaVersion": "3.10.0-wagfam-abc1234",
 //       "spaFsUrl": "http://example.com/marquee-v3.10.0-littlefs.bin"
 //     }
@@ -226,6 +227,14 @@ void WagFamBdayClient::value(String value) {
       currentConfig.configUpdatePayload = value;
     } else if (currentKey == "configUpdateSignature") {
       currentConfig.configUpdateSignature = value;
+    } else if (currentKey == "family") {
+      // Coordinated with wagfam-server: wire form is lowercase ASCII.
+      // Caller (marquee.ino) validates against the {butterfield, wagner}
+      // allowlist and decides whether to persist; we just surface the raw
+      // value so the validation message can log what the server actually
+      // sent.
+      currentConfig.familyValid = true;
+      currentConfig.family = value;
     } else if (currentKey == "runTasmotaDiscovery") {
       // Tasmota auto-discovery trigger. Accept the common truthy spellings
       // ("1", "true") since the static JSON can come from any tooling. The

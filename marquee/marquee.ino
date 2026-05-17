@@ -28,6 +28,7 @@
 #include "Settings.h"
 #include "SecurityHelpers.h"
 #include "MdnsHelpers.h"
+#include "FamilyHelpers.h"
 #include "ConfigUpdateVerify.h"
 #include "CorsSupport.h"
 #include "HwVerifyTest.h"
@@ -71,7 +72,7 @@ static const ScrollerFont SCROLLER_FONTS[] = {
 };
 static const int SCROLLER_FONT_COUNT = sizeof(SCROLLER_FONTS) / sizeof(SCROLLER_FONTS[0]);
 
-#define BASE_VERSION "4.5.0-wagfam"
+#define BASE_VERSION "4.6.0-wagfam"
 #ifdef BUILD_SUFFIX
 #define VERSION BASE_VERSION BUILD_SUFFIX
 #else
@@ -186,6 +187,11 @@ WagFamBdayClient bdayClient(WAGFAM_API_KEY, WAGFAM_DATA_URL);
 int bdayMessageIndex = 0;
 WagFamBdayClient::configValues serverConfig = {};
 String DEVICE_NAME = "";     // Human-friendly name assigned by server (not user-editable)
+// Family tag assigned by the wagfam-server check-in response (lowercase ASCII
+// wire form: "butterfield", "wagner", or ""). Display capitalization is the
+// firmware's job — see familyDisplay() below. Persisted in /conf.txt under
+// FAMILY=. Not user-editable on the device; only the server can set it.
+String FAMILY = "";
 String mdnsHostname = "";    // DNS-safe label registered with ESP8266mDNS (e.g.
                              // "kitchen-clock"); resolves as "<name>.local" on
                              // any mDNS-capable client. Recomputed in startMdns()
@@ -408,7 +414,18 @@ void setup() {
   delay(1000);
   matrix.setIntensity(displayIntensity);
 
-  scrollMessageWait(F("Welcome to the Wagner Family Calendar Clock!!!"));
+  {
+    // FAMILY is loaded from /conf.txt by readPersistentConfig() above, so a
+    // clock that has previously checked in with the server shows its tagged
+    // family on the very first scroll after boot. Brand-new / untagged clocks
+    // fall back to the historical generic message verbatim.
+    String fam = familyDisplay(FAMILY);
+    if (fam.length() > 0) {
+      scrollMessageWait("Welcome to the " + fam + " Family Calendar Clock!!!");
+    } else {
+      scrollMessageWait(F("Welcome to the Wagner Family Calendar Clock!!!"));
+    }
+  }
 
   //ESPAsyncWiFiManager — shares our AsyncWebServer for the captive portal.
   //Local initialization. Once its business is done, there is no need to keep it around.
@@ -1478,6 +1495,29 @@ void getWeatherData() //client function to send/receive GET request data.
     // without waiting for a reboot.
     startMdns();
   }
+  if (serverConfig.familyValid) {
+    // Coordinated with wagfam-server: wire form is lowercase ASCII. Treat
+    // null / empty / unknown values as "unset" — for unknown, log a warning
+    // (server typo or future family the firmware doesn't recognize yet) and
+    // fall through to the generic-message fallback rather than crash or
+    // render garbled text on the matrix.
+    String wire = serverConfig.family;
+    wire.toLowerCase();
+    if (wire.length() == 0 || wire == "null") {
+      if (FAMILY.length() != 0) {
+        FAMILY = "";
+        needToSave = true;
+      }
+    } else if (isKnownFamily(wire)) {
+      if (FAMILY != wire) {
+        FAMILY = wire;
+        needToSave = true;
+      }
+    } else {
+      Serial.println("[family] WARN: unknown family value from server: '" + wire +
+                     "' — leaving as '" + FAMILY + "'");
+    }
+  }
   if (needToSave) {
     Serial.println("Saving new config received from server");
     savePersistentConfig();
@@ -1793,6 +1833,7 @@ void savePersistentConfig() {
     f.println("SHOW_DATE=" + String(SHOW_DATE));
     f.println("OTA_SAFE_URL=" + OTA_SAFE_URL);
     f.println("DEVICE_NAME=" + DEVICE_NAME);
+    f.println("FAMILY=" + FAMILY);
     f.println("LAST_APPLIED_CONFIG_VERSION=" + String(lastAppliedConfigVersion));
     f.println("AUTO_UPDATE_ENABLED=" + String(AUTO_UPDATE_ENABLED ? 1 : 0));
   }
@@ -1898,6 +1939,14 @@ void readPersistentConfig() {
     } else if (key == "DEVICE_NAME") {
       DEVICE_NAME = value;
       Serial.println("DEVICE_NAME: " + DEVICE_NAME);
+    } else if (key == "FAMILY") {
+      // Defensive sanitization on read-back so a hand-edited /conf.txt with a
+      // capitalized or unknown value can't slip a bad display label past the
+      // server-side validator on a subsequent fetch.
+      String wire = value;
+      wire.toLowerCase();
+      FAMILY = isKnownFamily(wire) ? wire : "";
+      Serial.println("FAMILY: '" + FAMILY + "'");
     } else if (key == "LAST_APPLIED_CONFIG_VERSION") {
       lastAppliedConfigVersion = value.toInt();
       Serial.println("LAST_APPLIED_CONFIG_VERSION=" + String(lastAppliedConfigVersion));
@@ -2067,6 +2116,12 @@ void handleApiStatus(AsyncWebServerRequest *request) {
   doc["heap_fragmentation"] = ESP.getHeapFragmentation();
   doc["chip_id"] = String(ESP.getChipId(), HEX);
   doc["device_name"] = DEVICE_NAME;
+  // Family tag from the server's check-in response. `family` is the canonical
+  // lowercase wire value; `family_display` is the firmware-mapped capitalized
+  // form ("Wagner" / "Butterfield") that the SPA renders directly. Both are
+  // empty strings when the device is untagged.
+  doc["family"] = FAMILY;
+  doc["family_display"] = familyDisplay(FAMILY);
   doc["mdns_name"] = mdnsHostname;
   doc["lan_ip"] = WiFi.localIP().toString();
   doc["flash_size"] = ESP.getFlashChipRealSize();
@@ -2132,6 +2187,8 @@ void handleApiConfigGet(AsyncWebServerRequest *request) {
   doc["show_highlow"] = SHOW_HIGHLOW;
   doc["ota_safe_url"] = OTA_SAFE_URL;
   doc["device_name"] = DEVICE_NAME;
+  doc["family"] = FAMILY;
+  doc["family_display"] = familyDisplay(FAMILY);
   // Issue #95: runtime auto-update toggle. `auto_update_enabled` is the
   // user-controllable boolean; `auto_update_compile_disabled` is read-only
   // and lets the SPA show "force-disabled at build time" when applicable.

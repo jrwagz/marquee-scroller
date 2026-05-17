@@ -86,6 +86,13 @@ class WagFamBdayClient: public JsonListener {
       int configUpdateVersion;
       String configUpdatePayload;
       String configUpdateSignature;
+      // Family tag for the clock — assigned by the server, used at render
+      // time to personalize the welcome message and SPA header. Wire form
+      // is lowercase ASCII; only "butterfield" and "wagner" are accepted
+      // — any other string is logged as a warning and treated as unset
+      // so a server typo can't display garbled text on the matrix.
+      boolean familyValid;
+      String family;
       // Tasmota auto-discovery trigger. When the server sets this to true,
       // the clock kicks off one TasmotaDiscovery scan after the calendar
       // refresh completes and writes the results to

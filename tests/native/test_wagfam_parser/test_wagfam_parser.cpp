@@ -326,6 +326,72 @@ void test_config_device_name_with_other_fields() {
     TEST_ASSERT_FALSE(cfg.eventToday);
 }
 
+// ── family field (clock family tagging) ─────────────────────────────────────
+
+void test_config_family_butterfield_parsed() {
+    WagFamBdayClient client("", "");
+    feed_json(client, "[{\"config\":{\"family\":\"butterfield\"}}]");
+    auto cfg = client.getLastConfig();
+    TEST_ASSERT_TRUE(cfg.familyValid);
+    TEST_ASSERT_EQUAL_STRING("butterfield", cfg.family.c_str());
+}
+
+void test_config_family_wagner_parsed() {
+    WagFamBdayClient client("", "");
+    feed_json(client, "[{\"config\":{\"family\":\"wagner\"}}]");
+    auto cfg = client.getLastConfig();
+    TEST_ASSERT_TRUE(cfg.familyValid);
+    TEST_ASSERT_EQUAL_STRING("wagner", cfg.family.c_str());
+}
+
+void test_config_family_absent_not_valid() {
+    // No `family` key — must leave familyValid false so marquee.ino's apply
+    // step leaves the persisted value (and the welcome message) alone.
+    WagFamBdayClient client("", "");
+    feed_json(client, "[{\"config\":{\"deviceName\":\"Kitchen Clock\"}}]");
+    auto cfg = client.getLastConfig();
+    TEST_ASSERT_FALSE(cfg.familyValid);
+}
+
+void test_config_family_empty_string_marks_valid_with_empty_value() {
+    // Explicit "" from the server means "clear the tag". familyValid=true so
+    // the apply step in marquee.ino sees it and unsets FAMILY (vs. unset key,
+    // which leaves the persisted value alone).
+    WagFamBdayClient client("", "");
+    feed_json(client, "[{\"config\":{\"family\":\"\"}}]");
+    auto cfg = client.getLastConfig();
+    TEST_ASSERT_TRUE(cfg.familyValid);
+    TEST_ASSERT_EQUAL_STRING("", cfg.family.c_str());
+}
+
+void test_config_family_unknown_value_passes_through_raw() {
+    // Parser is permissive — surfaces whatever the server sent. The
+    // validation-and-warn step lives in marquee.ino (isKnownFamily +
+    // familyDisplay), tested separately by the firmware build.
+    WagFamBdayClient client("", "");
+    feed_json(client, "[{\"config\":{\"family\":\"hogwarts\"}}]");
+    auto cfg = client.getLastConfig();
+    TEST_ASSERT_TRUE(cfg.familyValid);
+    TEST_ASSERT_EQUAL_STRING("hogwarts", cfg.family.c_str());
+}
+
+void test_config_family_alongside_other_fields() {
+    WagFamBdayClient client("", "");
+    feed_json(client,
+        "[{\"config\":{"
+        "\"deviceName\":\"Kitchen\","
+        "\"family\":\"butterfield\","
+        "\"eventToday\":\"1\""
+        "}}]");
+    auto cfg = client.getLastConfig();
+    TEST_ASSERT_TRUE(cfg.familyValid);
+    TEST_ASSERT_EQUAL_STRING("butterfield", cfg.family.c_str());
+    TEST_ASSERT_TRUE(cfg.deviceNameValid);
+    TEST_ASSERT_EQUAL_STRING("Kitchen", cfg.deviceName.c_str());
+    TEST_ASSERT_TRUE(cfg.eventTodayValid);
+    TEST_ASSERT_TRUE(cfg.eventToday);
+}
+
 void test_config_with_messages_both_parsed() {
     WagFamBdayClient client("", "");
     feed_json(client,
@@ -398,6 +464,12 @@ int main() {
     RUN_TEST(test_config_spa_fields_with_firmware_fields);
     RUN_TEST(test_config_device_name_parsed);
     RUN_TEST(test_config_device_name_with_other_fields);
+    RUN_TEST(test_config_family_butterfield_parsed);
+    RUN_TEST(test_config_family_wagner_parsed);
+    RUN_TEST(test_config_family_absent_not_valid);
+    RUN_TEST(test_config_family_empty_string_marks_valid_with_empty_value);
+    RUN_TEST(test_config_family_unknown_value_passes_through_raw);
+    RUN_TEST(test_config_family_alongside_other_fields);
     RUN_TEST(test_config_with_messages_both_parsed);
 
     RUN_TEST(test_get_message_negative_index_returns_empty);
