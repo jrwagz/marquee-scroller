@@ -615,3 +615,19 @@ input[type="checkbox"].toggle:checked::after {
   font-family: ui-monospace, monospace;
   font-size: 0.8rem;
 }
+
+/* Files tab — full-width JSON/text preview. The pre block sits inside a
+   .card and needs to wrap long lines (e.g. minified JSON) instead of
+   producing a horizontal scrollbar that hides the right-hand columns. */
+.files-page { display: flex; flex-direction: column; gap: 1rem; }
+.files-preview {
+  max-height: 60vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: color-mix(in srgb, var(--muted) 6%, transparent);
+  padding: 0.75rem;
+  border-radius: 4px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+}
