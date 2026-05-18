@@ -5,10 +5,11 @@ import { StatusPage } from "./pages/StatusPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { ActionsPage } from "./pages/ActionsPage";
 import { SchedulesPage } from "./pages/SchedulesPage";
+import { FilesPage } from "./pages/FilesPage";
 import { Footer } from "./pages/Footer";
 import { getStatus } from "./api";
 
-type Tab = "home" | "status" | "settings" | "actions" | "schedules";
+type Tab = "home" | "status" | "settings" | "actions" | "schedules" | "files";
 
 const activeTab = signal<Tab>("home");
 const familyDisplay = signal<string>("");
@@ -19,6 +20,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "settings", label: "Settings" },
   { id: "actions", label: "Actions" },
   { id: "schedules", label: "Schedules" },
+  { id: "files", label: "Files" },
 ];
 
 export function App() {
@@ -59,6 +61,7 @@ export function App() {
       {activeTab.value === "settings" && <SettingsPage />}
       {activeTab.value === "actions" && <ActionsPage />}
       {activeTab.value === "schedules" && <SchedulesPage />}
+      {activeTab.value === "files" && <FilesPage />}
       <Footer />
     </main>
   );

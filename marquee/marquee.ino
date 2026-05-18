@@ -72,7 +72,7 @@ static const ScrollerFont SCROLLER_FONTS[] = {
 };
 static const int SCROLLER_FONT_COUNT = sizeof(SCROLLER_FONTS) / sizeof(SCROLLER_FONTS[0]);
 
-#define BASE_VERSION "4.7.0"
+#define BASE_VERSION "4.8.0"
 #ifdef BUILD_SUFFIX
 #define VERSION BASE_VERSION BUILD_SUFFIX
 #else
@@ -146,6 +146,7 @@ void handleApiFsRead(AsyncWebServerRequest *request);
 void handleApiFsWrite(AsyncWebServerRequest *request, JsonVariant &json);
 void handleApiFsDelete(AsyncWebServerRequest *request);
 void handleApiFsList(AsyncWebServerRequest *request);
+void handleApiFsRaw(AsyncWebServerRequest *request);
 void handleApiSpaUpdateFromUrl(AsyncWebServerRequest *request, JsonVariant &json);
 static void doOtaFsFlash(const String &fsUrl, const String &expectedSha256);
 // Tasmota scheduler
@@ -489,6 +490,11 @@ void setup() {
   server.on("/api/fs/read", HTTP_GET, handleApiFsRead);
   server.on("/api/fs/delete", HTTP_DELETE, handleApiFsDelete);
   server.on("/api/fs/list", HTTP_GET, handleApiFsList);
+  // Stream the raw file bytes (any size). The /read endpoint is JSON-wrapped
+  // and capped at 4KB for backwards compatibility; /raw is what the SPA Files
+  // tab uses for both viewing larger logs (Tasmota discovery, ARP dumps) and
+  // for downloading via Blob.
+  server.on("/api/fs/raw", HTTP_GET, handleApiFsRaw);
   // Tasmota scheduler — devices list, schedules CRUD, immediate-run + power
   // state probe. AsyncCallbackJsonWebHandler wires the JSON-body POSTs and
   // PUTs further below.
@@ -2484,6 +2490,24 @@ void handleApiFsList(AsyncWebServerRequest *request) {
   listFilesRecursive("/", files);
 
   sendJsonResponse(request, 200, doc);
+}
+
+// Streams the raw bytes of a file. No size cap (AsyncWebServer handles
+// chunked transfer for us via beginResponse(FS, path)). Content-Type is
+// always text/plain; the SPA detects JSON-shaped content client-side and
+// pretty-prints it, while binary files (.bin) are routed through the
+// "Download" button instead of preview.
+void handleApiFsRaw(AsyncWebServerRequest *request) {
+  String path = request->arg("path");
+  if (path == "") { sendJsonError(request, 400, "missing 'path' parameter"); return; }
+  if (!path.startsWith("/")) path = "/" + path;
+  if (path.indexOf("..") >= 0) { sendJsonError(request, 400, "invalid path"); return; }
+  if (!LittleFS.exists(path)) { sendJsonError(request, 404, "file not found"); return; }
+
+  AsyncWebServerResponse *resp =
+      request->beginResponse(LittleFS, path, "text/plain", false);
+  setCorsHeaders(request, resp);
+  request->send(resp);
 }
 
 // ── Tasmota scheduler API ───────────────────────────────────────────────────
