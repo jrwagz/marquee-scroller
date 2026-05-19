@@ -64,6 +64,11 @@ bool set_timeZoneSec(int timeZoneSeconds)
   return timechange;
 }
 
+int get_timeZoneSec()
+{
+  return timeZoneSec;
+}
+
 /*-------- NTP code ----------*/
 
 const int NTP_PACKET_SIZE = 48; // NTP time is in the first 48 bytes of message
