@@ -72,7 +72,7 @@ static const ScrollerFont SCROLLER_FONTS[] = {
 };
 static const int SCROLLER_FONT_COUNT = sizeof(SCROLLER_FONTS) / sizeof(SCROLLER_FONTS[0]);
 
-#define BASE_VERSION "4.8.0"
+#define BASE_VERSION "4.8.1"
 #ifdef BUILD_SUFFIX
 #define VERSION BASE_VERSION BUILD_SUFFIX
 #else
@@ -1427,12 +1427,17 @@ void getWeatherData() //client function to send/receive GET request data.
   weatherClient.updateWeather();
   if (weatherClient.getErrorMessage() != "") {
     scrollMessageWait(weatherClient.getErrorMessage());
-  } else {
-    // Set current timezone (adapts to DST when region supports that)
-    // when time was potentially changed, stop quick auto sync
+  } else if (weatherClient.getWeatherDataValid()) {
+    // Issue #121: only push the timezone into NTP when the OWM response was
+    // actually valid. A failed fetch must not clobber the previously-good
+    // offset — otherwise the clock drifts to UTC until the next success.
     if (set_timeZoneSec(weatherClient.getTimeZoneSeconds())) {
       // Stop automatic NTP sync and do it explicitly below
       setSyncProvider(NULL);
+      // Persist so the offset survives reboots; without this, every power
+      // cycle restarts at UTC and the device shows the wrong time until OWM
+      // succeeds again.
+      savePersistentConfig();
     }
   }
   lastRefreshDataTimestamp = now();
@@ -1842,6 +1847,7 @@ void savePersistentConfig() {
     f.println("FAMILY=" + FAMILY);
     f.println("LAST_APPLIED_CONFIG_VERSION=" + String(lastAppliedConfigVersion));
     f.println("AUTO_UPDATE_ENABLED=" + String(AUTO_UPDATE_ENABLED ? 1 : 0));
+    f.println("TIMEZONE_SEC=" + String(get_timeZoneSec()));
   }
   f.close();
   // Apply current settings to hardware and clients directly.
@@ -1959,6 +1965,12 @@ void readPersistentConfig() {
     } else if (key == "AUTO_UPDATE_ENABLED") {
       AUTO_UPDATE_ENABLED = value.toInt() != 0;
       Serial.println("AUTO_UPDATE_ENABLED=" + String(AUTO_UPDATE_ENABLED ? 1 : 0));
+    } else if (key == "TIMEZONE_SEC") {
+      // Issue #121: restore the last-known timezone offset so NTP syncs
+      // before the first successful OWM fetch land on the user's local
+      // wall clock instead of UTC.
+      set_timeZoneSec(value.toInt());
+      Serial.println("TIMEZONE_SEC=" + String(value.toInt()));
     }
   }
   fr.close();

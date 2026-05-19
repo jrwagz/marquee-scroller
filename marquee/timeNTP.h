@@ -11,4 +11,5 @@
 
 void timeNTPsetup();
 bool set_timeZoneSec(int timeZoneSeconds);
+int get_timeZoneSec();
 time_t getNtpTime();
