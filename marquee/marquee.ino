@@ -2008,6 +2008,16 @@ static void scrollMessageWaitCustomFont(const String &msg, const ScrollerFont &s
   }
 
   matrix.setFont();  // restore builtin for the clock face
+  // Restore the default "transparent background" text mode (textcolor ==
+  // textbgcolor). Adafruit_GFX's drawChar paints every pixel of the 5x8 cell
+  // — including the bottom row of the GLCD glyph, which is almost always
+  // OFF — when textbgcolor differs from textcolor. Leaving the (HIGH, LOW)
+  // pair set above corrupts later clock-face frames: the event-day border
+  // draws row 7 (bottom edge) FIRST and the centered "HH:MM" then erases
+  // every column it covers in row 7 — issue #113, where only the left and
+  // right sides of the animated border remained visible until reboot.
+  matrix.setTextColor(HIGH);
+  matrix.setTextWrap(true);
 }
 
 void scrollMessageWait(const String &msg) {
