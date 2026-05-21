@@ -45,6 +45,38 @@ struct DeviceInfo {
                           // directory page's redirect target.
 };
 
+// Build the device-telemetry query string shared by the calendar fetch
+// (WagFamBdayClient::updateData) and the enrollment poll (EnrollmentClient::
+// poll). Returns "chip_id=...&version=...&..." with NO leading '?' or '&' —
+// each caller prepends the right separator. lan_ip / mdns_name are appended
+// only when non-empty. Kept here, next to DeviceInfo, as a header-only inline
+// so both clients share one definition without an extra translation unit.
+inline String buildHeartbeatQuery(const DeviceInfo &device) {
+  String q;
+  q.reserve(200);
+  q += "chip_id=";
+  q += device.chipId;
+  q += "&version=";
+  q += device.version;
+  q += "&uptime=";
+  q += String(device.uptimeMs);
+  q += "&heap=";
+  q += String(device.freeHeap);
+  q += "&rssi=";
+  q += String(device.rssi);
+  q += "&utc_offset_sec=";
+  q += String(device.utcOffsetSec);
+  if (device.lanIp.length() > 0) {
+    q += "&lan_ip=";
+    q += device.lanIp;
+  }
+  if (device.mdnsName.length() > 0) {
+    q += "&mdns_name=";
+    q += device.mdnsName;
+  }
+  return q;
+}
+
 class WagFamBdayClient: public JsonListener {
 
   public:

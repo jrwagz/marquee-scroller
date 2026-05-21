@@ -30,6 +30,7 @@
 #include "MdnsHelpers.h"
 #include "FamilyHelpers.h"
 #include "ConfigUpdateVerify.h"
+#include "EnrollmentClient.h"
 #include "CorsSupport.h"
 #include "HwVerifyTest.h"
 #include <Fonts/Picopixel.h>
@@ -72,7 +73,7 @@ static const ScrollerFont SCROLLER_FONTS[] = {
 };
 static const int SCROLLER_FONT_COUNT = sizeof(SCROLLER_FONTS) / sizeof(SCROLLER_FONTS[0]);
 
-#define BASE_VERSION "4.8.1"
+#define BASE_VERSION "4.9.0"
 #ifdef BUILD_SUFFIX
 #define VERSION BASE_VERSION BUILD_SUFFIX
 #else
@@ -126,6 +127,10 @@ static void doOtaFlash(const String &firmwareUrl);
 // the bytes, compares to `expectedHex`. Empty `expectedHex` returns true
 // (forward-compat with older server that doesn't publish hashes).
 static bool verifyOtaSha256(const String &url, const String &expectedHex);
+
+// Issue #125: device enrollment. runEnrollmentLoop() replaces the normal
+// clock loop while the device is self-registering against the wagfam-server.
+void runEnrollmentLoop();
 
 void handleUpdateFromUrl(AsyncWebServerRequest *request);
 
@@ -219,6 +224,12 @@ String spaOtaError = "";
 // rejects any incoming configUpdate whose version is <= this value (replay
 // protection). Server is expected to increment per-device with each push.
 int lastAppliedConfigVersion = 0;
+
+// Issue #125: true when this clock has no calendar API key and is running the
+// enrollment loop (poll the server, show the setup code, apply the authorized
+// config bundle) instead of the normal clock. Decided once at the end of
+// setup(); the device reboots out of this mode rather than clearing it live.
+bool enrollmentMode = false;
 
 // Issue #99: most recent troll message override. We track it as device state
 // so a transient server outage doesn't immediately drop us back to normal
@@ -792,6 +803,16 @@ void setup() {
   // Start NTP , although it can't do anything while in config mode or when no WiFi AP connected
   timeNTPsetup();
 
+  // Issue #125: enter enrollment mode when this clock has never been given a
+  // calendar API key and the firmware was built with an enrollment endpoint.
+  // loop() then runs runEnrollmentLoop() in place of the normal clock until an
+  // admin authorizes the device (or a key is set by hand via the SPA). A build
+  // without WAGFAM_ENROLL_URL (Arduino IDE / generic build) just runs normally.
+  if (WAGFAM_ENROLL_URL[0] != '\0' && WAGFAM_API_KEY.length() == 0) {
+    enrollmentMode = true;
+    Serial.println(F("[ENROLL] No calendar API key — entering enrollment mode"));
+  }
+
   flashLED(1, 500);
 }
 
@@ -803,6 +824,16 @@ void loop() {
   // Pump the mDNS responder. The sync ESP8266mDNS variant needs this every
   // loop iteration; the wrapper is cheap when no queries are pending.
   MDNS.update();
+
+  // Issue #125: a clock with no calendar API key runs the enrollment loop
+  // instead of the normal clock — poll the server, show the setup code, and
+  // apply the signed config bundle once an admin authorizes the device. mDNS
+  // (above) and the async web server stay live, so the device is still
+  // reachable; everything else (Tasmota, clock face, weather) is skipped.
+  if (enrollmentMode) {
+    runEnrollmentLoop();
+    return;
+  }
 
   // Drive Tasmota discovery state machine. No-op when idle/done; dispatches
   // one ICMP ping (or one deferred HTTP probe) per call when running.
@@ -1824,6 +1855,9 @@ void savePersistentConfig() {
     f.println("WAGFAM_DATA_URL=" + WAGFAM_DATA_URL);
     f.println("WAGFAM_API_KEY=" + WAGFAM_API_KEY);
     f.println("WAGFAM_EVENT_TODAY=" + String(WAGFAM_EVENT_TODAY));
+    // Issue #125: enrollment identity, minted by the server. Not user-editable.
+    f.println("ENROLLMENT_SECRET=" + ENROLLMENT_SECRET);
+    f.println("ENROLLMENT_CODE=" + ENROLLMENT_CODE);
     f.println("APIKEY=" + APIKEY);
     f.println("CityID=" + geoLocation);
     f.println("ledIntensity=" + String(displayIntensity));
@@ -1884,6 +1918,13 @@ void readPersistentConfig() {
     } else if (key == "WAGFAM_EVENT_TODAY") {
       WAGFAM_EVENT_TODAY = value.toInt();
       Serial.println("WAGFAM_EVENT_TODAY: " + String(WAGFAM_EVENT_TODAY));
+    } else if (key == "ENROLLMENT_SECRET") {
+      ENROLLMENT_SECRET = value;
+      // Never log the secret itself — it is proof-of-possession.
+      Serial.println(F("ENROLLMENT_SECRET: [set]"));
+    } else if (key == "ENROLLMENT_CODE") {
+      ENROLLMENT_CODE = value;
+      Serial.println("ENROLLMENT_CODE: " + ENROLLMENT_CODE);
     } else if (key == "APIKEY") {
       APIKEY = value;
       Serial.println("APIKEY: [set]");
@@ -2152,6 +2193,15 @@ void handleApiStatus(AsyncWebServerRequest *request) {
   doc["family_display"] = familyDisplay(FAMILY);
   doc["mdns_name"] = mdnsHostname;
   doc["lan_ip"] = WiFi.localIP().toString();
+
+  // Issue #125: device-enrollment state. `has_secret` is reported instead of
+  // the secret itself — the secret is proof-of-possession and never leaves
+  // the device over the API.
+  JsonObject enroll = doc["enrollment"].to<JsonObject>();
+  enroll["mode"] = enrollmentMode;
+  enroll["code"] = ENROLLMENT_CODE;
+  enroll["has_secret"] = ENROLLMENT_SECRET.length() > 0;
+
   doc["flash_size"] = ESP.getFlashChipRealSize();
   doc["sketch_size"] = ESP.getSketchSize();
   doc["free_sketch_space"] = ESP.getFreeSketchSpace();
@@ -2259,6 +2309,169 @@ static void applyConfigJson(JsonObject json) {
   // settable here — runtime writes always land, the compile flag just
   // overrides them in the auto-update gate above.
   if (json["auto_update_enabled"].is<bool>()) AUTO_UPDATE_ENABLED = json["auto_update_enabled"].as<bool>();
+}
+
+// ── Device enrollment (issue #125) ───────────────────────────────────────────
+
+// Base interval between enrollment polls while waiting to be authorized. On
+// consecutive *failed* polls the interval backs off exponentially up to
+// ENROLL_POLL_MAX_MS, so a stranded clock (never authorized, or the server is
+// down) doesn't hammer the public endpoint forever; a successful poll resets
+// it to the base so authorization is still picked up within ~15 s.
+static const uint32_t ENROLL_POLL_INTERVAL_MS = 15000;
+static const uint32_t ENROLL_POLL_MAX_MS = 300000; // 5 min backoff ceiling
+
+// Verify and apply the signed config bundle from an authorized enrollment
+// response, then reboot into normal calendar operation. Mirrors the calendar
+// config-update path in getWeatherData() — same ECDSA signature check, same
+// applyConfigJson(), same monotonic-version guard. On a bad signature or a
+// malformed payload we log and return so the caller keeps polling.
+static void applyEnrollmentBundle(const EnrollmentClient::Result &res) {
+  if (res.configUpdateVersion <= 0 || res.configUpdatePayload.length() == 0 ||
+      res.configUpdateSignature.length() == 0) {
+    Serial.println(F("[ENROLL] authorized response carried no config bundle — ignoring"));
+    return;
+  }
+  if (res.configUpdateVersion <= lastAppliedConfigVersion) {
+    Serial.println(F("[ENROLL] bundle version <= last applied — ignoring"));
+    return;
+  }
+  if (!verifyConfigUpdateSignature(res.configUpdatePayload,
+                                   res.configUpdateSignature,
+                                   WAGFAM_CONFIG_PUBLIC_KEY)) {
+    // verifyConfigUpdateSignature already logged the reason. Keep polling —
+    // a later poll may carry a correctly-signed bundle.
+    return;
+  }
+  JsonDocument cfgDoc;
+  DeserializationError err = deserializeJson(cfgDoc, res.configUpdatePayload);
+  if (err) {
+    Serial.print(F("[ENROLL] bundle payload didn't parse as JSON: "));
+    Serial.println(err.c_str());
+    return;
+  }
+  if (!cfgDoc.is<JsonObject>()) {
+    Serial.println(F("[ENROLL] bundle payload not a JSON object — ignoring"));
+    return;
+  }
+  Serial.println("[ENROLL] applying authorized config bundle v" +
+                 String(res.configUpdateVersion));
+  applyConfigJson(cfgDoc.as<JsonObject>());
+  // Post-condition: enrollment is entered on an empty WAGFAM_API_KEY and left
+  // only by the reboot below, so the bundle MUST have populated the key. A
+  // (signed but mistaken) bundle that left it empty would otherwise bump the
+  // version, reboot, re-enter enrollment, and then be rejected by the
+  // monotonic guard on every later poll — a permanent wedge. Bail without
+  // persisting or bumping the version so a corrected bundle can still land.
+  if (WAGFAM_API_KEY.length() == 0) {
+    Serial.println(F("[ENROLL] bundle applied but no API key set — enrollment not completed"));
+    return;
+  }
+  lastAppliedConfigVersion = res.configUpdateVersion;
+  savePersistentConfig();
+  // Reboot so the device re-enters setup() cleanly with the calendar URL +
+  // key now in place — enrollmentMode evaluates false on the next boot.
+  Serial.println(F("[ENROLL] enrollment complete — restarting"));
+  delay(250);
+  ESP.restart();
+}
+
+// Perform one enrollment poll and act on the result. Persists any newly
+// minted secret/code; on an authorized response, hands off to
+// applyEnrollmentBundle() (which reboots on success). Returns true when the
+// poll produced a usable response — the caller uses this to drive backoff.
+static bool pollEnrollmentOnce() {
+  DeviceInfo devInfo;
+  devInfo.chipId = String(ESP.getChipId(), HEX);
+  devInfo.version = VERSION;
+  devInfo.uptimeMs = millis();
+  devInfo.freeHeap = ESP.getFreeHeap();
+  devInfo.rssi = WiFi.RSSI();
+  // A factory-fresh clock has no OWM data yet, so this is 0 (UTC).
+  devInfo.utcOffsetSec = weatherClient.getTimeZoneSeconds();
+  devInfo.lanIp = WiFi.localIP().toString();
+  devInfo.mdnsName = mdnsHostname;
+
+  EnrollmentClient::Result res =
+      EnrollmentClient::poll(WAGFAM_ENROLL_URL, devInfo, ENROLLMENT_SECRET);
+  if (!res.ok) {
+    Serial.println(F("[ENROLL] poll did not return a usable response"));
+    return false;
+  }
+
+  // Persist a minted secret/code. The server returns the secret on first
+  // contact and again after an admin "reset enrollment" — we overwrite in
+  // both cases, so a stale secret never wedges the recovery path.
+  bool changed = false;
+  if (res.secret.length() > 0 && res.secret != ENROLLMENT_SECRET) {
+    ENROLLMENT_SECRET = res.secret;
+    changed = true;
+    Serial.println(F("[ENROLL] stored enrollment secret"));
+  }
+  if (res.code.length() > 0 && res.code != ENROLLMENT_CODE) {
+    ENROLLMENT_CODE = res.code;
+    changed = true;
+    Serial.println("[ENROLL] enrollment code: " + ENROLLMENT_CODE);
+  }
+  if (changed) {
+    savePersistentConfig();
+  }
+
+  if (res.status == "authorized") {
+    applyEnrollmentBundle(res); // reboots on success
+  }
+  return true;
+}
+
+// Enrollment-mode loop body, called once per loop() iteration in place of the
+// normal clock. Polls the server every ENROLL_POLL_INTERVAL_MS and scrolls the
+// setup code on the LED in between. Exits (via reboot) when the device is
+// authorized or when a calendar API key is set by hand through the SPA.
+void runEnrollmentLoop() {
+  // Escape hatch: the async web server stays up during enrollment, so a user
+  // can still configure the clock by hand on the SPA Settings tab. If a key
+  // lands there, drop enrollment and reboot into normal operation.
+  if (WAGFAM_API_KEY.length() > 0) {
+    Serial.println(F("[ENROLL] calendar API key set manually — leaving enrollment mode"));
+    delay(250);
+    ESP.restart();
+  }
+
+  // Poll cadence: ENROLL_POLL_INTERVAL_MS, doubled per consecutive failed poll
+  // up to ENROLL_POLL_MAX_MS, reset on success. These statics never need
+  // resetting — enrollment mode is left only by ESP.restart().
+  static uint32_t lastPollMs = 0;
+  static bool everPolled = false;
+  static uint8_t failCount = 0;
+
+  uint32_t interval = ENROLL_POLL_INTERVAL_MS;
+  for (uint8_t i = 0; i < failCount && interval < ENROLL_POLL_MAX_MS; i++) {
+    interval *= 2;
+  }
+  if (interval > ENROLL_POLL_MAX_MS) {
+    interval = ENROLL_POLL_MAX_MS;
+  }
+
+  uint32_t nowMs = millis();
+  if (!everPolled || (nowMs - lastPollMs) >= interval) {
+    everPolled = true;
+    lastPollMs = nowMs;
+    if (pollEnrollmentOnce()) { // may reboot
+      failCount = 0;
+    } else if (failCount < 8) {
+      failCount++;
+    }
+  }
+
+  // Dedicated enrollment screen — the clock does not show the time in this
+  // mode. A ~6-char code plus its label is wider than the 32px matrix, so it
+  // is scrolled rather than statically centered.
+  matrix.fillScreen(LOW);
+  if (ENROLLMENT_CODE.length() > 0) {
+    scrollMessageWait("  Setup Code: " + ENROLLMENT_CODE + "  ");
+  } else {
+    scrollMessageWait(F("  Enrolling...  "));
+  }
 }
 
 void handleApiConfigPost(AsyncWebServerRequest *request, JsonVariant &json) {

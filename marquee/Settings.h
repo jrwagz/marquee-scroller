@@ -63,6 +63,15 @@ String WAGFAM_DATA_URL = ""; // URL to Pull WagFam Calendar Data from
 String WAGFAM_API_KEY = ""; // Authorization token to use to authenticate to access the DATA_URL, only used if provided
 boolean WAGFAM_EVENT_TODAY = false; // Whether or not an event is happening today
 
+// Issue #125: device enrollment. A factory-fresh clock with no WAGFAM_API_KEY
+// polls the wagfam-server enrollment endpoint until an admin authorizes it.
+// Both values are minted by the server and persisted to /conf.txt; neither is
+// user-editable. ENROLLMENT_SECRET is the per-device proof-of-possession
+// (never echoed back over the API); ENROLLMENT_CODE is the short human code
+// shown on the LED for the admin to match against the pending device.
+String ENROLLMENT_SECRET = "";
+String ENROLLMENT_CODE = "";
+
 // SEC-03: Compile-time allowlist of domains that are *always* trusted as firmware
 // sources, regardless of the calendar URL's domain. Comma-separated list of bare
 // hostnames (no scheme, no port, no path). The runtime check (isTrustedFirmwareDomain)
@@ -91,6 +100,18 @@ boolean WAGFAM_EVENT_TODAY = false; // Whether or not an event is happening toda
 //   pio run --build-flag '-DWAGFAM_CONFIG_PUBLIC_KEY="\"0485b4...\""'
 #ifndef WAGFAM_CONFIG_PUBLIC_KEY
 #define WAGFAM_CONFIG_PUBLIC_KEY "0429ad542d32ded3469e0e87c5a66bc59c3fd0bbc2f3b62721bed3204620a751bf06ad1b393f708ca6f82565ab2699a39f83a6c666c9e99eb683aba674a1ef347b"
+#endif
+
+// Issue #125: base URL of the wagfam-server device-enrollment endpoint. A
+// clock with no stored WAGFAM_API_KEY polls this on boot to self-register.
+// HTTPS so the minted secret and the config bundle are encrypted in transit.
+//
+// Empty default => enrollment is disabled: a build without the flag (Arduino
+// IDE, or a generic non-wagfam build) just runs as a normal clock. Production
+// PlatformIO envs set it via build flag — see platformio.ini. Override:
+//   pio run --build-flag '-DWAGFAM_ENROLL_URL="\"https://host/api/v1/enroll\""'
+#ifndef WAGFAM_ENROLL_URL
+#define WAGFAM_ENROLL_URL ""
 #endif
 
 int TODAY_DISPLAY_DOT_SPACING = 5;  // How far apart the dots for the Today display are spaced

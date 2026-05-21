@@ -26,6 +26,7 @@ All firmware source lives in [marquee/](marquee/):
 | [Settings.h](marquee/Settings.h) | Hardware pin config + all `#include` directives; default values for first-run only |
 | [OpenWeatherMapClient.h/.cpp](marquee/OpenWeatherMapClient.h) | Fetches weather from OpenWeatherMap API using ArduinoJson |
 | [WagFamBdayClient.h/.cpp](marquee/WagFamBdayClient.h) | Fetches family calendar JSON over HTTPS; parses messages and remote config |
+| [EnrollmentClient.h/.cpp](marquee/EnrollmentClient.h) | Device self-enrollment client — polls wagfam-server `/api/v1/enroll`, parses the response, surfaces the signed config bundle (issue #125). `parse()` is pure so it's testable under tests/native/ |
 | [SecurityHelpers.h/.cpp](marquee/SecurityHelpers.h) | Firmware URL validation, path protection, domain extraction |
 | [MdnsHelpers.h/.cpp](marquee/MdnsHelpers.h) | DNS-safe hostname sanitization for mDNS bringup (extracted so it's testable under tests/native/) |
 | [timeNTP.h/.cpp](marquee/timeNTP.h) | NTP time sync; exposes `timeNTPsetup()`, `getNtpTime()`, and `set_timeZoneSec()` |
@@ -93,7 +94,9 @@ changes there require a filesystem erase to take effect.
 
 `WAGFAM_EVENT_TODAY` and `DEVICE_NAME` are not user-configurable via the web form — they are set
 exclusively by the server's `config.eventToday` and `config.deviceName` fields in the calendar
-JSON response and persisted across reboots via `/conf.txt`.
+JSON response and persisted across reboots via `/conf.txt`. `ENROLLMENT_SECRET` and
+`ENROLLMENT_CODE` are likewise server-minted (during device enrollment, see below) and not
+user-editable — `ENROLLMENT_SECRET` is proof-of-possession and is never echoed back over the API.
 
 ### Adding a New Config Key
 
@@ -413,6 +416,38 @@ out-of-band if the parameter set changes or the calendar URL moves to a differen
 static-JSON host. The corresponding regression test was removed because the CDN
 returned race-flaky results when the target file was being updated; see the
 "Back assertions about external services" rule above for the policy.
+
+## Device Enrollment (issue #125)
+
+A factory-fresh clock with no `WAGFAM_API_KEY` self-registers against the
+wagfam-server instead of needing hand configuration. Companion to
+[wagfam-server#62](https://github.com/jrwagz/wagfam-server/issues/62).
+
+- **Trigger.** Decided once at the end of `setup()`: `enrollmentMode` is set
+  true when `WAGFAM_ENROLL_URL` is non-empty (a build flag, see `Settings.h` +
+  `platformio.ini`) **and** `WAGFAM_API_KEY` is empty. A build without the flag
+  never enrolls.
+- **Loop.** `loop()` branches to `runEnrollmentLoop()` right after
+  `MDNS.update()` and returns — the normal clock, Tasmota, and weather paths
+  are all skipped. mDNS and the async web server stay live, so the device is
+  still reachable. The clock face is **not** shown in this mode; the LED
+  scrolls `Setup Code: <code>` (or `Enrolling...` before the first response).
+- **Polling.** `EnrollmentClient::poll()` GETs `WAGFAM_ENROLL_URL` every
+  ~15 s over HTTPS with `setInsecure()` (same posture as `WagFamBdayClient` —
+  the bundle's ECDSA signature, not TLS, is the integrity guarantee). The
+  response parser `EnrollmentClient::parse()` is pure and unit-tested under
+  `tests/native/test_enrollment/`.
+- **Authorized bundle.** An `authorized` response carries a
+  `configUpdateVersion`/`Payload`/`Signature` triple — the **same shape as the
+  calendar config-update** (issue #99). `applyEnrollmentBundle()` reuses
+  `verifyConfigUpdateSignature()` + `applyConfigJson()` + the monotonic
+  `lastAppliedConfigVersion` guard verbatim, then `ESP.restart()`s into normal
+  operation.
+- **Escape hatch.** `runEnrollmentLoop()` re-checks `WAGFAM_API_KEY` each
+  iteration; setting it by hand via the SPA exits enrollment (reboot).
+- `ENROLLMENT_SECRET` (proof-of-possession) and `ENROLLMENT_CODE` are persisted
+  to `/conf.txt`. Any response carrying `enrollment_secret` overwrites the
+  stored one — that is the recovery path after a server-side enrollment reset.
 
 ## OTA Update Architecture
 
