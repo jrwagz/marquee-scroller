@@ -48,31 +48,13 @@ WagFamBdayClient::configValues WagFamBdayClient::updateData(const DeviceInfo& de
 
   HTTPClient https;
 
-  // Build URL with device telemetry query params for heartbeat/identification
+  // Build URL with device telemetry query params for heartbeat/identification.
+  // The param string is shared with the enrollment poll — see buildHeartbeatQuery().
   String url;
-  url.reserve(myJsonSourceUrl.length() + 180);
+  url.reserve(myJsonSourceUrl.length() + 220);
   url = myJsonSourceUrl;
   url += (url.indexOf('?') >= 0) ? '&' : '?';
-  url += "chip_id=";
-  url += device.chipId;
-  url += "&version=";
-  url += device.version;
-  url += "&uptime=";
-  url += String(device.uptimeMs);
-  url += "&heap=";
-  url += String(device.freeHeap);
-  url += "&rssi=";
-  url += String(device.rssi);
-  url += "&utc_offset_sec=";
-  url += String(device.utcOffsetSec);
-  if (device.lanIp.length() > 0) {
-    url += "&lan_ip=";
-    url += device.lanIp;
-  }
-  if (device.mdnsName.length() > 0) {
-    url += "&mdns_name=";
-    url += device.mdnsName;
-  }
+  url += buildHeartbeatQuery(device);
 
   Serial.println("Getting Birthdays Data");
   Serial.println(F("[calendar URL redacted]"));

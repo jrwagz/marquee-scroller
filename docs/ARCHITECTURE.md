@@ -118,6 +118,7 @@ marquee-scroller/
 │   ├── Settings.h              # Pin config + #include directives + compile-time defaults
 │   ├── OpenWeatherMapClient.h/.cpp  # Weather fetching + JSON parsing
 │   ├── WagFamBdayClient.h/.cpp      # Calendar/birthday fetching + streaming JSON parse
+│   ├── EnrollmentClient.h/.cpp      # Device self-enrollment client (issue #125)
 │   ├── SecurityHelpers.h/.cpp       # Firmware URL validation, path protection
 │   ├── timeNTP.h/.cpp               # NTP time sync
 │   └── timeStr.h/.cpp               # Time formatting helpers
@@ -186,6 +187,24 @@ whole document in RAM.
 Stores up to 10 display messages. Also parses an optional `config` block that can push
 remote config updates back to the device.
 
+Also exposes `buildHeartbeatQuery(DeviceInfo)` as a header-only inline (issue #125) — a
+shared helper that constructs the device-telemetry query string appended to both the
+calendar URL and the enrollment poll URL.
+
+### `EnrollmentClient` — Device Self-Registration
+
+Polls `GET WAGFAM_ENROLL_URL` over HTTPS while the device is in enrollment mode (no
+`WAGFAM_API_KEY` configured). The server returns a `status` of `"pending"` or
+`"authorized"`, plus `enrollment_code` (shown on the LED for an admin to match) and —
+after authorization — a signed `configUpdateVersion`/`Payload`/`Signature` bundle in the
+same format as the calendar config-update (issue #99).
+
+Implements `JsonListener` with depth-tracking (via `objectDepth_`/`configDepth_`) so
+bundle fields are accepted only as direct children of the top-level `"config"` object.
+`parse()` is pure (no network, no globals) and unit-tested under
+`tests/native/test_enrollment/`. The HTTPS poll uses `setInsecure()` + reduced BearSSL
+buffer sizes to conserve heap during the enrollment phase.
+
 ### `SecurityHelpers.h/.cpp` — Security Utilities
 
 Extracted from `marquee.ino` to enable unit testing. Provides:
@@ -235,6 +254,9 @@ All runtime state lives as global variables in `marquee.ino`. The most important
 | `WAGFAM_API_KEY` | `String` | Bearer token for calendar endpoint |
 | `WAGFAM_EVENT_TODAY` | `boolean` | Drives the animated event-day border |
 | `DEVICE_NAME` | `String` | Human-friendly name assigned by server |
+| `ENROLLMENT_SECRET` | `String` | Per-device proof-of-possession minted by the server (never echoed over API) |
+| `ENROLLMENT_CODE` | `String` | Short human code shown on the LED during enrollment (e.g. `"K7M2QP"`) |
+| `enrollmentMode` | `bool` | True when the device has no API key and is self-registering; set once at end of `setup()` |
 | `geoLocation` | `String` | Weather location (city ID, lat/lon, or name) |
 | `IS_METRIC` | `boolean` | Unit system toggle |
 | `IS_24HOUR` | `boolean` | 12h vs 24h clock |
@@ -272,6 +294,8 @@ Format: one `key=value` pair per line, terminated with `\n`.
 WAGFAM_DATA_URL=https://example.com/family.json
 WAGFAM_API_KEY=ghp_xxxxx
 WAGFAM_EVENT_TODAY=0
+ENROLLMENT_SECRET=a1b2c3d4e5f6
+ENROLLMENT_CODE=K7M2QP
 APIKEY=abc123openweather
 CityID=Chicago,US
 ledIntensity=4
@@ -301,6 +325,13 @@ then calls `readPersistentConfig()` to re-apply the new values.
 web form**. They are only set by the calendar server's `config.eventToday` and
 `config.deviceName` fields, then persisted so they survive reboots.
 
+**`ENROLLMENT_SECRET`** and **`ENROLLMENT_CODE`** are likewise server-minted and not
+user-editable. They are written by `pollEnrollmentOnce()` when the server's enrollment
+response carries new values, and are cleared only if the enrollment endpoint resets them.
+`ENROLLMENT_SECRET` is the per-device proof-of-possession — it is accepted from the
+server response but **never returned** through `GET /api/status` (only `has_secret: true`
+is reported).
+
 ---
 
 ## Data Flow: Weather + Calendar
@@ -322,7 +353,8 @@ getWeatherData()
 │   └── Returns adjusted Unix time
 ├── setTime(t)                             → Updates TimeLib clock
 ├── bdayClient.updateData(devInfo)          → HTTPS GET to WAGFAM_DATA_URL
-│   └── Appends ?chip_id=&version=&uptime=&heap=&rssi=&utc_offset_sec= (heartbeat)
+│   └── Appends heartbeat params via buildHeartbeatQuery():
+│       chip_id, version, uptime, heap, rssi, utc_offset_sec, lan_ip, mdns_name
 │   └── Streams JSON through parser
 │   └── Fills messages[0..9]
 │   └── Returns configValues (remote config)
@@ -391,11 +423,13 @@ spacer = 6 pixels total. This is the `width` variable; `scrollMessageWait` uses 
 compute how many scroll steps are needed for a given message in the default path.
 
 The marquee scroll font is selectable per device via the `display_font` config (issue #106).
-Five fonts are registered in `SCROLLER_FONTS[]` near the top of `marquee.ino`: Classic
-(default), Block (custom 5×7 from `marquee/WagfamFont.h`), Org, Picopixel, TomThumb.
-Non-default fonts go through `scrollMessageWaitCustomFont()`, which uses Adafruit_GFX's
-variable-width path (`setFont` + `setCursor` + `print`) and re-renders the whole message
-each frame. The clock face always uses Classic regardless of selection.
+Fifteen fonts are registered in `SCROLLER_FONTS[]` near the top of `marquee.ino`: five short
+fonts (Classic, Block, Org, Picopixel, TomThumb), five full-height hand-designed fonts (Tall,
+Bold, Slim, Outline, Digi), and five full-height stylistic variants derived from Tall (Italic,
+Serif, Pixel, Inverse, Stencil). Custom glyphs live in `marquee/WagfamFont.h`. Non-default
+fonts go through `scrollMessageWaitCustomFont()`, which uses Adafruit_GFX's variable-width
+path (`setFont` + `setCursor` + `print`) and re-renders the whole message each frame. The
+clock face always uses Classic regardless of selection.
 
 ---
 

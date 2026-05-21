@@ -139,6 +139,24 @@ Once connected to WiFi, the device displays its IP address. Open
 `http://<ip>/spa/` in a browser to access the web interface (`http://<ip>/`
 also works — it 302-redirects to `/spa/`).
 
+### Device enrollment
+
+A factory-fresh clock (no calendar API key stored) self-registers against the
+wagfam-server after WiFi connects — it does **not** need to be configured by
+hand. The clock polls the server's enrollment endpoint every ~15 seconds and
+scrolls a short **setup code** (`Setup Code: ABC234`) on the LED. An admin
+matches that code to the pending device in the wagfam-server admin UI and
+authorizes it; the server then hands back a signed config bundle (calendar
+URL, auth key, name, display settings), the clock applies it and reboots into
+normal operation. See [issue #125](https://github.com/jrwagz/marquee-scroller/issues/125)
+and [wagfam-server#62](https://github.com/jrwagz/wagfam-server/issues/62).
+
+The enrollment endpoint is baked in at build time via the `WAGFAM_ENROLL_URL`
+flag (`platformio.ini`); a build without that flag skips enrollment and runs as
+a normal clock. While a clock waits to be authorized you can still configure it
+by hand on the SPA **Settings** tab — entering a calendar API key there exits
+enrollment mode.
+
 ## Configuration
 
 All settings are managed through the web interface and persisted to the device filesystem.

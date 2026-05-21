@@ -73,11 +73,19 @@ setup()
 │
 ├── timeNTPsetup()                   // Open UDP socket, set 20s sync interval
 │
+├── if WAGFAM_ENROLL_URL non-empty AND WAGFAM_API_KEY empty:
+│   └── enrollmentMode = true        // Enter enrollment mode (issue #125)
+│       └── loop() will call runEnrollmentLoop() instead of the normal clock
+│
 └── flashLED(1, 500)                 // Blink status LED once
 ```
 
 **After `setup()` completes**, the device is on WiFi, serving HTTP, and ready.
 Time is not yet synced (NTP first sync happens on the first `getWeatherData()` call).
+
+When `enrollmentMode` is true the device skips the clock, Tasmota, and weather
+paths in `loop()` and instead runs the enrollment polling loop — see
+[Main Loop](#main-loop-loop) below.
 
 ---
 
@@ -90,6 +98,14 @@ when not scrolling).
 
 ```text
 loop()
+│
+├── MDNS.update()                    // Pump mDNS (always, even in enrollment mode)
+│
+├── if enrollmentMode:               // Issue #125 — no calendar API key
+│   ├── runEnrollmentLoop()          // Poll server, scroll setup code, apply bundle
+│   └── return                       // Normal clock, Tasmota, weather all skipped
+│
+├── TasmotaDiscovery::tick()
 │
 ├── if second() changed → processEverySecond()
 │
@@ -106,7 +122,14 @@ loop()
 (The web server is `AsyncWebServer`; HTTP requests are handled in the background
 via TCP callbacks, so `server.handleClient()` is *not* called from `loop()`.)
 
-The display is **redrawn every loop iteration**. `matrix.write()` (inside `centerPrint`)
+When `enrollmentMode` is true the clock does **not** show the time; `runEnrollmentLoop()`
+scrolls `Setup Code: <code>` (or `Enrolling...` before the first server response) on the
+LED. mDNS and the async web server stay live, so the SPA is still accessible. The device
+exits this mode only by `ESP.restart()` — either after a successful authorized bundle
+(which saves the API key and reboots) or when a calendar API key is set manually via the
+SPA Settings tab.
+
+The display is **redrawn every loop iteration** in normal mode. `matrix.write()` (inside `centerPrint`)
 does a full SPI transfer on every frame. This is fast on ESP8266 but could be optimized
 to only redraw when the content actually changes.
 
@@ -206,7 +229,8 @@ getWeatherData()
 ├── Update firstTimeSync if this is first successful sync
 │
 ├── bdayClient.updateData(devInfo)    // HTTPS GET to WAGFAM_DATA_URL
-│   └── Appends ?chip_id=&version=&uptime=&heap=&rssi= (heartbeat)
+│   └── Appends heartbeat params via buildHeartbeatQuery():
+│       chip_id, version, uptime, heap, rssi, utc_offset_sec, lan_ip, mdns_name
 │   └── Streams JSON through streaming parser
 │   └── Fills messages[] and returns configValues
 │
@@ -480,6 +504,6 @@ transitions are handled automatically after the next weather refresh.
 | `marquee.ino:95–189` | All global settings variables (APIKEY, geoLocation, IS_*, SHOW_*, security, OTA) |
 | `marquee.ino:133–179` | All PROGMEM HTML string constants |
 | `Settings.h` | Library includes and compile-time hardware defaults |
-| `WagFamBdayClient.h:31–37` | `DeviceInfo` struct (heartbeat telemetry) |
-| `WagFamBdayClient.h:42–55` | `configValues` struct returned by `updateData()` |
+| `WagFamBdayClient.h` | `DeviceInfo` struct (heartbeat telemetry) + `buildHeartbeatQuery()` inline |
+| `WagFamBdayClient.h` | `configValues` struct returned by `updateData()` |
 | `OpenWeatherMapClient.h:31–55` | `weather` struct (all weather fields) |
